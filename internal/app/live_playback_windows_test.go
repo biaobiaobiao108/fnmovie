@@ -237,4 +237,33 @@ func TestLiveNASPeople(t *testing.T) {
 	var postResp any
 	postErr := server.request("POST", "v1", "person/list/"+url.PathEscape(sample.ID), body, &postResp, server.tokenValue())
 	t.Logf("POST person/list/%s (with body): err=%v, resp=%+v", sample.ID, postErr, postResp)
+
+	// Test POST person/item/list with person_guid
+	people, err := server.People(sample.ID)
+	if err != nil || len(people) == 0 {
+		t.Fatalf("People failed: %v", err)
+	}
+	firstPerson := people[0]
+	t.Logf("First person: ID=%s Name=%s", firstPerson.ID, firstPerson.Name)
+	itemsBody := map[string]any{"person_guid": firstPerson.ID, "page": 1, "page_size": 20}
+	var itemsResp any
+	itemsErr := server.request("POST", "v1", "person/item/list", itemsBody, &itemsResp, server.tokenValue())
+	t.Logf("POST person/item/list (for %s): err=%v, resp=%+v", firstPerson.Name, itemsErr, itemsResp)
+}
+
+func TestLiveNASFavorites(t *testing.T) {
+	if os.Getenv("FNMOVIE_LIVE_TEST") != "1" {
+		t.Skip("set FNMOVIE_LIVE_TEST=1 to run the NAS check")
+	}
+	base, username, password := os.Getenv("FNMOVIE_SERVER"), os.Getenv("FNMOVIE_USER"), os.Getenv("FNMOVIE_PASSWORD")
+	server := NewServer(base, "")
+	if _, err := server.Login(username, password); err != nil {
+		t.Fatalf("NAS login failed: %v", err)
+	}
+
+	favItems, total, favErr := server.MediaPageContext(t.Context(), "", "favorite", "", 1, 50)
+	if favErr != nil {
+		t.Fatalf("Favorite MediaPageContext failed: %v", favErr)
+	}
+	t.Logf("Favorites: total=%d, itemsCount=%d", total, len(favItems))
 }

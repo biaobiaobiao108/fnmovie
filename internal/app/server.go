@@ -535,6 +535,19 @@ func (s *Server) People(itemID string) ([]CastMember, error) {
 	return people, nil
 }
 
+// PersonItems returns the media items credited to a specific person/actor.
+func (s *Server) PersonItems(personGUID string) ([]MediaItem, error) {
+	if strings.TrimSpace(personGUID) == "" {
+		return nil, fmt.Errorf("缺少人物标识，无法读取作品列表")
+	}
+	body := map[string]any{"person_guid": personGUID, "page": 1, "page_size": 200, "sort_column": "update_time", "sort_type": "desc"}
+	var response any
+	if err := s.request("POST", "v1", "person/item/list", body, &response, s.tokenValue()); err != nil {
+		return nil, err
+	}
+	return normalizeItems(findItemsList(unwrapData(response))), nil
+}
+
 func mapsFromList(value any) []map[string]any {
 	switch current := value.(type) {
 	case []any:
@@ -917,7 +930,7 @@ func normalizeItem(object map[string]any) MediaItem {
 	}
 	item.Rating = formatRating(firstString(object, "rating", "score", "vote_average"))
 	item.Overview = firstString(object, "overview", "description", "summary", "plot")
-	item.Poster = firstImagePath(object, "poster", "posters", "poster_list", "poster_url", "posterUrl", "image", "image_url", "cover", "poster_path", "posterPath")
+	item.Poster = firstImagePath(object, "poster", "posters", "poster_list", "poster_url", "posterUrl", "image", "image_url", "cover", "poster_path", "posterPath", "avatar", "photo", "profile_path", "head_path", "thumb")
 	item.Favorite = anyBool(object["favorite"]) || anyBool(object["is_favorite"]) || anyBool(object["isFavorite"])
 	item.Watched = anyBool(object["is_watched"]) || anyBool(object["watched"])
 	item.AddedAt = firstString(object, "create_time", "created_at", "ts", "release_date")
@@ -935,6 +948,8 @@ func normalizeMediaKind(object map[string]any) string {
 	for _, value := range types {
 		kind := strings.ToLower(strings.TrimSpace(value))
 		switch {
+		case strings.Contains(kind, "person") || strings.Contains(kind, "actor") || strings.Contains(kind, "cast"):
+			return "person"
 		case strings.Contains(kind, "episode"):
 			return "episode"
 		case strings.Contains(kind, "season"):

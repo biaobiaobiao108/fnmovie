@@ -69,13 +69,14 @@ func TestLibraryProjectionKeepsShowsAndMoviesButHidesSeasonAndEpisodeNodes(t *te
 	}
 }
 
-func TestEpisodeProjectionRemainsAvailableToHistoryAndFavorites(t *testing.T) {
-	items := []MediaItem{{ID: "episode", Kind: "episode", SeriesTitle: "Show", Favorite: true, Watched: true}}
-	for _, section := range []string{"history", "favorites"} {
-		got := deriveVisibleItems(items, mediaViewKey{Section: section, GroupEpisodes: true})
-		if len(got) != 1 || len(got[0].Episodes) != 1 {
-			t.Errorf("%s projection hid the watched/favorite episode: %#v", section, got)
-		}
+func TestEpisodeAndPersonProjectionRemainsAvailableToFavorites(t *testing.T) {
+	items := []MediaItem{
+		{ID: "episode", Kind: "episode", SeriesTitle: "Show", Favorite: true},
+		{ID: "actor", Kind: "person", Title: "新垣结衣", Favorite: true},
+	}
+	got := deriveVisibleItems(items, mediaViewKey{Section: "favorites", GroupEpisodes: true})
+	if len(got) != 2 {
+		t.Fatalf("favorites projection should keep both episode and person, got %d: %#v", len(got), got)
 	}
 }
 

@@ -84,6 +84,12 @@ type appState struct {
 	playbackLoadingID        string
 	playbackLoadingTitle     string
 	playbackCancel           context.CancelFunc
+	selectedPerson           *CastMember
+	personItems              []MediaItem
+	personLoading            bool
+	personError              string
+	personRequest            uint64
+	personGrid               ui.GridState
 }
 
 // Run starts the native desktop application.
@@ -145,6 +151,8 @@ func (a *appState) view(c *ui.Context) {
 		ui.Column(c).Grow(1).FillHeight().Padding(16, 34, 12, 34).Gap(18).Children(func() {
 			a.topbar(c)
 			switch {
+			case a.selectedPerson != nil:
+				a.personView(c, *a.selectedPerson)
 			case a.selected != nil:
 				a.detailView(c, *a.selected)
 			default:
@@ -159,15 +167,15 @@ func (a *appState) view(c *ui.Context) {
 func movieTheme() *ui.Theme {
 	t := ui.LightTheme()
 	t.Background = ui.Hex("#f7f6f2")
-	t.Surface = ui.Hex("#fffefa")
-	t.SurfaceHover = ui.Hex("#f0f1ec")
-	t.SurfacePressed = ui.Hex("#e7ebe5")
-	t.Text = ui.Hex("#252a27")
-	t.TextMuted = ui.Hex("#78837d")
-	t.Border = ui.Hex("#e5e5df")
-	t.Accent = ui.Hex("#376655")
-	t.AccentHover = ui.Hex("#427764")
-	t.AccentPressed = ui.Hex("#2f594b")
+	t.Surface = ui.Hex("#ffffff")
+	t.SurfaceHover = ui.Hex("#f2f1ec")
+	t.SurfacePressed = ui.Hex("#e8e7e1")
+	t.Text = ui.Hex("#1c201d")
+	t.TextMuted = ui.Hex("#747d77")
+	t.Border = ui.Hex("#e4e2dc")
+	t.Accent = ui.Hex("#2d5a49")
+	t.AccentHover = ui.Hex("#366d58")
+	t.AccentPressed = ui.Hex("#244639")
 	t.AccentText = ui.Hex("#ffffff")
 	t.Radius = 11
 	// Keep native scrollbars hidden. The catalog draws its own very subtle
@@ -192,7 +200,6 @@ func (a *appState) sidebar(c *ui.Context) {
 		a.navButton(c, "▣", "电影", "movies")
 		a.navButton(c, "▤", "电视节目", "tv")
 		a.navButton(c, "♡", "我的收藏", "favorites")
-		a.navButton(c, "◷", "观看记录", "history")
 		ui.Text(c, "影视库").Padding(6, 14).FontSize(11).Bold().TextColor(t.TextMuted)
 		ui.Scroll(c).Grow(1).Children(func() {
 			for _, library := range a.libraries {
@@ -214,6 +221,7 @@ func (a *appState) sidebar(c *ui.Context) {
 				})
 				if button.Clicked() {
 					a.section, a.libraryID, a.selected, a.query = "library", library.ID, nil, ""
+					a.closePerson()
 					a.selectedTab = 0
 					a.grid = ui.GridState{}
 					a.loadLibrary()
@@ -269,6 +277,7 @@ func (a *appState) navButton(c *ui.Context, icon, label, key string) {
 	if e.Clicked() {
 		a.section = key
 		a.selected = nil
+		a.closePerson()
 		a.query = ""
 		a.grid = ui.GridState{}
 		if key != "library" {
@@ -284,7 +293,7 @@ func (a *appState) topbar(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(14).Children(func() {
 		ui.Column(c).Grow(1).Gap(3).Children(func() {
-			label := map[string]string{"movies": "电影", "tv": "电视节目", "favorites": "我的收藏", "history": "观看记录", "settings": "服务器设置", "library": a.selectedLibraryName()}[a.section]
+			label := map[string]string{"movies": "电影", "tv": "电视节目", "favorites": "我的收藏", "settings": "服务器设置", "library": a.selectedLibraryName()}[a.section]
 			if label == "" {
 				label = "影视库"
 			}
@@ -475,7 +484,15 @@ func (a *appState) libraryView(c *ui.Context) {
 			})
 		})
 		if card.Clicked() {
-			a.openDetail(item)
+			if item.Kind == "person" || strings.EqualFold(firstString(item.Raw, "type"), "Person") {
+				a.openPerson(CastMember{
+					ID:      item.ID,
+					Name:    item.Title,
+					Profile: item.Poster,
+				})
+			} else {
+				a.openDetail(item)
+			}
 		}
 	}).Grow(1)
 	grid.TrackScroll(&a.catalogScroll).HandleInput(func(ev ui.InputEvent) bool {
@@ -514,6 +531,9 @@ func (a *appState) libraryView(c *ui.Context) {
 }
 
 func cardCaption(item MediaItem) string {
+	if item.Kind == "person" {
+		return "影人 / 演员"
+	}
 	if item.Kind != "tv" {
 		return item.Year
 	}
@@ -564,6 +584,7 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 }
 
 func (a *appState) openDetail(item MediaItem) {
+	a.closePerson()
 	serverURL := a.settings.ServerURL
 	cachedDetail := false
 	if a.server != nil && a.catalogCache != nil {
@@ -1089,22 +1110,204 @@ func (a *appState) castSection(c *ui.Context, item MediaItem) {
 		if len(item.Cast) == 0 {
 			return
 		}
-		ui.ScrollHorizontal(c).Height(150).Gap(18).Children(func() {
+		ui.ScrollHorizontal(c).Height(156).Gap(14).Children(func() {
 			for _, person := range item.Cast {
-				ui.Column(c).Width(94).Gap(4).AlignItems(ui.Center).Children(func() {
-					if image := a.imageForURL(person.Profile, 82, 82); image != nil {
-						ui.Image(c, image).Size(82, 82).Fit(ui.Cover).Radius(41)
-					} else {
-						ui.Box(c).Size(82, 82).Radius(41).Background(ui.Hex("#e8e8e2")).Center().Children(func() {
-							ui.Text(c, "•").FontSize(20).TextColor(t.TextMuted)
+				p := person
+				btn := ui.Button(c, "").Width(96).Padding(6, 4).Radius(10).BorderWidth(0).
+					Background(ui.Color{}).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond}).
+					Tooltip("查看 " + p.Name + " 的作品")
+				if btn.Hovered() {
+					btn.Background(ui.Hex("#eeece6"))
+				}
+				btn.Children(func() {
+					ui.Column(c).AlignItems(ui.Center).Gap(5).Children(func() {
+						if image := a.imageForURL(p.Profile, 78, 78); image != nil {
+							ui.Image(c, image).Size(78, 78).Fit(ui.Cover).Radius(39)
+						} else {
+							ui.Box(c).Size(78, 78).Radius(39).Background(ui.Hex("#e5e3dc")).Center().Children(func() {
+								nameRune := "•"
+								if runes := []rune(p.Name); len(runes) > 0 {
+									nameRune = string(runes[:1])
+								}
+								ui.Text(c, nameRune).FontSize(18).Bold().TextColor(t.TextMuted)
+							})
+						}
+						ui.Text(c, p.Name).FontSize(12).Bold().TextAlign(ui.Center).SingleLine()
+						role := p.Role
+						if role == "" {
+							role = p.Job
+						}
+						ui.Text(c, role).FontSize(10).TextColor(t.TextMuted).TextAlign(ui.Center).SingleLine()
+					})
+				})
+				if btn.Clicked() {
+					a.openPerson(p)
+				}
+			}
+		})
+	})
+}
+
+func (a *appState) openPerson(person CastMember) {
+	a.selectedPerson = &person
+	a.personItems = nil
+	a.personLoading = true
+	a.personError = ""
+	a.personGrid = ui.GridState{}
+	a.personRequest++
+	reqID := a.personRequest
+	if a.server == nil {
+		a.personLoading = false
+		return
+	}
+	server := a.server
+	personID := person.ID
+	if personID == "" {
+		a.personLoading = false
+		a.personError = "该演职人员缺少服务器标识"
+		return
+	}
+	go func() {
+		items, err := server.PersonItems(personID)
+		a.window.Update(func() {
+			if a.selectedPerson == nil || a.selectedPerson.ID != personID || a.personRequest != reqID {
+				return
+			}
+			a.personLoading = false
+			if err != nil {
+				a.personError = "作品读取失败：" + err.Error()
+				return
+			}
+			a.personItems = items
+		})
+	}()
+	if a.window != nil {
+		a.window.Invalidate()
+	}
+}
+
+func (a *appState) closePerson() {
+	a.selectedPerson = nil
+	a.personItems = nil
+	a.personLoading = false
+	a.personError = ""
+	if a.window != nil {
+		a.window.Invalidate()
+	}
+}
+
+func (a *appState) personView(c *ui.Context, person CastMember) {
+	t := c.Theme()
+	ui.Column(c).Grow(1).FillHeight().Gap(16).Children(func() {
+		// 顶部导航栏
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			backBtn := ui.Button(c, "").Size(36, 34).Padding(0).Radius(9).BorderWidth(0).
+				Background(ui.Color{}).TextColor(t.TextMuted).Tooltip("返回")
+			if backBtn.Hovered() {
+				backBtn.Background(ui.Hex("#e9ece6"))
+			}
+			backBtn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(18, 18) })
+			if backBtn.Clicked() {
+				a.closePerson()
+			}
+			ui.Text(c, "演职人员").FontSize(13).TextColor(t.TextMuted)
+			ui.Text(c, "/").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, person.Name).FontSize(13).Bold()
+		})
+
+		// 演员头部简介区（优雅的白色卡片）
+		ui.Row(c).Gap(20).AlignItems(ui.Center).Padding(16, 20).Radius(14).Background(t.Surface).Border(1, t.Border).Children(func() {
+			if image := a.imageForURL(person.Profile, 84, 84); image != nil {
+				ui.Image(c, image).Size(84, 84).Fit(ui.Cover).Radius(42)
+			} else {
+				ui.Box(c).Size(84, 84).Radius(42).Background(ui.Hex("#e5e3dc")).Center().Children(func() {
+					nameRune := "人"
+					if runes := []rune(person.Name); len(runes) > 0 {
+						nameRune = string(runes[:1])
+					}
+					ui.Text(c, nameRune).FontSize(24).Bold().TextColor(t.TextMuted)
+				})
+			}
+			ui.Column(c).Gap(6).Children(func() {
+				ui.Text(c, person.Name).FontSize(22).Bold()
+				roleDesc := person.Role
+				if roleDesc != "" {
+					roleDesc = "代表角色：" + roleDesc
+				} else if person.Job != "" {
+					roleDesc = person.Job
+				}
+				if roleDesc != "" {
+					ui.Text(c, roleDesc).FontSize(13).TextColor(t.TextMuted)
+				}
+				countText := ""
+				if len(a.personItems) > 0 {
+					countText = fmt.Sprintf("影视库中共有 %d 部参演与相关作品", len(a.personItems))
+				} else if a.personLoading {
+					countText = "正在读取作品列表…"
+				}
+				if countText != "" {
+					ui.Text(c, countText).FontSize(11).TextColor(t.Accent)
+				}
+			})
+		})
+
+		// 作品网格展示
+		ui.Column(c).Grow(1).FillHeight().Gap(10).Children(func() {
+			ui.Text(c, "参演与相关作品").FontSize(15).Bold()
+			if a.personLoading {
+				ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(24, 0).Children(func() {
+					ui.Spinner(c).FontSize(16)
+					ui.Text(c, "正在读取作品列表…").FontSize(13).TextColor(t.TextMuted)
+				})
+			} else if a.personError != "" {
+				ui.Row(c).Gap(10).Padding(16, 0).Children(func() {
+					ui.Text(c, a.personError).FontSize(12).TextColor(ui.Hex("#ad5148"))
+					if ui.Button(c, "重试").Clicked() {
+						a.openPerson(person)
+					}
+				})
+			} else if len(a.personItems) == 0 {
+				ui.Text(c, "在当前影视库中没有找到该演职人员的作品。").FontSize(13).TextColor(t.TextMuted).Padding(24, 0)
+			} else {
+				items := a.personItems
+				ui.GridView(c, &a.personGrid, len(items), 168, 326, func(i int) {
+					if i >= len(items) {
+						return
+					}
+					item := items[i]
+					card := ui.Button(c, "").Key("person-" + item.ID).Padding(0).BorderWidth(0).
+						Background(ui.Color{}).TextColor(t.Text)
+					card.Children(func() {
+						ui.Column(c).Gap(8).Center().Children(func() {
+							cover := ui.Box(c).Size(168, 252).Radius(10).Clip().BorderWidth(0)
+							cover.Children(func() {
+								poster := a.imageFor(item, 168, 252)
+								if poster != nil {
+									ui.Image(c, poster).Size(168, 252).Fit(ui.Cover)
+								} else {
+									ui.Box(c).Size(168, 252).Background(ui.Hex("#e8e8e2")).Center().Children(func() {
+										ui.Text(c, "FILM").FontSize(10).Bold().TextColor(ui.Hex("#969d96"))
+									})
+								}
+								if item.Rating != "" {
+									ui.Text(c, item.Rating).Absolute().Top(10).Left(10).Padding(3, 7).Radius(6).
+										Background(t.Accent).FontSize(12).Bold().TextColor(t.AccentText)
+								}
+							})
+							ui.Text(c, item.Title).FontSize(14).Bold().TextAlign(ui.Center).SingleLine()
+							subtitle := item.Subtitle()
+							if subtitle == "" {
+								subtitle = item.Year
+							}
+							if subtitle != "" {
+								ui.Text(c, subtitle).FontSize(11).TextColor(t.TextMuted).SingleLine()
+							}
 						})
+					})
+					if card.Clicked() {
+						a.closePerson()
+						a.openDetail(item)
 					}
-					ui.Text(c, person.Name).FontSize(12).Bold().TextAlign(ui.Center).SingleLine()
-					role := person.Role
-					if role == "" {
-						role = person.Job
-					}
-					ui.Text(c, role).FontSize(10).TextColor(t.TextMuted).TextAlign(ui.Center).SingleLine()
 				})
 			}
 		})
@@ -1357,8 +1560,6 @@ func catalogMediaType(section string) string {
 		return "tv"
 	case "favorites":
 		return "favorite"
-	case "history":
-		return "watched"
 	default:
 		return ""
 	}
@@ -1505,28 +1706,41 @@ func (a *appState) startPlayback(item MediaItem) {
 		a.window.Invalidate()
 	}
 	server := a.server
+	nativeHandle := uintptr(0)
+	if a.window != nil {
+		nativeHandle = a.window.NativeHandle()
+	}
 	go func() {
 		stream, err := server.Playback(item)
 		if ctx.Err() != nil {
 			return
 		}
-		a.window.Update(func() {
-			if ctx.Err() != nil {
-				return
-			}
-			if err != nil {
+		if err != nil {
+			a.window.Update(func() {
+				if ctx.Err() != nil {
+					return
+				}
 				a.playbackLoading = false
 				a.playbackLoadingID = ""
 				a.playbackLoadingTitle = ""
 				a.playbackCancel = nil
 				a.status = "无法获取播放源：" + err.Error()
-				return
+			})
+			return
+		}
+		item.MediaID = stream.MediaID
+		localURL, proxy, err := server.ProxyPlayback(stream.URL)
+		if ctx.Err() != nil {
+			if proxy != nil {
+				proxy.Close()
 			}
-			item.MediaID = stream.MediaID
-			a.playingItem = &item
-			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
-			localURL, proxy, err := server.ProxyPlayback(stream.URL)
-			if err != nil {
+			return
+		}
+		if err != nil {
+			a.window.Update(func() {
+				if ctx.Err() != nil {
+					return
+				}
 				a.playbackLoading = false
 				a.playbackLoadingID = ""
 				a.playbackLoadingTitle = ""
@@ -1534,10 +1748,25 @@ func (a *appState) startPlayback(item MediaItem) {
 				a.playback.Active = false
 				a.playingItem = nil
 				a.status = "播放代理启动失败：" + err.Error()
+			})
+			return
+		}
+
+		// 在后台 goroutine 中等待媒体载入，绝不在 UI 线程中阻塞！
+		startErr := a.player.Start(localURL, nativeHandle, stream.Duration, stream.ResumeAt)
+		if ctx.Err() != nil {
+			proxy.Close()
+			a.player.Stop()
+			return
+		}
+
+		a.window.Update(func() {
+			if ctx.Err() != nil {
+				proxy.Close()
+				a.player.Stop()
 				return
 			}
-			a.playerProxy = proxy
-			if err := a.player.Start(localURL, a.window.NativeHandle(), stream.Duration, stream.ResumeAt); err != nil {
+			if startErr != nil {
 				proxy.Close()
 				a.playerProxy = nil
 				a.playbackLoading = false
@@ -1546,15 +1775,18 @@ func (a *appState) startPlayback(item MediaItem) {
 				a.playbackCancel = nil
 				a.playback.Active = false
 				a.playingItem = nil
-				a.status = "播放器启动失败：" + err.Error()
+				a.status = "播放器启动失败：" + startErr.Error()
 				return
 			}
+			a.playerProxy = proxy
+			a.playingItem = &item
+			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
 			a.playbackLoading = false
 			a.playbackLoadingID = ""
 			a.playbackLoadingTitle = ""
 			a.playbackCancel = nil
-			a.window.Invalidate()
 			a.seekSliderPosition = stream.ResumeAt
+			a.window.Invalidate()
 			a.createPlayerOverlay()
 			a.startPlayerOverlayMonitor()
 			go a.trackPlayback(item, a.server)
@@ -1580,30 +1812,19 @@ func (a *appState) playbackLoadingOverlay(c *ui.Context) {
 		return
 	}
 	c.AnimationFrame()
-	ui.Box(c).Absolute().Fill().Background(ui.RGBA(0, 0, 0, 0.40)).Children(func() {
-		ui.Column(c).Absolute().Center().Padding(28, 36).Gap(16).Radius(18).
-			Background(ui.RGBA(28, 30, 34, 0.88)).Border(1, ui.RGBA(255, 255, 255, 0.16)).
-			AlignItems(ui.Center).Children(func() {
-			ui.Spinner(c).FontSize(32).TextColor(ui.RGB(255, 255, 255))
-			ui.Column(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "正在准备播放").FontSize(16).Bold().TextColor(ui.RGB(255, 255, 255))
-				title := a.playbackLoadingTitle
-				if title != "" {
-					ui.Text(c, title).FontSize(13).TextColor(ui.RGBA(255, 255, 255, 0.82)).SingleLine()
-				}
-				ui.Text(c, "正在连接服务器并解析媒体流，请稍候…").FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.55))
-			})
-			cancelBtn := ui.Button(c, "取消").Padding(6, 18).Radius(8).Border(1, ui.RGBA(255, 255, 255, 0.20)).
-				Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.85)).
-				Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
-			if cancelBtn.Hovered() {
-				cancelBtn.Background(ui.RGBA(255, 255, 255, 0.18))
-			}
-			if cancelBtn.Clicked() {
-				a.cancelPlaybackLoading()
-			}
+	t := c.Theme()
+	open := a.playbackLoading
+	ui.DialogBase(c, &open, func(back, panel *ui.Element) {
+		back.Background(ui.RGBA(0, 0, 0, 0.35))
+		panel.Size(96, 96).Radius(18).
+			Background(t.Surface).Border(1, t.Border).
+			Center().Children(func() {
+			ui.Spinner(c).FontSize(36).TextColor(t.Accent)
 		})
 	})
+	if !open {
+		a.cancelPlaybackLoading()
+	}
 }
 
 func (a *appState) trackPlayback(item MediaItem, server *Server) {

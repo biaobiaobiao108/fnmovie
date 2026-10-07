@@ -41,8 +41,9 @@ func deriveVisibleItems(source []MediaItem, key mediaViewKey) []MediaItem {
 	for _, item := range source {
 		// fnOS returns the complete hierarchy for a library query. Only the
 		// Movie and TV nodes belong on the library's first level; Season and
-		// Episode nodes are loaded after opening their parent show.
-		if item.Kind == "season" || (item.Kind == "episode" && key.Section != "history" && key.Section != "favorites") {
+		// Episode nodes are loaded after opening their parent show. Person
+		// nodes are visible when starred in favorites.
+		if item.Kind == "season" || (item.Kind == "episode" && key.Section != "favorites") || (item.Kind == "person" && key.Section != "favorites") {
 			continue
 		}
 		if key.Section == "library" {
@@ -53,7 +54,7 @@ func deriveVisibleItems(source []MediaItem, key mediaViewKey) []MediaItem {
 		if key.Section == "movies" && item.Kind != "movie" || key.Section == "tv" && item.Kind != "tv" {
 			continue
 		}
-		if key.Section == "favorites" && !item.Favorite || key.Section == "history" && !item.Watched {
+		if key.Section == "favorites" && !item.Favorite {
 			continue
 		}
 		switch key.Tab {

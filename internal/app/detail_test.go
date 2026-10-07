@@ -22,7 +22,7 @@ func TestSidebarAlignment(t *testing.T) {
 		app.view(c)
 	}, 1280, 800)
 
-	items := []string{"电影", "电视节目", "我的收藏", "观看记录", "电影库", "动漫", "美剧精选"}
+	items := []string{"电影", "电视节目", "我的收藏", "电影库", "动漫", "美剧精选"}
 	var targetX float32 = -1
 	for _, name := range items {
 		rect, ok := tester.Find(name)
@@ -244,15 +244,9 @@ func TestPlaybackLoadingFeedback(t *testing.T) {
 		app.view(c)
 	}, 1280, 800)
 
-	// Check loading overlay text
-	if _, ok := tester.Find("正在准备播放"); !ok {
-		t.Fatalf("expected '正在准备播放' in loading overlay")
-	}
-	if _, ok := tester.Find("正在连接服务器并解析媒体流，请稍候…"); !ok {
-		t.Fatalf("expected hint text in loading overlay")
-	}
-	if _, ok := tester.Find("取消"); !ok {
-		t.Fatalf("expected cancel button in loading overlay")
+	// In detail view, the action button displays loading state
+	if _, ok := tester.Find("正在准备播放…"); !ok {
+		t.Fatalf("expected '正在准备播放…' in detail view button")
 	}
 
 	// Cancel loading
@@ -294,5 +288,85 @@ func TestPlayerOverlayViews(t *testing.T) {
 	}
 	if _, ok := transportTester.Find("02:00:00"); !ok {
 		t.Fatalf("duration timestamp missing")
+	}
+}
+
+func TestPersonViewLayoutAndNavigation(t *testing.T) {
+	person := CastMember{
+		ID:   "p-jiangwen",
+		Name: "姜文",
+		Role: "蓝青峰",
+	}
+	app := &appState{
+		section:        "library",
+		libraryID:      "movies",
+		selectedPerson: &person,
+		personItems: []MediaItem{
+			{ID: "m1", Title: "邪不压正", Year: "2018", Rating: "7.2"},
+			{ID: "m2", Title: "让子弹飞", Year: "2010", Rating: "9.0"},
+		},
+		catalogs: map[string]*CatalogState{},
+	}
+
+	tester := ui.NewTester(func(c *ui.Context) {
+		app.view(c)
+	}, 1280, 800)
+
+	if _, ok := tester.Find("姜文"); !ok {
+		t.Fatalf("expected person name '姜文'")
+	}
+	if _, ok := tester.Find("参演与相关作品"); !ok {
+		t.Fatalf("expected '参演与相关作品' section")
+	}
+	if _, ok := tester.Find("邪不压正"); !ok {
+		t.Fatalf("expected '邪不压正' movie card")
+	}
+	if _, ok := tester.Find("让子弹飞"); !ok {
+		t.Fatalf("expected '让子弹飞' movie card")
+	}
+
+	// Close person view
+	app.closePerson()
+	if app.selectedPerson != nil {
+		t.Fatalf("expected selectedPerson to be nil after closePerson")
+	}
+}
+
+func TestFavoritePersonNavigationAndSectionSwitch(t *testing.T) {
+	personItem := MediaItem{
+		ID:       "p-yui",
+		Title:    "新垣结衣",
+		Kind:     "person",
+		Favorite: true,
+	}
+	app := &appState{
+		section: "favorites",
+		items:   []MediaItem{personItem},
+		catalogs: map[string]*CatalogState{
+			catalogStateKey("", "favorite", ""): {
+				Items: []MediaItem{personItem},
+			},
+		},
+	}
+
+	tester := ui.NewTester(func(c *ui.Context) {
+		app.view(c)
+	}, 1280, 800)
+
+	if _, ok := tester.Find("新垣结衣"); !ok {
+		t.Fatalf("expected favorite person card '新垣结衣' to be visible")
+	}
+
+	// Click person card to open person view
+	app.openPerson(CastMember{ID: personItem.ID, Name: personItem.Title})
+	if app.selectedPerson == nil || app.selectedPerson.Name != "新垣结衣" {
+		t.Fatalf("expected selectedPerson to be set")
+	}
+
+	// Switch section to movies
+	app.section = "movies"
+	app.closePerson()
+	if app.selectedPerson != nil {
+		t.Fatalf("expected selectedPerson to be nil after switching section")
 	}
 }
