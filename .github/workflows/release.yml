@@ -1,0 +1,72 @@
+name: Release Windows x64
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build and publish Windows x64
+    runs-on: windows-latest
+    steps:
+      - name: Check out source and Git LFS assets
+        uses: actions/checkout@v7
+        with:
+          lfs: true
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build Windows x64 app and installer
+        run: go tool mygo build -platform windows/amd64 -o out\fnmovie-20261007
+
+      - name: Prepare release assets
+        shell: pwsh
+        run: |
+          $config = Get-Content mygo.json -Raw | ConvertFrom-Json
+          $expectedTag = "v$($config.version)"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match mygo.json version $expectedTag"
+          }
+
+          $releaseDir = Join-Path $PWD 'out\fnmovie-20261007\windows-amd64'
+          $installer = Get-ChildItem -LiteralPath $releaseDir -Filter '* Setup *.exe' | Select-Object -First 1
+          if (-not $installer) {
+            throw "MyGo did not produce a Windows installer in $releaseDir"
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $releaseDir 'FnMovie.exe'))) {
+            throw "MyGo did not produce FnMovie.exe in $releaseDir"
+          }
+          if (-not (Test-Path -LiteralPath (Join-Path $releaseDir 'player\libmpv-2.dll'))) {
+            throw "The packaged libmpv-2.dll is missing from $releaseDir"
+          }
+
+          $portableZip = Join-Path $releaseDir "FnMovie-$($config.version)-windows-amd64-portable.zip"
+          Compress-Archive -Path @(
+            (Join-Path $releaseDir 'FnMovie.exe'),
+            (Join-Path $releaseDir 'icon.png'),
+            (Join-Path $releaseDir 'THIRD-PARTY-NOTICES.md'),
+            (Join-Path $releaseDir 'licenses'),
+            (Join-Path $releaseDir 'player')
+          ) -DestinationPath $portableZip -CompressionLevel Optimal
+
+          $relativeReleaseDir = 'out/fnmovie-20261007/windows-amd64'
+          "INSTALLER_PATH=$relativeReleaseDir/$($installer.Name)" >> $env:GITHUB_ENV
+          "PORTABLE_ZIP_PATH=$relativeReleaseDir/$([System.IO.Path]::GetFileName($portableZip))" >> $env:GITHUB_ENV
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: FnMovie ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            ${{ env.INSTALLER_PATH }}
+            ${{ env.PORTABLE_ZIP_PATH }}
