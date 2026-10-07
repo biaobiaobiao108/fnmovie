@@ -53,3 +53,25 @@ func TestSmoothScrollClampsAndCanReverse(t *testing.T) {
 		t.Fatalf("reversed motion settled at %v, want 160", position)
 	}
 }
+
+func TestSmoothScrollStopAndPositionResync(t *testing.T) {
+	start := time.Unix(300, 0)
+	var scroll smoothScroll
+	scroll.Add(0, 150, 600, start)
+	scroll.Advance(start.Add(16 * time.Millisecond))
+	if !scroll.Active {
+		t.Fatal("scroll should be active")
+	}
+	scroll.Stop(42)
+	if scroll.Active || scroll.Position != 42 || scroll.Target != 42 || scroll.Velocity != 0 {
+		t.Fatalf("scroll did not stop at requested position: %#v", scroll)
+	}
+
+	// Resync on external position jump while active
+	scroll.Add(42, 100, 600, start.Add(32*time.Millisecond))
+	// External drag sets position far away to 200
+	scroll.Add(200, 50, 600, start.Add(48*time.Millisecond))
+	if scroll.Position != 200 {
+		t.Fatalf("scroll should resync position to external jump, got %v", scroll.Position)
+	}
+}

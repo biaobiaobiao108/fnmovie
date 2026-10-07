@@ -314,13 +314,14 @@ func (s *Server) MediaPageContext(ctx context.Context, libraryID, mediaType, que
 	}
 	route := "item/list"
 	tags := map[string]any{}
-	switch mediaType {
-	case "movie", "tv":
+	switch strings.ToLower(strings.TrimSpace(mediaType)) {
+	case "movie":
 		// fnOS's web client sends resource type filters inside tags.type.
 		// A top-level `type` is ignored by item/list and can yield pages that
 		// are filtered to empty on the client.
-		resourceType := map[string]string{"movie": "Movie", "tv": "TV"}[mediaType]
-		tags["type"] = []string{resourceType}
+		tags["type"] = []string{"Movie"}
+	case "tv":
+		tags["type"] = []string{"TV"}
 	case "favorite":
 		route = "favorite/list"
 	case "watched":
@@ -422,6 +423,9 @@ func (s *Server) Detail(item MediaItem) (MediaItem, error) {
 	apiRoute := resource + "/" + url.PathEscape(item.ID)
 	var response any
 	if err := s.request("GET", "v1", apiRoute, nil, &response, s.tokenValue()); err != nil {
+		if strings.Contains(err.Error(), "501") || strings.Contains(err.Error(), "404") {
+			return item, nil
+		}
 		return item, err
 	}
 	detail := normalizeItem(detailObject(unwrapData(response)))
@@ -936,16 +940,18 @@ func normalizeMediaKind(object map[string]any) string {
 			return "season"
 		case strings.Contains(kind, "tv") || strings.Contains(kind, "series") || strings.Contains(kind, "show"):
 			return "tv"
-		case strings.Contains(kind, "movie") || kind == "film":
+		case strings.Contains(kind, "movie") || kind == "film" || kind == "video":
 			return "movie"
 		}
 	}
+	seasonNum := parseMediaNumber(firstString(object, "season_number", "seasonNumber"))
+	episodeNum := parseMediaNumber(firstString(object, "episode_number", "episodeNumber"))
 	if firstString(object, "season_guid", "seasonGuid", "season_id", "seasonId") != "" ||
-		valueAt(object, "season_number") != nil {
+		(seasonNum > 0 && episodeNum == 0) {
 		return "season"
 	}
 	if firstString(object, "tv_guid", "tvGuid", "series_guid", "seriesGuid", "tv_id", "tvId", "series_id", "seriesId",
-		"tv_title", "series_title", "show_title") != "" || valueAt(object, "episode_number") != nil {
+		"tv_title", "series_title", "show_title") != "" || episodeNum > 0 {
 		return "episode"
 	}
 	for _, value := range types {

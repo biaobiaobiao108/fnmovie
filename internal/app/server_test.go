@@ -307,7 +307,7 @@ func TestDetailUsesResourceRouteAndMergesCardFields(t *testing.T) {
 
 func TestNormalizeFnOSTypesKeepsSeasonAndEpisodeDistinct(t *testing.T) {
 	for _, test := range []struct{ input, want string }{
-		{"TV", "tv"}, {"Season", "season"}, {"Episode", "episode"}, {"Movie", "movie"},
+		{"TV", "tv"}, {"Season", "season"}, {"Episode", "episode"}, {"Movie", "movie"}, {"Video", "movie"},
 	} {
 		item := normalizeItem(map[string]any{"guid": "id", "title": "title", "type": test.input})
 		if item.Kind != test.want {
@@ -316,6 +316,14 @@ func TestNormalizeFnOSTypesKeepsSeasonAndEpisodeDistinct(t *testing.T) {
 		if test.want == "tv" && !item.IsSeries {
 			t.Errorf("TV root should be marked as a series: %#v", item)
 		}
+	}
+
+	// fnOS returns type: Video with season_number: 0 on generic libraries
+	videoItem := normalizeItem(map[string]any{
+		"guid": "vid-1", "title": "Video File", "type": "Video", "season_number": 0, "episode_number": 0,
+	})
+	if videoItem.Kind != "movie" {
+		t.Errorf("video with season_number 0 normalized as %q, want movie", videoItem.Kind)
 	}
 }
 

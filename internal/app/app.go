@@ -360,9 +360,10 @@ func (a *appState) libraryView(c *ui.Context) {
 	if key != a.catalogScrollKey {
 		a.catalogScrollKey = key
 		a.catalogScroll = ui.ScrollState{}
-		a.catalogScrollAnimation = smoothScroll{}
+		a.catalogScrollAnimation.Stop(0)
 		a.grid = ui.GridState{}
 	}
+	a.advanceCatalogScroll(c)
 	state := a.catalogs[a.currentCatalogKey()]
 	if len(items) == 0 {
 		if catalogNeedsMoreVisibleItems(len(items), state) {
@@ -453,16 +454,17 @@ func (a *appState) libraryView(c *ui.Context) {
 		if ev.Kind != ui.InputScroll {
 			return false
 		}
-		now := c.Now()
-		delta := ev.DY
-		if !ev.Precise {
-			delta *= 1.15
+		if ev.Precise {
+			a.catalogScrollAnimation.Stop(a.catalogScroll.Y)
+			a.catalogScroll.Y = max(0, min(a.catalogScroll.MaxY, a.catalogScroll.Y+ev.DY))
+			return true
 		}
+		now := c.Now()
+		delta := ev.DY * 1.15
 		a.catalogScrollAnimation.Add(a.catalogScroll.Y, delta, a.catalogScroll.MaxY, now)
-		a.advanceCatalogScroll(c)
+		c.AnimationFrame()
 		return true
 	})
-	a.advanceCatalogScroll(c)
 	background := t.Background
 	grid.DrawOver(func(p *ui.Painter, rect ui.Rect) {
 		const fadeHeight = 28
@@ -1221,7 +1223,7 @@ func (a *appState) loadLibrary() {
 		return
 	}
 	server, libraryID, query := a.server, a.libraryID, strings.TrimSpace(a.query)
-	mediaType := catalogMediaType(a.section)
+	mediaType := a.currentMediaType()
 	serverURL := a.settings.ServerURL
 	key := catalogStateKey(libraryID, mediaType, query)
 	for otherKey, other := range a.catalogs {
@@ -1273,7 +1275,26 @@ func (a *appState) loadLibrary() {
 }
 
 func (a *appState) currentCatalogKey() string {
-	return catalogStateKey(a.libraryID, catalogMediaType(a.section), strings.TrimSpace(a.query))
+	return catalogStateKey(a.libraryID, a.currentMediaType(), strings.TrimSpace(a.query))
+}
+
+func (a *appState) currentMediaType() string {
+	if a.section == "library" {
+		for _, lib := range a.libraries {
+			if lib.ID == a.libraryID {
+				switch strings.ToLower(strings.TrimSpace(lib.Kind)) {
+				case "tv":
+					return "tv"
+				case "movie":
+					return "movie"
+				default:
+					return ""
+				}
+			}
+		}
+		return ""
+	}
+	return catalogMediaType(a.section)
 }
 
 func catalogMediaType(section string) string {
@@ -1405,7 +1426,7 @@ func (a *appState) loadNextCatalogPage(retry bool) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	state.Cancel, state.Loading, state.Err, state.PageAutoRequested = cancel, true, "", true
-	a.fetchCatalogPage(ctx, key, a.server, a.settings.ServerURL, a.libraryID, catalogMediaType(a.section), strings.TrimSpace(a.query), state.NextPage, false)
+	a.fetchCatalogPage(ctx, key, a.server, a.settings.ServerURL, a.libraryID, a.currentMediaType(), strings.TrimSpace(a.query), state.NextPage, false)
 }
 
 func isAuthError(err error) bool {

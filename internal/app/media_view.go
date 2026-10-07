@@ -42,7 +42,7 @@ func deriveVisibleItems(source []MediaItem, key mediaViewKey) []MediaItem {
 		// fnOS returns the complete hierarchy for a library query. Only the
 		// Movie and TV nodes belong on the library's first level; Season and
 		// Episode nodes are loaded after opening their parent show.
-		if item.Kind == "season" || item.Kind == "episode" && key.Section != "history" && key.Section != "favorites" {
+		if item.Kind == "season" || (item.Kind == "episode" && key.Section != "history" && key.Section != "favorites") {
 			continue
 		}
 		if key.Section == "library" {
