@@ -1,4 +1,4 @@
-name: Release Windows x64
+name: Release Windows x64 and macOS arm64
 
 on:
   push:
@@ -9,9 +9,21 @@ permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build and publish Windows x64
-    runs-on: windows-latest
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows amd64
+            os: windows-latest
+            platform: windows/amd64
+            artifact: fnmovie-windows-amd64
+          - name: macOS arm64
+            os: macos-latest
+            platform: darwin/arm64
+            artifact: fnmovie-macos-arm64
     steps:
       - name: Check out source and Git LFS assets
         uses: actions/checkout@v7
@@ -24,10 +36,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build Windows x64 app and installer
-        run: go tool mygo build -platform windows/amd64 -o out\fnmovie-20261007
+      - name: Build application
+        run: go tool mygo build -platform ${{ matrix.platform }} -o out/fnmovie-20261007
 
-      - name: Prepare release assets
+      - name: Prepare Windows release assets
+        if: matrix.platform == 'windows/amd64'
         shell: pwsh
         run: |
           $config = Get-Content mygo.json -Raw | ConvertFrom-Json
@@ -41,11 +54,10 @@ jobs:
           if (-not $installer) {
             throw "MyGo did not produce a Windows installer in $releaseDir"
           }
-          if (-not (Test-Path -LiteralPath (Join-Path $releaseDir 'FnMovie.exe'))) {
-            throw "MyGo did not produce FnMovie.exe in $releaseDir"
-          }
-          if (-not (Test-Path -LiteralPath (Join-Path $releaseDir 'player\libmpv-2.dll'))) {
-            throw "The packaged libmpv-2.dll is missing from $releaseDir"
+          foreach ($required in @('FnMovie.exe', 'player\libmpv-2.dll')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $releaseDir $required))) {
+              throw "Required Windows release file is missing: $required"
+            }
           }
 
           $portableZip = Join-Path $releaseDir "FnMovie-$($config.version)-windows-amd64-portable.zip"
@@ -57,9 +69,50 @@ jobs:
             (Join-Path $releaseDir 'player')
           ) -DestinationPath $portableZip -CompressionLevel Optimal
 
-          $relativeReleaseDir = 'out/fnmovie-20261007/windows-amd64'
-          "INSTALLER_PATH=$relativeReleaseDir/$($installer.Name)" >> $env:GITHUB_ENV
-          "PORTABLE_ZIP_PATH=$relativeReleaseDir/$([System.IO.Path]::GetFileName($portableZip))" >> $env:GITHUB_ENV
+      - name: Prepare macOS release assets
+        if: matrix.platform == 'darwin/arm64'
+        shell: bash
+        run: |
+          version="$(python3 -c 'import json; print(json.load(open("mygo.json"))["version"])')"
+          test "$GITHUB_REF_NAME" = "v$version"
+          app="out/fnmovie-20261007/darwin-arm64/FnMovie.app"
+          dmg="out/fnmovie-20261007/darwin-arm64/FnMovie $version.dmg"
+          test -d "$app"
+          test -f "$dmg"
+          ditto -c -k --sequesterRsrc --keepParent "$app" "out/fnmovie-20261007/darwin-arm64/FnMovie-$version-darwin-arm64-portable.zip"
+
+      - name: Upload Windows build
+        if: matrix.platform == 'windows/amd64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            out/fnmovie-20261007/windows-amd64/FnMovie Setup *.exe
+            out/fnmovie-20261007/windows-amd64/FnMovie-*-windows-amd64-portable.zip
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Upload macOS build
+        if: matrix.platform == 'darwin/arm64'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            out/fnmovie-20261007/darwin-arm64/*.dmg
+            out/fnmovie-20261007/darwin-arm64/FnMovie-*-darwin-arm64-portable.zip
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows and macOS builds
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -67,6 +120,4 @@ jobs:
           name: FnMovie ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: |
-            ${{ env.INSTALLER_PATH }}
-            ${{ env.PORTABLE_ZIP_PATH }}
+          files: release-assets/*
