@@ -3,10 +3,36 @@ package app
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 )
+
+func TestPlayerMenusKeepUniformBoundsAndTruncateLongTrackNames(t *testing.T) {
+	for _, option := range []string{"subtitle", "audio", "speed"} {
+		for _, count := range []int{1, 30} {
+			a := &appState{player: NewPlayer(), playback: PlaybackState{Speed: 1}, playerOverlayMenu: option}
+			for i := range count {
+				a.playerMenuTracks = append(a.playerMenuTracks, PlayerTrack{ID: i + 1, Title: strings.Repeat("很长的轨道名称", 30)})
+			}
+			tester := ui.NewTester(a.playerMenuView, playerMenuWidth, playerMenuHeight)
+			panel, ok := tester.Find("播放选项菜单")
+			if !ok || panel.W != playerMenuWidth || panel.H != playerMenuHeight {
+				t.Fatalf("%s/%d menu expanded with track content: %+v", option, count, panel)
+			}
+			if option != "speed" {
+				track, ok := tester.Find(playerTrackLabel(a.playerMenuTracks[0]))
+				if !ok || track.H <= 0 || track.Y >= playerMenuHeight {
+					t.Fatalf("first %s track must remain visible: %+v", option, track)
+				}
+			}
+			if a.playerOverlayContentHeight() != playerOverlayControlHeight {
+				t.Fatal("menu resized the transport window")
+			}
+		}
+	}
+}
 
 func TestPlayerTransportRemainsCentered(t *testing.T) {
 	for _, width := range []int{960, 1280, 1920} {

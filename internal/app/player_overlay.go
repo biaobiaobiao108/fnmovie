@@ -17,6 +17,8 @@ const (
 	playerOverlayControlHeight = 118
 	playerOverlayFadeDuration  = 180 * time.Millisecond
 	playerOverlayTargetOpacity = 1.0
+	playerMenuWidth            = 300
+	playerMenuHeight           = 330
 )
 
 var playerOverlayIcons = map[string]*ui.SVG{
@@ -73,7 +75,10 @@ func (a *appState) registerPlayerOverlayHooks() {
 	a.playerOverlayHooks = true
 	a.window.OnResize(a.syncPlayerOverlay)
 	a.window.OnMove(a.syncPlayerOverlay)
-	a.window.OnMinimize(func() { a.hidePlayerOverlay(false) })
+	a.window.OnMinimize(func() {
+		a.cancelPlayerFullscreen()
+		a.hidePlayerOverlay(false)
+	})
 	a.window.OnRestore(func() {
 		a.syncPlayerOverlay()
 		if a.playback.Active {
@@ -96,6 +101,10 @@ func (a *appState) syncPlayerOverlay() {
 	a.playerHeaderWindow.SetContentBounds(headerBounds)
 	a.playerOverlayWindow.Invalidate()
 	a.playerHeaderWindow.Invalidate()
+	if a.playerMenuWindow != nil {
+		a.playerMenuWindow.SetContentBounds(playerMenuBounds(bounds))
+		a.playerMenuWindow.Invalidate()
+	}
 	if a.player != nil {
 		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
 		a.player.SetViewport(ui.Rect{W: float32(width), H: float32(height)})
@@ -103,24 +112,15 @@ func (a *appState) syncPlayerOverlay() {
 }
 
 func (a *appState) playerOverlayContentHeight() int {
-	if a.playerOverlayMenu == "" {
-		return playerOverlayControlHeight
-	}
-	rows := 7
-	switch a.playerOverlayMenu {
-	case "audio":
-		rows = len(a.playerMenuTracks)
-	case "subtitle":
-		rows = len(a.playerMenuTracks) + 1
-	case "speed":
-		rows = 7
-	}
-	menuHeight := min(330, max(90, 36+rows*34))
-	height := playerOverlayControlHeight + 118 + menuHeight
-	if a.window != nil {
-		height = min(height, a.window.ContentBounds().Height)
-	}
-	return height
+	// Opening a menu must never move or resize the transport surface. Windows
+	// otherwise moves the last composited progress bar before its next paint.
+	return playerOverlayControlHeight
+}
+
+func playerMenuBounds(bounds mygo.Rectangle) mygo.Rectangle {
+	width := min(playerMenuWidth, max(1, bounds.Width-40))
+	height := min(playerMenuHeight, max(1, bounds.Height-playerOverlayControlHeight-playerOverlayHeaderHeight))
+	return mygo.Rectangle{X: bounds.X + max(0, bounds.Width-width-20), Y: bounds.Y + max(0, bounds.Height-playerOverlayControlHeight-height), Width: width, Height: height}
 }
 
 func (a *appState) startPlayerOverlayMonitor() {
@@ -187,6 +187,9 @@ func (a *appState) showPlayerOverlay() {
 	if !wasVisible {
 		a.playerOverlayWindow.Show()
 		a.playerHeaderWindow.Show()
+		if a.playerMenuWindow != nil {
+			a.playerMenuWindow.Show()
+		}
 		a.animatePlayerOverlay(playerOverlayTargetOpacity)
 	} else {
 		a.playerOverlayWindow.Invalidate()
@@ -209,6 +212,9 @@ func (a *appState) hidePlayerOverlay(returnFocus bool) {
 		a.overlayMu.Unlock()
 		a.playerOverlayWindow.Hide()
 		a.playerHeaderWindow.Hide()
+		if a.playerMenuWindow != nil {
+			a.playerMenuWindow.Hide()
+		}
 		a.setPlayerOverlayOpacity(0)
 		a.overlayMu.Lock()
 		a.playerOverlayOpacity = 0
@@ -223,6 +229,11 @@ func (a *appState) animatePlayerOverlay(target float64) {
 	a.playerOverlayAnimationFrom = a.playerOverlayOpacity
 	a.playerOverlayAnimationTarget = target
 	a.overlayMu.Unlock()
+	// The main window also drives the fade when an owned surface is hidden or
+	// temporarily awaiting its first frame after a native fullscreen change.
+	if a.window != nil {
+		a.window.Invalidate()
+	}
 	if a.playerOverlayWindow != nil {
 		a.playerOverlayWindow.Invalidate()
 	}
@@ -232,11 +243,15 @@ func (a *appState) animatePlayerOverlay(target float64) {
 }
 
 func (a *appState) setPlayerOverlayOpacity(alpha float64) {
+	alpha *= a.fullscreenFade()
 	if a.playerOverlayContent != nil && a.playerOverlayWindow != nil {
 		a.playerOverlayContent.SetOpacity(a.playerOverlayWindow, alpha)
 	}
 	if a.playerHeaderContent != nil && a.playerHeaderWindow != nil {
 		a.playerHeaderContent.SetOpacity(a.playerHeaderWindow, alpha)
+	}
+	if a.playerMenuContent != nil && a.playerMenuWindow != nil {
+		a.playerMenuContent.SetOpacity(a.playerMenuWindow, alpha)
 	}
 }
 
@@ -268,12 +283,17 @@ func (a *appState) advancePlayerOverlayAnimation(c *ui.Context) {
 			}
 			a.playerOverlayWindow.Hide()
 			a.playerHeaderWindow.Hide()
+			if a.playerMenuWindow != nil {
+				a.playerMenuWindow.Hide()
+			}
 			restoreWindowFocus(a.window)
 		})
 	}
 }
 
 func (a *appState) closePlayerOverlay() {
+	a.cancelPlayerFullscreen()
+	a.destroyPlayerMenuWindow()
 	if a.playerOverlayMonitorDone != nil {
 		close(a.playerOverlayMonitorDone)
 		a.playerOverlayMonitorDone = nil
@@ -336,6 +356,15 @@ func (a *appState) playerOverlayView(c *ui.Context) {
 	c.SetTheme(playerOverlayTheme)
 	a.playerShortcuts(c)
 	a.playerTransport(c)
+}
+
+func (a *appState) playerMenuView(c *ui.Context) {
+	a.advancePlayerOverlayAnimation(c)
+	c.Root().Background(ui.Transparent)
+	theme := ui.DarkTheme()
+	theme.Background, theme.Surface = ui.Transparent, ui.Transparent
+	c.SetTheme(theme)
+	a.playerShortcuts(c)
 	a.playerPopover(c)
 }
 
@@ -473,8 +502,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 				}
 				if playerAppleIconButton(c, fullscreenIcon, "切换全屏", 32, 17).Clicked() {
 					if a.window != nil {
-						a.window.ToggleFullScreen()
-						a.syncPlayerOverlay()
+						a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
 					}
 					a.markPlayerOverlayActivity()
 				}
@@ -534,33 +562,55 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 		if a.playerOverlayMenu == option {
 			a.closePlayerOverlayMenu()
 		} else {
-			a.playerOverlayMenu = option
-			if option == "subtitle" {
-				a.playerMenuTracks = append(a.playerMenuTracks[:0], a.playback.SubtitleTracks...)
-			} else if option == "audio" {
-				a.playerMenuTracks = append(a.playerMenuTracks[:0], a.playback.AudioTracks...)
-			} else {
-				a.playerMenuTracks = nil
-			}
-			a.setPlayerOverlayPinned(true)
+			a.openPlayerOverlayMenu(option)
 		}
-		a.syncPlayerOverlay()
 		a.markPlayerOverlayActivity()
 	}
+}
+
+func (a *appState) openPlayerOverlayMenu(option string) {
+	a.destroyPlayerMenuWindow()
+	a.playerOverlayMenu = option
+	switch option {
+	case "subtitle":
+		a.playerMenuTracks = append(a.playerMenuTracks[:0], a.playback.SubtitleTracks...)
+	case "audio":
+		a.playerMenuTracks = append(a.playerMenuTracks[:0], a.playback.AudioTracks...)
+	default:
+		a.playerMenuTracks = nil
+	}
+	a.setPlayerOverlayPinned(true)
+	if a.window == nil || a.playerOverlayWindow == nil {
+		return
+	}
+	bounds := playerMenuBounds(a.window.ContentBounds())
+	a.playerMenuContent = overlay.View(a.playerMenuView)
+	a.playerMenuWindow = mygo.NewWindow(mygo.WindowOptions{
+		Title: "播放选项", X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height,
+		Parent: a.window, Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
+		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
+		Content: a.playerMenuContent,
+	})
+	// A new menu surface contains no previous transport/menu bitmap. It stays
+	// transparent until its own first paint, and never shifts the control bar.
+	a.playerMenuContent.SetOpacity(a.playerMenuWindow, a.playerOverlayOpacity)
+	a.playerMenuWindow.Show()
+	a.playerOverlayWindow.Invalidate()
+}
+
+func (a *appState) destroyPlayerMenuWindow() {
+	if a.playerMenuWindow != nil {
+		a.playerMenuWindow.Destroy()
+		a.playerMenuWindow = nil
+	}
+	a.playerMenuContent = nil
 }
 
 func (a *appState) playerPopover(c *ui.Context) {
 	if a.playerOverlayMenu == "" {
 		return
 	}
-	rows := 7
-	if a.playerOverlayMenu == "audio" {
-		rows = len(a.playerMenuTracks)
-	} else if a.playerOverlayMenu == "subtitle" {
-		rows = len(a.playerMenuTracks) + 1
-	}
-	menuHeight := min(330, max(90, 36+rows*34))
-	ui.Column(c).Absolute().Bottom(118).Right(20).Width(300).Height(float32(menuHeight)).Padding(8).Gap(3).Radius(18).
+	ui.Column(c).Label("播放选项菜单").Fill().MinWidth(0).Padding(8).Gap(3).Radius(18).Clip().
 		Background(ui.RGBA(20, 22, 26, 0.88)).Border(1, ui.RGBA(255, 255, 255, 0.16)).Children(func() {
 		var title string
 		switch a.playerOverlayMenu {
@@ -572,7 +622,7 @@ func (a *appState) playerPopover(c *ui.Context) {
 			title = "播放速度"
 		}
 		ui.Text(c, title).Padding(4, 9).FontSize(11).Bold().TextColor(ui.RGBA(255, 255, 255, 0.65))
-		ui.Scroll(c).Height(float32(menuHeight - 38)).Children(func() {
+		ui.Scroll(c).Grow(1).FillWidth().MinWidth(0).Children(func() {
 			switch a.playerOverlayMenu {
 			case "subtitle":
 				selected := true
@@ -613,8 +663,8 @@ func (a *appState) playerTrackMenuItem(c *ui.Context, label string, trackID int,
 }
 
 func playerAppleMenuItem(c *ui.Context, label string, selected bool) bool {
-	btn := ui.Button(c, "").Padding(6, 10).Radius(9).BorderWidth(0).
-		Background(ui.RGBA(0, 0, 0, 0)).FillWidth().
+	btn := ui.Button(c, "").Height(34).Padding(6, 10).Radius(9).BorderWidth(0).
+		Background(ui.RGBA(0, 0, 0, 0)).FillWidth().MinWidth(0).Clip().Label(label).
 		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 	txtColor := ui.RGBA(255, 255, 255, 0.88)
 	if selected {
@@ -628,7 +678,7 @@ func playerAppleMenuItem(c *ui.Context, label string, selected bool) bool {
 		prefix = "✓  "
 	}
 	btn.Children(func() {
-		ui.Text(c, prefix+label).FontSize(12).TextColor(txtColor).SingleLine()
+		ui.Text(c, prefix+label).FontSize(12).TextColor(txtColor).Grow(1).MinWidth(0).SingleLine()
 	})
 	return btn.Clicked()
 }
@@ -660,11 +710,18 @@ func playerTrackLabel(track PlayerTrack) string {
 }
 
 func (a *appState) closePlayerOverlayMenu() {
+	hadMenu := a.playerMenuWindow != nil
+	a.destroyPlayerMenuWindow()
 	a.playerOverlayMenu = ""
 	a.playerMenuTracks = nil
-	a.syncPlayerOverlay()
+	if a.playerOverlayWindow != nil {
+		a.playerOverlayWindow.Invalidate()
+	}
 	a.setPlayerOverlayPinned(false)
 	a.markPlayerOverlayActivity()
+	if hadMenu && a.window != nil {
+		restoreWindowFocus(a.window)
+	}
 }
 
 func (a *appState) seekDisplayPosition() float64 {
@@ -683,7 +740,14 @@ func (a *appState) playerShortcuts(c *ui.Context) {
 				a.closePlayerOverlayMenu()
 				return
 			}
-			a.performPlayerAction(playerShortcutAction(0, key, fullscreen))
+			action := playerShortcutAction(0, key, fullscreen)
+			if action == playerToggleFull {
+				a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
+			} else if action == playerExitFull {
+				a.requestPlayerFullscreen(false, c.Preferences().ReduceMotion)
+			} else {
+				a.performPlayerAction(action)
+			}
 			return
 		}
 	}
@@ -753,13 +817,11 @@ func (a *appState) performPlayerAction(action playerAction) {
 		a.playback.Muted = !a.playback.Muted
 	case playerToggleFull:
 		if a.window != nil {
-			a.window.ToggleFullScreen()
-			a.syncPlayerOverlay()
+			a.togglePlayerFullscreen(false)
 		}
 	case playerExitFull:
 		if a.window != nil {
-			a.window.SetFullScreen(false)
-			a.syncPlayerOverlay()
+			a.requestPlayerFullscreen(false, false)
 		}
 	case playerReturn:
 		a.stopPlayback()

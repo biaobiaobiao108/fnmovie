@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -43,6 +44,8 @@ func runNativePlaybackOverlayComposition() error {
 	mygo.App.WhenReady(func() {
 		a := &appState{player: NewPlayer(), playback: PlaybackState{Active: true, Title: "透明控件验证", Duration: 7200, Position: 1200, Volume: 80, Speed: 1}}
 		a.window = mygo.NewWindow(mygo.WindowOptions{Title: "FnMovie overlay test", Width: 1000, Height: 650, AlwaysOnTop: true, Content: ui.View(func(c *ui.Context) {
+			a.advancePlayerFullscreen(c)
+			a.advancePlayerOverlayAnimation(c)
 			ui.Box(c).Fill().Background(ui.RGB(24, 164, 98))
 		})})
 		a.createPlayerOverlay()
@@ -84,13 +87,24 @@ func runNativePlaybackOverlayComposition() error {
 						break
 					}
 				}
-				a.closePlayerOverlay()
 				if err != nil {
+					a.closePlayerOverlay()
 					result <- err
 					mygo.App.Quit()
 					return
 				}
-				go checkNativePlaybackSessions(a, result)
+				go func() {
+					err := checkNativePlayerMenus(a)
+					a.window.Update(func() {
+						a.closePlayerOverlay()
+						if err != nil {
+							result <- err
+							mygo.App.Quit()
+							return
+						}
+						go checkNativePlaybackSessions(a, result)
+					})
+				}()
 			})
 		}()
 	})
@@ -98,6 +112,127 @@ func runNativePlaybackOverlayComposition() error {
 		return err
 	}
 	return <-result
+}
+
+// Scan the actual desktop while repeatedly opening fresh native menu surfaces.
+// Pixels outside the menu and bottom control bar must remain the green video
+// background, including during the first frame when the old implementation
+// moved the last progress-bar bitmap into the middle of the video.
+func checkNativePlayerMenus(a *appState) error {
+	onUI := func(fn func()) { done := make(chan struct{}); a.window.Update(func() { fn(); close(done) }); <-done }
+	var transportBounds mygo.Rectangle
+	onUI(func() { transportBounds = a.playerOverlayWindow.ContentBounds() })
+	getDC := syscall.NewLazyDLL("user32.dll").NewProc("GetDC")
+	release := syscall.NewLazyDLL("user32.dll").NewProc("ReleaseDC")
+	getPixel := syscall.NewLazyDLL("gdi32.dll").NewProc("GetPixel")
+	for _, option := range []string{"subtitle", "audio", "speed", "subtitle", "audio"} {
+		var err error
+		onUI(func() {
+			tracks := make([]PlayerTrack, 25)
+			for i := range tracks {
+				tracks[i] = PlayerTrack{ID: i + 1, Title: strings.Repeat("长轨道名称", 25)}
+			}
+			if option == "subtitle" {
+				tracks = tracks[:1]
+			}
+			a.playback.AudioTracks, a.playback.SubtitleTracks = tracks, tracks
+			a.openPlayerOverlayMenu(option)
+			if a.playerOverlayWindow.ContentBounds() != transportBounds {
+				err = fmt.Errorf("%s menu moved or resized the transport surface", option)
+			}
+			if a.playerMenuWindow.ContentBounds().Width != playerMenuWidth || a.playerMenuWindow.ContentBounds().Height != playerMenuHeight {
+				err = fmt.Errorf("%s native menu has inconsistent dimensions: %+v", option, a.playerMenuWindow.ContentBounds())
+			}
+		})
+		if err != nil {
+			return err
+		}
+		for frame := range 5 {
+			onUI(func() {
+				wantTracks := 25
+				if option == "subtitle" {
+					wantTracks = 1
+				}
+				if option != "speed" && len(a.playerMenuTracks) != wantTracks {
+					err = fmt.Errorf("%s menu lost its track snapshot: %d", option, len(a.playerMenuTracks))
+					return
+				}
+				bounds := a.window.ContentBounds()
+				scale := windowScale(a.window.NativeHandle())
+				dc, _, _ := getDC.Call(0)
+				defer release.Call(0, dc)
+				for y := playerOverlayHeaderHeight + 20; y < bounds.Height-playerOverlayControlHeight; y += 20 {
+					color, _, _ := getPixel.Call(dc, uintptr(float64(bounds.X+bounds.Width/2)*scale), uintptr(float64(bounds.Y+y)*scale))
+					r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
+					if absInt(r-24) > 3 || absInt(g-164) > 3 || absInt(b-98) > 3 {
+						err = fmt.Errorf("%s menu frame %d left a ghost at center y=%d: RGB(%d,%d,%d), main=%+v menu=%+v controls=%+v", option, frame, y, r, g, b, bounds, a.playerMenuWindow.ContentBounds(), a.playerOverlayWindow.ContentBounds())
+						break
+					}
+				}
+			})
+			if err != nil {
+				return err
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		onUI(func() {
+			if png, captureErr := a.playerMenuWindow.CapturePage(); captureErr == nil {
+				_ = os.WriteFile("../../out/overlay-check/menu-"+option+".png", png, 0600)
+			}
+			a.closePlayerOverlayMenu()
+			if a.playerMenuWindow != nil {
+				err = fmt.Errorf("closed menu surface was retained")
+			}
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return checkNativeFullscreen(a, onUI)
+}
+
+func checkNativeFullscreen(a *appState, onUI func(func())) error {
+	for _, target := range []bool{true, false} {
+		onUI(func() { a.requestPlayerFullscreen(target, false) })
+		deadline := time.Now().Add(3 * time.Second)
+		for {
+			ready := false
+			onUI(func() {
+				ready = a.fullscreenMotion.started.IsZero() && a.window.IsFullScreen() == target && a.window.Opacity() > 0.99
+			})
+			if ready {
+				break
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("fullscreen transition to %t failed or left window translucent", target)
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		var err error
+		onUI(func() {
+			main, controls := a.window.ContentBounds(), a.playerOverlayWindow.ContentBounds()
+			if controls.Height != playerOverlayControlHeight || controls.Y+controls.Height != main.Y+main.Height {
+				err = fmt.Errorf("fullscreen transition detached controls: main=%+v controls=%+v", main, controls)
+			}
+		})
+		if err != nil {
+			return err
+		}
+	}
+	// A quick reversed request cancels the pending transition and restores opacity.
+	onUI(func() { a.togglePlayerFullscreen(false); a.togglePlayerFullscreen(false) })
+	var err error
+	onUI(func() {
+		if !a.fullscreenMotion.started.IsZero() || a.window.Opacity() < 0.99 || a.window.IsFullScreen() {
+			err = fmt.Errorf("reversed fullscreen request left stale transition state")
+		}
+		a.requestPlayerFullscreen(true, true)
+		if !a.fullscreenMotion.started.IsZero() || !a.window.IsFullScreen() {
+			err = fmt.Errorf("reduced-motion fullscreen request was not immediate")
+		}
+		a.requestPlayerFullscreen(false, true)
+	})
+	return err
 }
 
 func checkNativePlaybackSessions(a *appState, result chan<- error) {
@@ -116,19 +251,7 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		return
 	}
 	defer os.Chdir(cwd)
-	data := make([]byte, 44+16000*20)
-	copy(data, "RIFF")
-	binary.LittleEndian.PutUint32(data[4:], uint32(len(data)-8))
-	copy(data[8:], "WAVEfmt ")
-	binary.LittleEndian.PutUint32(data[16:], 16)
-	binary.LittleEndian.PutUint16(data[20:], 1)
-	binary.LittleEndian.PutUint16(data[22:], 1)
-	binary.LittleEndian.PutUint32(data[24:], 8000)
-	binary.LittleEndian.PutUint32(data[28:], 16000)
-	binary.LittleEndian.PutUint16(data[32:], 2)
-	binary.LittleEndian.PutUint16(data[34:], 16)
-	copy(data[36:], "data")
-	binary.LittleEndian.PutUint32(data[40:], uint32(len(data)-44))
+	data := nativeTestAVI()
 	entered, release := make(chan struct{}), make(chan struct{})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -143,9 +266,9 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 			}
 			fmt.Fprint(w, `{"code":0,"data":{"media_guid":"synthetic","ts":0}}`)
 		case "/api/v1/stream":
-			fmt.Fprint(w, `{"code":0,"data":{"video_stream":{"duration":20},"direct_link_qualities":[{"url":"/media.wav","resolution":"test"}]}}`)
-		case "/media.wav":
-			w.Header().Set("Content-Type", "audio/wav")
+			fmt.Fprint(w, `{"code":0,"data":{"video_stream":{"duration":20},"direct_link_qualities":[{"url":"/media.avi","resolution":"test"}]}}`)
+		case "/media.avi":
+			w.Header().Set("Content-Type", "video/x-msvideo")
 			_, _ = w.Write(data)
 		case "/api/v1/play/record":
 			fmt.Fprint(w, `{"code":0,"data":{}}`)
@@ -190,11 +313,26 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	if err := checkNativeFullscreen(a, onUI); err != nil {
+		finish(err)
+		return
+	}
 	time.Sleep(12 * time.Second)
 	var finalErr error
 	onUI(func() {
 		if !a.playback.Active || !a.player.Running() || a.playback.Position < 10 {
 			finalErr = fmt.Errorf("playback unexpectedly stopped: active=%t running=%t position=%v status=%s", a.playback.Active, a.player.Running(), a.playback.Position, a.status)
+			return
+		}
+		bounds := a.window.ContentBounds()
+		scale := windowScale(a.window.NativeHandle())
+		user := syscall.NewLazyDLL("user32.dll")
+		dc, _, _ := user.NewProc("GetDC").Call(0)
+		color, _, _ := syscall.NewLazyDLL("gdi32.dll").NewProc("GetPixel").Call(dc, uintptr(float64(bounds.X+bounds.Width/2)*scale), uintptr(float64(bounds.Y+bounds.Height/2)*scale))
+		user.NewProc("ReleaseDC").Call(0, dc)
+		r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
+		if r > 60 || g < 55 || g > 110 || b < 125 || b > 200 {
+			finalErr = fmt.Errorf("D3D11 video lost after fullscreen transitions: RGB(%d,%d,%d)", r, g, b)
 			return
 		}
 		a.showPlayerOverlay()
@@ -206,7 +344,7 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 	time.Sleep(400 * time.Millisecond)
 	onUI(func() {
 		if a.playerOverlayOpacity < 0.99 || !a.playerOverlayVisible {
-			finalErr = fmt.Errorf("playback controls failed to reappear")
+			finalErr = fmt.Errorf("playback controls failed to reappear: alpha=%v visible=%t fullscreenMotion=%+v animationStart=%v", a.playerOverlayOpacity, a.playerOverlayVisible, a.fullscreenMotion, a.playerOverlayAnimationStart)
 		}
 	})
 	finish(finalErr)
@@ -279,4 +417,44 @@ func checkNativeSeriesCast(a *appState, onUI func(func())) error {
 		a.selected = nil
 	})
 	return err
+}
+
+// A short uncompressed AVI exercises libmpv's actual D3D11 video surface.
+// Its blue frame differs from the green parent, so a lost/black GPU surface
+// after a layered-window/fullscreen transition cannot pass the pixel check.
+func nativeTestAVI() []byte {
+	chunk := func(tag string, payload []byte) []byte {
+		result := make([]byte, 8+len(payload)+(len(payload)&1))
+		copy(result, tag)
+		binary.LittleEndian.PutUint32(result[4:], uint32(len(payload)))
+		copy(result[8:], payload)
+		return result
+	}
+	words := func(values ...uint32) []byte {
+		b := make([]byte, len(values)*4)
+		for i, v := range values {
+			binary.LittleEndian.PutUint32(b[i*4:], v)
+		}
+		return b
+	}
+	const width, height, frameSize, frames = 160, 90, 160 * 90 * 3, 100
+	header := chunk("avih", words(200000, frameSize*5, 0, 0, frames, 0, 1, frameSize, width, height, 0, 0, 0, 0))
+	stream := append([]byte("vidsDIB "), words(0, 0, 0, 1, 5, 0, frames, frameSize, 0xffffffff, 0)...)
+	stream = append(stream, words(0, width|height<<16)...)
+	format := words(40, width, height, 1|24<<16, 0, frameSize, 0, 0, 0, 0)
+	streamList := append([]byte("strl"), chunk("strh", stream)...)
+	streamList = append(streamList, chunk("strf", format)...)
+	headers := append([]byte("hdrl"), header...)
+	headers = append(headers, chunk("LIST", streamList)...)
+	frame := make([]byte, frameSize)
+	for i := 0; i < len(frame); i += 3 {
+		frame[i], frame[i+1], frame[i+2] = 164, 80, 24
+	}
+	movie := []byte("movi")
+	for range frames {
+		movie = append(movie, chunk("00db", frame)...)
+	}
+	payload := append([]byte("AVI "), chunk("LIST", headers)...)
+	payload = append(payload, chunk("LIST", movie)...)
+	return chunk("RIFF", payload)
 }

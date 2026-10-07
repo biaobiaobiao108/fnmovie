@@ -80,8 +80,11 @@ type appState struct {
 	displayScale                 float64
 	playerOverlayWindow          *mygo.Window
 	playerHeaderWindow           *mygo.Window
+	playerMenuWindow             *mygo.Window
 	playerOverlayContent         *overlay.Content
 	playerHeaderContent          *overlay.Content
+	playerMenuContent            *overlay.Content
+	fullscreenMotion             playerFullscreenMotion
 	playerOverlayHooks           bool
 	playerOverlayMonitorDone     chan struct{}
 	overlayMu                    sync.Mutex
@@ -163,7 +166,9 @@ func Run() {
 
 func (a *appState) view(c *ui.Context) {
 	c.SetTheme(movieTheme())
+	a.advancePlayerFullscreen(c)
 	if a.playback.Active {
+		a.advancePlayerOverlayAnimation(c)
 		a.playerView(c)
 		return
 	}
@@ -240,7 +245,7 @@ func (a *appState) sidebar(c *ui.Context) {
 				if selected {
 					iconColor = t.Accent
 				}
-				ui.Text(c, "🗂").FontSize(13).Width(20).TextAlign(ui.Center).TextColor(iconColor)
+				ui.Icon(c, libraryNavigationIcon(library)).Size(20, 20).TextColor(iconColor)
 				ui.Text(c, library.Name).FontSize(13).SingleLine()
 			})
 			if button.Clicked() {
