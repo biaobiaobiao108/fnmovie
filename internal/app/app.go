@@ -1225,9 +1225,9 @@ func (a *appState) requestPoster(item MediaItem, width, height int) *ui.Bitmap {
 
 func (a *appState) castSection(c *ui.Context, item MediaItem) {
 	t := c.Theme()
-	ui.Column(c).Gap(8).Children(func() {
+	ui.Column(c).Gap(12).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "演职人员").FontSize(13).Bold()
+			ui.Text(c, "演职人员").FontSize(16).Bold()
 			if a.castLoading {
 				ui.Text(c, "正在读取…").FontSize(10).TextColor(t.TextMuted)
 			}
@@ -1245,34 +1245,34 @@ func (a *appState) castSection(c *ui.Context, item MediaItem) {
 			}
 			return
 		}
-		ui.ScrollHorizontal(c).Height(128).Gap(12).Children(func() {
+		ui.ScrollHorizontal(c).Height(164).Gap(16).Children(func() {
 			for _, person := range item.Cast {
 				p := person
-				btn := actionButton(c, "").Width(86).Padding(6, 4).Radius(10).BorderWidth(0).
+				btn := actionButton(c, "").Width(120).Padding(8, 8).Radius(12).BorderWidth(0).
 					Background(ui.Color{}).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond}).
 					Label("查看 " + p.Name + " 的作品")
 				if btn.Hovered() {
 					btn.Background(ui.Hex("#eeece6"))
 				}
 				btn.Children(func() {
-					ui.Column(c).AlignItems(ui.Center).Gap(5).Children(func() {
-						if image := a.imageForURL(p.Profile, 60, 60); image != nil {
-							ui.Image(c, image).Size(60, 60).Fit(ui.Cover).Radius(30)
+					ui.Column(c).AlignItems(ui.Center).Gap(8).Children(func() {
+						if image := a.imageForURL(p.Profile, 84, 84); image != nil {
+							ui.Image(c, image).Size(84, 84).Fit(ui.Cover).Radius(42)
 						} else {
-							ui.Box(c).Size(60, 60).Radius(30).Background(ui.Hex("#e5e3dc")).Center().Children(func() {
+							ui.Box(c).Size(84, 84).Radius(42).Background(ui.Hex("#e5e3dc")).Center().Children(func() {
 								nameRune := "•"
 								if runes := []rune(p.Name); len(runes) > 0 {
 									nameRune = string(runes[:1])
 								}
-								ui.Text(c, nameRune).FontSize(18).Bold().TextColor(t.TextMuted)
+								ui.Text(c, nameRune).FontSize(26).Bold().TextColor(t.TextMuted)
 							})
 						}
-						ui.Text(c, p.Name).FontSize(12).Bold().TextAlign(ui.Center).SingleLine()
+						ui.Text(c, p.Name).FontSize(15).Bold().TextAlign(ui.Center).SingleLine()
 						role := p.Role
 						if role == "" {
 							role = p.Job
 						}
-						ui.Text(c, role).FontSize(10).TextColor(t.TextMuted).TextAlign(ui.Center).SingleLine()
+						ui.Text(c, role).FontSize(12).TextColor(t.TextMuted).TextAlign(ui.Center).SingleLine()
 					})
 				})
 				if btn.Clicked() {
