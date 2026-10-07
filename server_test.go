@@ -28,7 +28,7 @@ func TestServerSessionLibraryAndPlayback(t *testing.T) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/item/list":
 			writeJSON(t, w, `{"code":0,"data":{"total":1,"list":[{"guid":"item-1","title":"Example","type":"Video","release_date":"2024-01-01","is_favorite":true,"watched":true}]}}`)
-		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/item/item-1":
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/movie/item-1":
 			writeJSON(t, w, `{"code":0,"data":{"guid":"item-1","title":"Example","overview":"Description"}}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/play/info":
 			writeJSON(t, w, `{"code":0,"data":{"media_guid":"media-1","ts":37}}`)
@@ -154,8 +154,9 @@ func TestMediaPageContextUsesSystemCategoryAndFiltersSearchResults(t *testing.T)
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Errorf("decode category request: %v", err)
 			}
-			if body["type"] != "tv" {
-				t.Errorf("system TV category should use type=tv, body=%#v", body)
+			tags, _ := body["tags"].(map[string]any)
+			if got, ok := tags["type"].([]any); !ok || len(got) != 1 || got[0] != "TV" {
+				t.Errorf("system TV category should use tags.type=[TV], body=%#v", body)
 			}
 			if _, hasAncestor := body["ancestor_guid"]; hasAncestor {
 				t.Errorf("system category must not be scoped to a personal library: %#v", body)
@@ -224,19 +225,12 @@ func TestSeriesSeasonsUsesSeriesGuidAndPreservesSeasonNodes(t *testing.T) {
 
 func TestPeopleLoadsCastAndProfilePaths(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/person/list/movie-1" {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/person/list/movie-1" {
 			t.Errorf("unexpected cast request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
 			return
 		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode cast request: %v", err)
-		}
-		if body["guid"] != "movie-1" || body["page_size"] != float64(200) {
-			t.Errorf("cast request body = %#v", body)
-		}
-		writeJSON(t, w, `{"code":0,"data":{"total":1,"list":[{"person_guid":"person-1","name":"演员甲","role":"Alice","job":"Actor","profile_path":"/person/a.jpg","order":0}]}}`)
+		writeJSON(t, w, `{"code":0,"data":{"total":1,"list":[{"person_guid":"person-1","person_name":"演员甲","character_name":"Alice","job":"Actor","profile_path":"/person/a.jpg","order":0}]}}`)
 	}))
 	defer server.Close()
 	client := NewServer(server.URL, "token")
@@ -248,6 +242,66 @@ func TestPeopleLoadsCastAndProfilePaths(t *testing.T) {
 	person := people[0]
 	if person.Name != "演员甲" || person.Role != "Alice" || person.Profile != "/person/a.jpg" {
 		t.Fatalf("unexpected person data: %#v", person)
+	}
+}
+
+func TestSystemCollectionsUseFnOSFiltersAndFavoriteEndpoint(t *testing.T) {
+	var favoriteCalled, watchedCalled bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		switch r.URL.Path {
+		case "/api/v1/favorite/list":
+			favoriteCalled = true
+			writeJSON(t, w, `{"code":0,"data":{"total":1,"list":[{"guid":"fav","title":"Favorite","type":"Movie"}]}}`)
+		case "/api/v1/item/list":
+			watchedCalled = true
+			tags, _ := body["tags"].(map[string]any)
+			if tags["watched"] != "1" {
+				t.Errorf("history must request watched items, body=%#v", body)
+			}
+			writeJSON(t, w, `{"code":0,"data":{"total":1,"list":[{"guid":"seen","title":"Watched","type":"TV"}]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewServer(server.URL, "token")
+	client.client = server.Client()
+
+	favorites, total, err := client.MediaPageContext(t.Context(), "", "favorite", "", 1, 100)
+	if err != nil || total != 1 || len(favorites) != 1 || !favorites[0].Favorite {
+		t.Fatalf("favorite page=%#v total=%d err=%v", favorites, total, err)
+	}
+	history, total, err := client.MediaPageContext(t.Context(), "", "watched", "", 1, 100)
+	if err != nil || total != 1 || len(history) != 1 || !history[0].Watched {
+		t.Fatalf("history page=%#v total=%d err=%v", history, total, err)
+	}
+	if !favoriteCalled || !watchedCalled {
+		t.Fatalf("favorite endpoint called=%t watched endpoint called=%t", favoriteCalled, watchedCalled)
+	}
+}
+
+func TestDetailUsesResourceRouteAndMergesCardFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/tv/show-1" {
+			t.Errorf("unexpected detail request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(t, w, `{"code":0,"data":{"tv":{"guid":"show-1","overview":"Series overview","first_air_date":"2020-01-02","vote_average":8.26,"posters":[{"path":"/posters/show.jpg"}]}}}`)
+	}))
+	defer server.Close()
+	client := NewServer(server.URL, "token")
+	client.client = server.Client()
+	item, err := client.Detail(MediaItem{ID: "show-1", Kind: "tv", Title: "Card title", Poster: "/card.jpg"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Title != "Card title" || item.Overview != "Series overview" || item.Year != "2020" || item.Rating != "8.3" || item.Poster != "/posters/show.jpg" {
+		t.Fatalf("detail fields were not normalized/merged: %#v", item)
 	}
 }
 

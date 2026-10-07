@@ -199,6 +199,9 @@ func (a *appState) sidebar(c *ui.Context) {
 					button.Background(ui.Hex("#eeece6"))
 				}
 				button.Children(func() {
+					// Keep library labels aligned with navigation labels, whose
+					// icon column reserves the same leading width.
+					ui.Box(c).Width(19)
 					ui.Text(c, library.Name).FontSize(13).SingleLine()
 				})
 				if button.Clicked() {
@@ -1278,6 +1281,10 @@ func catalogMediaType(section string) string {
 		return "movie"
 	case "tv":
 		return "tv"
+	case "favorites":
+		return "favorite"
+	case "history":
+		return "watched"
 	default:
 		return ""
 	}

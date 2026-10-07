@@ -288,6 +288,15 @@ func (s *Server) MediaPageContext(ctx context.Context, libraryID, mediaType, que
 			return nil, 0, err
 		}
 		items := filterMediaItems(filterLibraryItems(normalizeItems(unwrapData(response)), libraryID), mediaType)
+		if mediaType == "favorite" || mediaType == "watched" {
+			filtered := items[:0]
+			for _, item := range items {
+				if mediaType == "favorite" && item.Favorite || mediaType == "watched" && item.Watched {
+					filtered = append(filtered, item)
+				}
+			}
+			items = filtered
+		}
 		total := len(items)
 		start := (page - 1) * pageSize
 		if start >= total {
@@ -303,17 +312,41 @@ func (s *Server) MediaPageContext(ctx context.Context, libraryID, mediaType, que
 	if libraryID != "" {
 		requestBody["ancestor_guid"] = libraryID
 	}
-	if mediaType != "" {
-		requestBody["type"] = mediaType
+	route := "item/list"
+	tags := map[string]any{}
+	switch mediaType {
+	case "movie", "tv":
+		// fnOS's web client sends resource type filters inside tags.type.
+		// A top-level `type` is ignored by item/list and can yield pages that
+		// are filtered to empty on the client.
+		resourceType := map[string]string{"movie": "Movie", "tv": "TV"}[mediaType]
+		tags["type"] = []string{resourceType}
+	case "favorite":
+		route = "favorite/list"
+	case "watched":
+		tags["watched"] = "1"
+	}
+	if len(tags) > 0 {
+		requestBody["tags"] = tags
 	}
 	var response any
-	if err := s.requestContext(ctx, "POST", "v1", "item/list", requestBody, &response, s.tokenValue()); err != nil {
+	if err := s.requestContext(ctx, "POST", "v1", route, requestBody, &response, s.tokenValue()); err != nil {
 		return nil, 0, err
 	}
 	data := unwrapData(response)
 	items := normalizeItems(findItemsList(data))
 	items = filterLibraryItems(items, libraryID)
 	items = filterMediaItems(items, mediaType)
+	if mediaType == "favorite" {
+		for i := range items {
+			items[i].Favorite = true
+		}
+	}
+	if mediaType == "watched" {
+		for i := range items {
+			items[i].Watched = true
+		}
+	}
 	total, _ := asInt(valueAt(data, "total"))
 	if total <= 0 {
 		total = int64((page-1)*pageSize + len(items))
@@ -326,7 +359,7 @@ func (s *Server) MediaPageContext(ctx context.Context, libraryID, mediaType, que
 
 func filterMediaItems(items []MediaItem, mediaType string) []MediaItem {
 	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
-	if mediaType == "" {
+	if mediaType == "" || mediaType == "favorite" || mediaType == "watched" {
 		return items
 	}
 	want := normalizeMediaKind(map[string]any{"type": mediaType})
@@ -382,16 +415,83 @@ func itemLibrary(raw map[string]any) (string, bool) {
 }
 
 func (s *Server) Detail(item MediaItem) (MediaItem, error) {
-	apiRoute := "item/" + url.PathEscape(item.ID)
+	resource := "movie"
+	if item.Kind == "tv" || item.IsSeries {
+		resource = "tv"
+	}
+	apiRoute := resource + "/" + url.PathEscape(item.ID)
 	var response any
 	if err := s.request("GET", "v1", apiRoute, nil, &response, s.tokenValue()); err != nil {
 		return item, err
 	}
-	detail := normalizeItem(firstObject(unwrapData(response)))
-	if detail.ID == "" {
-		detail = item
+	detail := normalizeItem(detailObject(unwrapData(response)))
+	return mergeMediaDetail(item, detail), nil
+}
+
+func detailObject(value any) map[string]any {
+	object := firstObject(value)
+	for _, key := range []string{"item", "info", "detail", "movie", "tv"} {
+		if nested, ok := object[key].(map[string]any); ok {
+			return nested
+		}
 	}
-	return detail, nil
+	return object
+}
+
+func mergeMediaDetail(base, detail MediaItem) MediaItem {
+	if detail.ID != "" {
+		base.ID = detail.ID
+	}
+	if detail.MediaID != "" {
+		base.MediaID = detail.MediaID
+	}
+	if detail.Title != "" {
+		base.Title = detail.Title
+	}
+	if detail.Kind != "" {
+		base.Kind = detail.Kind
+	}
+	if detail.Year != "" {
+		base.Year = detail.Year
+	}
+	if detail.Rating != "" {
+		base.Rating = detail.Rating
+	}
+	if detail.Overview != "" {
+		base.Overview = detail.Overview
+	}
+	if detail.Poster != "" {
+		base.Poster = detail.Poster
+	}
+	if detail.SeriesTitle != "" {
+		base.SeriesTitle = detail.SeriesTitle
+	}
+	if detail.SeriesID != "" {
+		base.SeriesID = detail.SeriesID
+	}
+	if detail.Favorite {
+		base.Favorite = true
+	}
+	if detail.Watched {
+		base.Watched = true
+	}
+	if len(detail.Sources) > 0 {
+		base.Sources = detail.Sources
+	}
+	if len(detail.Cast) > 0 {
+		base.Cast = detail.Cast
+	}
+	if len(detail.Raw) > 0 {
+		merged := make(map[string]any, len(base.Raw)+len(detail.Raw))
+		for key, value := range base.Raw {
+			merged[key] = value
+		}
+		for key, value := range detail.Raw {
+			merged[key] = value
+		}
+		base.Raw = merged
+	}
+	return base
 }
 
 // People returns the people credited on a movie or series. fnOS exposes the
@@ -400,9 +500,8 @@ func (s *Server) People(itemID string) ([]CastMember, error) {
 	if strings.TrimSpace(itemID) == "" {
 		return nil, fmt.Errorf("媒体缺少标识，无法读取演职员")
 	}
-	body := map[string]any{"guid": itemID, "page": 1, "page_size": 200}
 	var response any
-	if err := s.request("POST", "v1", "person/list/"+url.PathEscape(itemID), body, &response, s.tokenValue()); err != nil {
+	if err := s.request("GET", "v1", "person/list/"+url.PathEscape(itemID), nil, &response, s.tokenValue()); err != nil {
 		return nil, err
 	}
 	data := unwrapData(response)
@@ -416,16 +515,14 @@ func (s *Server) People(itemID string) ([]CastMember, error) {
 	for _, object := range objects {
 		person := CastMember{
 			ID:         firstString(object, "person_guid", "guid", "item_guid"),
-			Name:       firstString(object, "name", "original_name"),
-			Role:       firstString(object, "role", "character"),
+			Name:       firstString(object, "name", "person_name", "original_name"),
+			Role:       firstString(object, "role", "character", "character_name", "characterName"),
 			Job:        firstString(object, "job", "known_for_department"),
 			Department: firstString(object, "department"),
-			Profile:    firstString(object, "profile_path", "profile", "image", "image_url"),
+			Profile:    firstImagePath(object, "profile_path", "profilePath", "profile", "image", "image_url", "person_image"),
 			Order:      parseMediaNumber(firstString(object, "order", "sort")),
 		}
-		job := strings.ToLower(person.Job + " " + person.Department)
-		isActor := person.Role != "" || strings.Contains(job, "actor") || strings.Contains(job, "acting") || strings.Contains(job, "演员") || strings.Contains(job, "表演")
-		if person.Name != "" && isActor {
+		if person.Name != "" {
 			people = append(people, person)
 		}
 	}
@@ -809,13 +906,13 @@ func normalizeItem(object map[string]any) MediaItem {
 	item.SeasonNumber = parseMediaNumber(firstString(object, "season_number", "seasonNumber"))
 	item.EpisodeNumber = parseMediaNumber(firstString(object, "episode_number", "episodeNumber"))
 	item.IsSeries = item.Kind == "tv"
-	item.Year = firstString(object, "year", "release_date", "air_date")
+	item.Year = firstString(object, "year", "release_date", "air_date", "first_air_date", "last_air_date")
 	if len(item.Year) >= 4 {
 		item.Year = item.Year[:4]
 	}
 	item.Rating = formatRating(firstString(object, "rating", "score", "vote_average"))
 	item.Overview = firstString(object, "overview", "description", "summary", "plot")
-	item.Poster = firstImagePath(object, "poster", "posters", "poster_url", "posterUrl", "image", "image_url", "cover", "poster_path", "posterPath")
+	item.Poster = firstImagePath(object, "poster", "posters", "poster_list", "poster_url", "posterUrl", "image", "image_url", "cover", "poster_path", "posterPath")
 	item.Favorite = anyBool(object["favorite"]) || anyBool(object["is_favorite"]) || anyBool(object["isFavorite"])
 	item.Watched = anyBool(object["is_watched"]) || anyBool(object["watched"])
 	item.AddedAt = firstString(object, "create_time", "created_at", "ts", "release_date")
