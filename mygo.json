@@ -1,0 +1,7 @@
+{
+  "name": "FnMovie",
+  "identifier": "com.fnmovie.desktop",
+  "version": "0.1.0",
+  "copyright": "Copyright 2026 fnmovie contributors",
+  "out": "build"
+}
