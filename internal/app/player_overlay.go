@@ -11,20 +11,24 @@ import (
 
 const playerOverlayHideDelay = 2500 * time.Millisecond
 const (
-	playerOverlayHeaderHeight  = 56
-	playerOverlayControlHeight = 82
+	playerOverlayHeaderHeight  = 64
+	playerOverlayControlHeight = 98
 	playerOverlayFadeDuration  = 180 * time.Millisecond
 	playerOverlayTargetOpacity = 1.0
 )
 
 var playerOverlayIcons = map[string]*ui.SVG{
-	"back":       ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/><path d="M9 12h11"/></svg>`)),
-	"play":       ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 5 12 7-12 7z"/></svg>`)),
-	"pause":      ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 5v14M16 5v14"/></svg>`)),
-	"volume":     ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6l-5 4z"/><path d="M17 9a5 5 0 0 1 0 6"/><path d="M19 6a9 9 0 0 1 0 12"/></svg>`)),
-	"muted":      ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10v4h4l5 4V6l-5 4z"/><path d="m17 9 5 6m0-6-5 6"/></svg>`)),
-	"fullscreen": ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/></svg>`)),
-	"window":     ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4"/><path d="M9 9h6v6H9z"/></svg>`)),
+	"back":            ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`)),
+	"play":            ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8c0-1.4 1.5-2.2 2.7-1.5l11.5 6.7c1.2.7 1.2 2.5 0 3.2L9.7 20c-1.2.7-2.7-.2-2.7-1.5V4.8z"/></svg>`)),
+	"pause":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="2"/><rect x="14" y="4" width="4" height="16" rx="2"/></svg>`)),
+	"volume":          ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`)),
+	"muted":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>`)),
+	"fullscreen":      ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>`)),
+	"window":          ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M10 14L3 21"/><path d="M14 10l7-7"/></svg>`)),
+	"seek-back-10":    ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5A8.5 8.5 0 1 0 20.5 13"/><path d="M12 1.5l-3 3 3 3"/><text x="12" y="16.5" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="-apple-system,system-ui,sans-serif">10</text></svg>`)),
+	"seek-forward-10": ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5A8.5 8.5 0 1 1 3.5 13"/><path d="M12 1.5l3 3-3 3"/><text x="12" y="16.5" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="-apple-system,system-ui,sans-serif">10</text></svg>`)),
+	"subtitles":       ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 15h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2H7"/><path d="M13 15h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-2"/></svg>`)),
+	"audio":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4"/><path d="M7 6v12"/><path d="M11 3v18"/><path d="M15 8v8"/><path d="M19 5v14"/><path d="M22 10v4"/></svg>`)),
 }
 
 func (a *appState) createPlayerOverlay() {
@@ -107,8 +111,8 @@ func (a *appState) playerOverlayContentHeight() int {
 	case "speed":
 		rows = 7
 	}
-	menuHeight := min(330, max(90, 34+rows*34))
-	height := playerOverlayControlHeight + 94 + menuHeight
+	menuHeight := min(330, max(90, 36+rows*34))
+	height := playerOverlayControlHeight + 118 + menuHeight
 	if a.window != nil {
 		height = min(height, a.window.ContentBounds().Height)
 	}
@@ -218,7 +222,7 @@ func (a *appState) animatePlayerOverlay(target float64) {
 					if progress >= 1 && target == 0 {
 						a.playerOverlayWindow.Hide()
 						a.playerHeaderWindow.Hide()
-						a.window.Focus()
+						restoreWindowFocus(a.window)
 					}
 				})
 			}
@@ -235,6 +239,9 @@ func (a *appState) closePlayerOverlay() {
 		close(a.playerOverlayMonitorDone)
 		a.playerOverlayMonitorDone = nil
 	}
+	if a.window != nil {
+		restoreWindowFocus(a.window)
+	}
 	if a.playerOverlayWindow != nil {
 		a.playerOverlayWindow.Destroy()
 		a.playerOverlayWindow = nil
@@ -242,6 +249,9 @@ func (a *appState) closePlayerOverlay() {
 	if a.playerHeaderWindow != nil {
 		a.playerHeaderWindow.Destroy()
 		a.playerHeaderWindow = nil
+	}
+	if a.window != nil {
+		restoreWindowFocus(a.window)
 	}
 	a.overlayMu.Lock()
 	a.playerOverlayVisible, a.playerOverlayPinned, a.playerOverlaySeeking = false, false, false
@@ -290,21 +300,30 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	playerOverlayTheme := ui.DarkTheme()
 	playerOverlayTheme.Background = ui.Transparent
 	playerOverlayTheme.Surface = ui.Transparent
-	playerOverlayTheme.SurfaceHover = ui.RGBA(255, 255, 255, 0.10)
-	playerOverlayTheme.SurfacePressed = ui.RGBA(255, 255, 255, 0.16)
+	playerOverlayTheme.SurfaceHover = ui.RGBA(255, 255, 255, 0.12)
+	playerOverlayTheme.SurfacePressed = ui.RGBA(255, 255, 255, 0.20)
 	c.SetTheme(playerOverlayTheme)
-	ui.Row(c).Absolute().Top(6).Left(18).Gap(12).AlignItems(ui.Center).Padding(8, 12).Radius(11).
-		Background(ui.RGBA(18, 19, 21, 0.54)).Children(func() {
-		if playerIconButton(c, "back", "返回影片库").Clicked() {
+	ui.Row(c).Absolute().Top(10).Left(20).Gap(12).AlignItems(ui.Center).Padding(5, 14, 5, 6).Radius(22).
+		Background(ui.RGBA(16, 18, 22, 0.65)).Border(1, ui.RGBA(255, 255, 255, 0.14)).Children(func() {
+		backBtn := ui.Button(c, "").Size(32, 32).Padding(0).Radius(16).BorderWidth(0).
+			Background(ui.RGBA(255, 255, 255, 0.12)).TextColor(ui.RGB(255, 255, 255)).Tooltip("返回影片库").
+			Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+		if backBtn.Hovered() {
+			backBtn.Background(ui.RGBA(255, 255, 255, 0.22))
+		}
+		backBtn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(16, 16) })
+		if backBtn.Clicked() {
 			a.stopPlayback()
 		}
-		ui.Column(c).Gap(2).Children(func() {
-			ui.Text(c, a.playback.Title).FontSize(15).Bold().TextColor(ui.RGB(255, 255, 255)).SingleLine()
+		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, a.playback.Title).FontSize(13).Bold().TextColor(ui.RGB(255, 255, 255)).SingleLine()
 			quality := strings.TrimSpace(a.playback.Quality)
 			if quality == "" {
 				quality = "飞牛影视"
 			}
-			ui.Text(c, quality).FontSize(10).TextColor(ui.RGBA(255, 255, 255, 0.72)).SingleLine()
+			ui.Box(c).Padding(2, 6).Radius(4).Background(ui.RGBA(255, 255, 255, 0.14)).Children(func() {
+				ui.Text(c, quality).FontSize(9).Bold().TextColor(ui.RGBA(255, 255, 255, 0.85)).SingleLine()
+			})
 		})
 	})
 }
@@ -314,10 +333,11 @@ func (a *appState) playerTransport(c *ui.Context) {
 	if !a.seekDragging {
 		a.seekSliderPosition = minFloat(maxPosition, maxFloat(0, a.playback.Position))
 	}
-	ui.Column(c).Absolute().Bottom(5).Left(18).Right(18).Padding(5, 12).Gap(2).Radius(11).
-		Background(ui.RGBA(18, 19, 21, 0.54)).Children(func() {
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, formatClock(a.seekDisplayPosition())).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.9))
+	ui.Column(c).Absolute().Bottom(12).Left(20).Right(20).Padding(8, 18, 10, 18).Gap(4).Radius(24).
+		Background(ui.RGBA(16, 18, 22, 0.68)).Border(1, ui.RGBA(255, 255, 255, 0.14)).Children(func() {
+		// 上层：Apple 细致时间轨与时间标签
+		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, formatClock(a.seekDisplayPosition())).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
 			slider := ui.Slider(c, &a.seekSliderPosition, 0, maxPosition).Grow(1)
 			pressed := slider.Pressed()
 			slider.Changed()
@@ -331,79 +351,127 @@ func (a *appState) playerTransport(c *ui.Context) {
 				a.player.SeekTo(a.seekSliderPosition)
 				a.markPlayerOverlayActivity()
 			}
-			ui.Text(c, formatClock(a.playback.Duration)).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.9))
+			ui.Text(c, formatClock(a.playback.Duration)).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
 		})
-		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-			playIcon := "play"
-			if !a.playback.Paused {
-				playIcon = "pause"
-			}
-			if playerIconButton(c, playIcon, "播放或暂停").Clicked() {
-				a.player.TogglePause()
-				a.playback.Paused = !a.playback.Paused
-				a.markPlayerOverlayActivity()
-			}
-			if playerTextButton(c, "−10").Clicked() {
-				a.player.Seek(-10)
-				a.markPlayerOverlayActivity()
-			}
-			if playerTextButton(c, "+10").Clicked() {
-				a.player.Seek(10)
-				a.markPlayerOverlayActivity()
-			}
-			ui.Spacer(c)
-			volumeIcon := "volume"
-			if a.playback.Muted || a.playback.Volume <= 0 {
-				volumeIcon = "muted"
-			}
-			if playerIconButton(c, volumeIcon, "静音").Clicked() {
-				a.player.ToggleMute()
-				a.playback.Muted = !a.playback.Muted
-				a.markPlayerOverlayActivity()
-			}
-			volume := ui.Slider(c, &a.playback.Volume, 0, 100).Width(92)
-			volumePressed := volume.Pressed()
-			if volume.Changed() {
-				a.player.SetVolume(a.playback.Volume)
-				a.markPlayerOverlayActivity()
-			}
-			if volumePressed {
-				a.volumeDragging = true
-				a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
-			} else if a.volumeDragging {
-				a.volumeDragging = false
-				a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
-			}
-			a.playerOptionButton(c, "speed")
-			a.playerOptionButton(c, "subtitle")
-			a.playerOptionButton(c, "audio")
-			fullscreenIcon := "fullscreen"
-			if a.window != nil && a.window.IsFullScreen() {
-				fullscreenIcon = "window"
-			}
-			if playerIconButton(c, fullscreenIcon, "切换全屏").Clicked() {
-				if a.window != nil {
-					a.window.ToggleFullScreen()
-					a.syncPlayerOverlay()
+		// 下层：Apple 经典居中核心对称控制区
+		ui.Row(c).AlignItems(ui.Center).Children(func() {
+			// 左侧：音量区域
+			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+				volumeIcon := "volume"
+				if a.playback.Muted || a.playback.Volume <= 0 {
+					volumeIcon = "muted"
 				}
-				a.markPlayerOverlayActivity()
-			}
+				if playerAppleIconButton(c, volumeIcon, "静音", 32, 17).Clicked() {
+					a.player.ToggleMute()
+					a.playback.Muted = !a.playback.Muted
+					a.markPlayerOverlayActivity()
+				}
+				volume := ui.Slider(c, &a.playback.Volume, 0, 100).Width(82)
+				volumePressed := volume.Pressed()
+				if volume.Changed() {
+					a.player.SetVolume(a.playback.Volume)
+					a.markPlayerOverlayActivity()
+				}
+				if volumePressed {
+					a.volumeDragging = true
+					a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
+				} else if a.volumeDragging {
+					a.volumeDragging = false
+					a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
+				}
+			})
+
+			ui.Spacer(c)
+
+			// 中央核心：-10s、大号圆形高光播放/暂停键、+10s
+			ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
+				if playerAppleIconButton(c, "seek-back-10", "快退 10 秒", 34, 20).Clicked() {
+					a.player.Seek(-10)
+					a.markPlayerOverlayActivity()
+				}
+
+				playIcon := "play"
+				if !a.playback.Paused {
+					playIcon = "pause"
+				}
+				playBtn := ui.Button(c, "").Size(42, 42).Padding(0).Radius(21).BorderWidth(0).
+					Background(ui.RGBA(255, 255, 255, 0.95)).TextColor(ui.RGB(18, 20, 24)).Tooltip("播放或暂停").
+					Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+				if playBtn.Hovered() {
+					playBtn.Background(ui.RGB(255, 255, 255))
+				}
+				playBtn.Children(func() {
+					iconSize := float32(18)
+					if playIcon == "pause" {
+						iconSize = 16
+					}
+					ui.Icon(c, playerOverlayIcons[playIcon]).Size(iconSize, iconSize)
+				})
+				if playBtn.Clicked() {
+					a.player.TogglePause()
+					a.playback.Paused = !a.playback.Paused
+					a.markPlayerOverlayActivity()
+				}
+
+				if playerAppleIconButton(c, "seek-forward-10", "快进 10 秒", 34, 20).Clicked() {
+					a.player.Seek(10)
+					a.markPlayerOverlayActivity()
+				}
+			})
+
+			ui.Spacer(c)
+
+			// 右侧功能胶囊：倍速、字幕、音轨、全屏
+			ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
+				a.playerOptionButton(c, "speed")
+				a.playerOptionButton(c, "subtitle")
+				a.playerOptionButton(c, "audio")
+				fullscreenIcon := "fullscreen"
+				if a.window != nil && a.window.IsFullScreen() {
+					fullscreenIcon = "window"
+				}
+				if playerAppleIconButton(c, fullscreenIcon, "切换全屏", 32, 17).Clicked() {
+					if a.window != nil {
+						a.window.ToggleFullScreen()
+						a.syncPlayerOverlay()
+					}
+					a.markPlayerOverlayActivity()
+				}
+			})
 		})
 	})
 }
 
 func (a *appState) playerOptionButton(c *ui.Context, option string) {
-	label, disabled := "", false
+	label, disabled, active := "", false, a.playerOverlayMenu == option
+	iconName := ""
 	switch option {
 	case "speed":
 		label = fmt.Sprintf("%.2g×", maxFloat(0.25, a.playback.Speed))
 	case "subtitle":
 		label, disabled = "字幕", len(a.playback.SubtitleTracks) == 0
+		iconName = "subtitles"
 	case "audio":
 		label, disabled = "音轨", len(a.playback.AudioTracks) == 0
+		iconName = "audio"
 	}
-	button := playerTextButton(c, label).Disabled(disabled)
-	if button.Clicked() {
+	btn := ui.Button(c, "").Padding(5, 9).Radius(11).Border(1, ui.RGBA(255, 255, 255, 0.12)).
+		Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.9)).Disabled(disabled).
+		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+	if active {
+		btn.Background(ui.RGBA(255, 255, 255, 0.22)).Border(1, ui.RGBA(255, 255, 255, 0.35))
+	} else if btn.Hovered() && !disabled {
+		btn.Background(ui.RGBA(255, 255, 255, 0.15))
+	}
+	btn.Children(func() {
+		ui.Row(c).Gap(4).AlignItems(ui.Center).Children(func() {
+			if iconName != "" {
+				ui.Icon(c, playerOverlayIcons[iconName]).Size(12, 12)
+			}
+			ui.Text(c, label).FontSize(11).Bold().TextColor(ui.RGBA(255, 255, 255, 0.92)).SingleLine()
+		})
+	})
+	if btn.Clicked() {
 		if a.playerOverlayMenu == option {
 			a.closePlayerOverlayMenu()
 		} else {
@@ -432,19 +500,19 @@ func (a *appState) playerPopover(c *ui.Context) {
 	} else if a.playerOverlayMenu == "subtitle" {
 		rows = len(a.playerMenuTracks) + 1
 	}
-	menuHeight := min(330, max(90, 34+rows*34))
-	ui.Column(c).Absolute().Bottom(94).Right(24).Width(320).Height(float32(menuHeight)).Padding(8).Gap(2).Radius(12).
-		Background(ui.RGBA(22, 23, 25, 0.78)).Children(func() {
+	menuHeight := min(330, max(90, 36+rows*34))
+	ui.Column(c).Absolute().Bottom(118).Right(20).Width(300).Height(float32(menuHeight)).Padding(8).Gap(3).Radius(18).
+		Background(ui.RGBA(20, 22, 26, 0.88)).Border(1, ui.RGBA(255, 255, 255, 0.16)).Children(func() {
 		var title string
 		switch a.playerOverlayMenu {
 		case "subtitle":
-			title = "字幕"
+			title = "字幕选择"
 		case "audio":
-			title = "音轨"
+			title = "音轨选择"
 		case "speed":
 			title = "播放速度"
 		}
-		ui.Text(c, title).Padding(7, 9).FontSize(11).Bold().TextColor(ui.RGBA(255, 255, 255, 0.68))
+		ui.Text(c, title).Padding(4, 9).FontSize(11).Bold().TextColor(ui.RGBA(255, 255, 255, 0.65))
 		ui.Scroll(c).Height(float32(menuHeight - 38)).Children(func() {
 			switch a.playerOverlayMenu {
 			case "subtitle":
@@ -463,7 +531,7 @@ func (a *appState) playerPopover(c *ui.Context) {
 			case "speed":
 				for _, speed := range []float64{0.5, 0.75, 1, 1.25, 1.5, 1.75, 2} {
 					label := fmt.Sprintf("%.2g×", speed)
-					if playerMenuItem(c, label, absFloat(a.playback.Speed-speed) < 0.01) {
+					if playerAppleMenuItem(c, label, absFloat(a.playback.Speed-speed) < 0.01) {
 						a.player.SetSpeed(speed)
 						a.playback.Speed = speed
 						a.closePlayerOverlayMenu()
@@ -475,7 +543,7 @@ func (a *appState) playerPopover(c *ui.Context) {
 }
 
 func (a *appState) playerTrackMenuItem(c *ui.Context, label string, trackID int, selected, subtitle bool) {
-	if playerMenuItem(c, label, selected) {
+	if playerAppleMenuItem(c, label, selected) {
 		kind := "audio"
 		if subtitle {
 			kind = "subtitle"
@@ -485,14 +553,37 @@ func (a *appState) playerTrackMenuItem(c *ui.Context, label string, trackID int,
 	}
 }
 
-func playerMenuItem(c *ui.Context, label string, selected bool) bool {
+func playerAppleMenuItem(c *ui.Context, label string, selected bool) bool {
+	btn := ui.Button(c, "").Padding(6, 10).Radius(9).BorderWidth(0).
+		Background(ui.RGBA(0, 0, 0, 0)).FillWidth().
+		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+	txtColor := ui.RGBA(255, 255, 255, 0.88)
+	if selected {
+		btn.Background(ui.RGBA(255, 255, 255, 0.16))
+		txtColor = ui.RGB(255, 255, 255)
+	} else if btn.Hovered() {
+		btn.Background(ui.RGBA(255, 255, 255, 0.10))
+	}
 	prefix := "   "
 	if selected {
 		prefix = "✓  "
 	}
-	return playerTextButton(c, prefix+label).FillWidth().Clicked()
+	btn.Children(func() {
+		ui.Text(c, prefix+label).FontSize(12).TextColor(txtColor).SingleLine()
+	})
+	return btn.Clicked()
 }
 
+func playerAppleIconButton(c *ui.Context, name, label string, size, iconSize float32) *ui.Element {
+	b := ui.Button(c, "").Size(size, size).Padding(0).Radius(size / 2).BorderWidth(0).
+		Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.9)).Tooltip(label).
+		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+	if b.Hovered() {
+		b.Background(ui.RGBA(255, 255, 255, 0.18))
+	}
+	b.Children(func() { ui.Icon(c, playerOverlayIcons[name]).Size(iconSize, iconSize) })
+	return b
+}
 func playerTrackLabel(track PlayerTrack) string {
 	parts := make([]string, 0, 3)
 	if language := strings.TrimSpace(track.Language); language != "" {

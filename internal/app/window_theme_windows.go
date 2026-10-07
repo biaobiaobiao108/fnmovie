@@ -12,6 +12,11 @@ import (
 var (
 	dwmThemeDLL        = syscall.NewLazyDLL("dwmapi.dll")
 	setWindowAttribute = dwmThemeDLL.NewProc("DwmSetWindowAttribute")
+
+	user32DLL           = syscall.NewLazyDLL("user32.dll")
+	setForegroundWindow = user32DLL.NewProc("SetForegroundWindow")
+	setActiveWindow     = user32DLL.NewProc("SetActiveWindow")
+	setFocus            = user32DLL.NewProc("SetFocus")
 )
 
 func setWindowTheme(window *mygo.Window) {
@@ -30,4 +35,23 @@ func setWindowTheme(window *mygo.Window) {
 	}{{35, &caption}, {36, &text}, {34, &border}} {
 		setWindowAttribute.Call(hwnd, attribute.id, uintptr(unsafe.Pointer(attribute.value)), unsafe.Sizeof(*attribute.value))
 	}
+}
+
+func restoreWindowFocus(window *mygo.Window) {
+	if window == nil {
+		return
+	}
+	hwnd := window.NativeHandle()
+	if hwnd != 0 {
+		if setForegroundWindow.Find() == nil {
+			setForegroundWindow.Call(hwnd)
+		}
+		if setActiveWindow.Find() == nil {
+			setActiveWindow.Call(hwnd)
+		}
+		if setFocus.Find() == nil {
+			setFocus.Call(hwnd)
+		}
+	}
+	window.Focus()
 }

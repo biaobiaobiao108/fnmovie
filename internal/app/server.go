@@ -504,8 +504,9 @@ func (s *Server) People(itemID string) ([]CastMember, error) {
 	if strings.TrimSpace(itemID) == "" {
 		return nil, fmt.Errorf("媒体缺少标识，无法读取演职员")
 	}
+	body := map[string]any{"guid": itemID, "page": 1, "page_size": 200}
 	var response any
-	if err := s.request("GET", "v1", "person/list/"+url.PathEscape(itemID), nil, &response, s.tokenValue()); err != nil {
+	if err := s.request("POST", "v1", "person/list/"+url.PathEscape(itemID), body, &response, s.tokenValue()); err != nil {
 		return nil, err
 	}
 	data := unwrapData(response)

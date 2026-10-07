@@ -225,7 +225,7 @@ func TestSeriesSeasonsUsesSeriesGuidAndPreservesSeasonNodes(t *testing.T) {
 
 func TestPeopleLoadsCastAndProfilePaths(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/person/list/movie-1" {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/person/list/movie-1" {
 			t.Errorf("unexpected cast request %s %s", r.Method, r.URL.Path)
 			http.NotFound(w, r)
 			return

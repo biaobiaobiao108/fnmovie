@@ -5,6 +5,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"runtime"
 	"strconv"
@@ -206,4 +207,34 @@ func TestLiveNASCatalog(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestLiveNASPeople(t *testing.T) {
+	if os.Getenv("FNMOVIE_LIVE_TEST") != "1" {
+		t.Skip("set FNMOVIE_LIVE_TEST=1 to run the NAS check")
+	}
+	base, username, password := os.Getenv("FNMOVIE_SERVER"), os.Getenv("FNMOVIE_USER"), os.Getenv("FNMOVIE_PASSWORD")
+	server := NewServer(base, "")
+	if _, err := server.Login(username, password); err != nil {
+		t.Fatalf("NAS login failed: %v", err)
+	}
+	libraries, err := server.Libraries()
+	if err != nil || len(libraries) == 0 {
+		t.Fatalf("NAS library list failed: %v", err)
+	}
+	var sample MediaItem
+	for _, lib := range libraries {
+		items, _, err := server.LibraryPageContext(t.Context(), lib.ID, "", 1, 10)
+		if err == nil && len(items) > 0 {
+			sample = items[0]
+			break
+		}
+	}
+	t.Logf("Testing with sample media item: ID=%s Title=%s Raw=%+v", sample.ID, sample.Title, sample.Raw)
+
+	// Test POST person/list with body
+	body := map[string]any{"guid": sample.ID, "page": 1, "page_size": 200}
+	var postResp any
+	postErr := server.request("POST", "v1", "person/list/"+url.PathEscape(sample.ID), body, &postResp, server.tokenValue())
+	t.Logf("POST person/list/%s (with body): err=%v, resp=%+v", sample.ID, postErr, postResp)
 }

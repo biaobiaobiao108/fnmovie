@@ -7,6 +7,37 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestSidebarAlignment(t *testing.T) {
+	app := &appState{
+		section: "movies",
+		libraries: []MediaLibrary{
+			{ID: "lib1", Name: "电影库"},
+			{ID: "lib2", Name: "动漫"},
+			{ID: "lib3", Name: "美剧精选"},
+		},
+		catalogs: map[string]*CatalogState{},
+	}
+
+	tester := ui.NewTester(func(c *ui.Context) {
+		app.view(c)
+	}, 1280, 800)
+
+	items := []string{"电影", "电视节目", "我的收藏", "观看记录", "电影库", "动漫", "美剧精选"}
+	var targetX float32 = -1
+	for _, name := range items {
+		rect, ok := tester.Find(name)
+		if !ok {
+			t.Fatalf("Sidebar item %q not found", name)
+		}
+		t.Logf("Sidebar item %q: X=%.1f", name, rect.X)
+		if targetX < 0 {
+			targetX = rect.X
+		} else if rect.X != targetX {
+			t.Errorf("Sidebar item %q X=%.1f mismatch targetX=%.1f (not aligned!)", name, rect.X, targetX)
+		}
+	}
+}
+
 func TestMovieDetailViewLayout(t *testing.T) {
 	movie := MediaItem{
 		ID:       "movie-1",
@@ -191,5 +222,77 @@ func TestDetailBackButton(t *testing.T) {
 
 	if app.selected != nil {
 		t.Fatalf("expected selected to be nil after clicking back button")
+	}
+}
+
+func TestPlaybackLoadingFeedback(t *testing.T) {
+	movie := MediaItem{
+		ID:    "m1",
+		Title: "测试电影",
+	}
+	app := &appState{
+		section:              "library",
+		libraryID:            "movies",
+		selected:             &movie,
+		catalogs:             map[string]*CatalogState{},
+		playbackLoading:      true,
+		playbackLoadingID:    "m1",
+		playbackLoadingTitle: "测试电影",
+	}
+
+	tester := ui.NewTester(func(c *ui.Context) {
+		app.view(c)
+	}, 1280, 800)
+
+	// Check loading overlay text
+	if _, ok := tester.Find("正在准备播放"); !ok {
+		t.Fatalf("expected '正在准备播放' in loading overlay")
+	}
+	if _, ok := tester.Find("正在连接服务器并解析媒体流，请稍候…"); !ok {
+		t.Fatalf("expected hint text in loading overlay")
+	}
+	if _, ok := tester.Find("取消"); !ok {
+		t.Fatalf("expected cancel button in loading overlay")
+	}
+
+	// Cancel loading
+	app.cancelPlaybackLoading()
+	if app.playbackLoading {
+		t.Fatalf("expected playbackLoading to be false after cancel")
+	}
+}
+
+func TestPlayerOverlayViews(t *testing.T) {
+	app := &appState{
+		playback: PlaybackState{
+			Active:   true,
+			Title:    "流浪地球 2",
+			Duration: 7200,
+			Position: 1200,
+			Volume:   80,
+			Quality:  "4K HDR",
+		},
+	}
+
+	headerTester := ui.NewTester(func(c *ui.Context) {
+		app.playerHeaderView(c)
+	}, 1280, 64)
+
+	if _, ok := headerTester.Find("流浪地球 2"); !ok {
+		t.Fatalf("player header title missing")
+	}
+	if _, ok := headerTester.Find("4K HDR"); !ok {
+		t.Fatalf("player header quality badge missing")
+	}
+
+	transportTester := ui.NewTester(func(c *ui.Context) {
+		app.playerTransport(c)
+	}, 1280, 98)
+
+	if _, ok := transportTester.Find("00:20:00"); !ok {
+		t.Fatalf("current position timestamp missing")
+	}
+	if _, ok := transportTester.Find("02:00:00"); !ok {
+		t.Fatalf("duration timestamp missing")
 	}
 }
