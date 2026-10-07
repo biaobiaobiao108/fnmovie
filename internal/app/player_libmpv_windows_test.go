@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package app
 
 import (
 	"os"
@@ -9,7 +9,7 @@ import (
 )
 
 func TestBundledLibMpvInitializes(t *testing.T) {
-	path := filepath.Join("resources", "windows-amd64", "player", "libmpv-2.dll")
+	path := filepath.Join("..", "..", "resources", "windows-amd64", "player", "libmpv-2.dll")
 	if _, err := os.Stat(path); err != nil {
 		t.Skip("libmpv LFS asset is not present in this checkout")
 	}

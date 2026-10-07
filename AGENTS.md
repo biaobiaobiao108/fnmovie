@@ -6,7 +6,7 @@ FnMovie 是 Windows x64 飞牛影视桌面客户端。界面和应用逻辑使�
 
 ## 开发规范
 
-- UI 状态保留在 Go 应用层；飞牛接口统一放在 `server.go`，播放器实现放在 `player.go` / 平台文件中。
+- UI 状态保留在 Go 应用层；应用实现和测试位于 `internal/app`，飞牛接口统一放在 `internal/app/server.go`，播放器实现放在 `internal/app/player.go` / 平台文件中。根目录 `main.go` 只负责启动应用。
 - 影视库媒体请求必须以 `ancestor_guid` 传服务器库 ID，并保留按库隔离；不要退回全库查询来掩盖 API 错误。
 - 不在源码、测试默认值或提交中保存 NAS 密码、会话令牌和个人配置。真实 NAS 测试通过环境变量提供凭据。
 - 媒体卡片列表使用 `ui.GridView` 虚拟化。派生列表只在目录数据、导航范围、搜索或筛选条件变化时重建；海报统一经过 `PosterLoader`，最多 4 个 worker、64 个待处理任务和 256 MiB LRU。不要在卡片构建函数中启动无界 goroutine，也不要恢复逐卡片进入动画。不要给 UI 刷新率硬编码 30/60 FPS 上限；滚动帧交给 MyGo/Windows 显示刷新调度。

@@ -11,6 +11,12 @@
 - 播放页由 MyGo 原生控件覆盖 `MyGoSurface` 中的 libmpv 视频画面，顶部显示影片信息和返回按钮，底部控件渐入渐出，支持进度、音量、倍速、字幕/音轨切换和全屏；同步播放进度并在退出时清理 libmpv 与本地代理。
 - Windows 凭据管理器保存密码和会话令牌；服务器地址与用户名保存在 `%APPDATA%\FnMovie\settings.json`。
 
+## 代码结构
+
+- `main.go` 是精简启动入口，应用实现与 Go 测试集中在 `internal/app`。
+- `internal/app/app.go` 管理 MyGo 原生界面和应用状态；`server.go` 管理飞牛接口；`player*.go` 管理 libmpv 与播放控件；`config.go`、`credentials_*.go` 管理设置和凭据；缓存、媒体视图和滚动各自放在对应文件中。
+- `resources` 保存 MyGo 随包资源及 Windows 播放依赖；应用内嵌图标源文件位于 `internal/app/assets`。
+
 ## 开发与构建
 
 要求 Go 1.27.1 或更新版本。应用依赖通过 Go modules 获取，MyGo CLI 作为 Go 工具依赖提供。
@@ -38,7 +44,7 @@ $env:FNMOVIE_SERVER='http://your-nas:5666/v'
 $env:FNMOVIE_USER='your-user'
 $env:FNMOVIE_PASSWORD='your-password'
 $env:FNMOVIE_PARENT_HWND=[string](Get-Process FnMovie).MainWindowHandle
-go test -run TestLiveNASPlayback -v -count=1
+go test ./internal/app -run TestLiveNASPlayback -v -count=1
 ```
 
 真实 NAS 测试会短暂更新当前媒体的观看进度并恢复原进度。测试账户只能看到服务器授予该账户的影视库。
