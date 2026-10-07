@@ -87,6 +87,10 @@ func (p *playerProcess) start(binary, streamURL string, parent uintptr, resumeAt
 	}
 	args := []string{
 		"--force-window=yes", "--no-border", "--osc=no", "--osd-level=1", "--cursor-autohide=2600", "--keepaspect=yes", "--input-default-bindings=yes", "--input-cursor=yes",
+		// Prefer Windows D3D11 hardware decoding when the GPU and codec support
+		// it. mpv keeps its software decoder as a fallback when initialization
+		// fails, which is safer than forcing a specific decoder.
+		"--hwdec=auto-safe", "--gpu-context=d3d11",
 		"--script=" + oscScript,
 		"--script-opts=osc-layout=floating,osc-icon_style=fluent,osc-floatingalpha=92,osc-background_color=#1C1C1E,osc-timecode_color=#F5F5F7,osc-buttons_color=#F5F5F7,osc-small_buttonsL_color=#D1D1D6,osc-small_buttonsR_color=#D1D1D6,osc-title_color=#F5F5F7,osc-visibility=auto,osc-deadzonesize=0,osc-hidetimeout=2500,osc-fadeduration=220,osc-fadein=yes,osc-custom_button_1_content=返回,osc-custom_button_1_mbtn_left_command=quit",
 		"--no-config", "--config-dir=" + mpvConfigDir,

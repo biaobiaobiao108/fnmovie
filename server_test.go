@@ -407,6 +407,25 @@ func TestExternalPosterDoesNotReceiveServerCredentials(t *testing.T) {
 	}
 }
 
+func TestNormalizeItemFormatsRatingToOneDecimal(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{input: "7.938754787572456", want: "7.9"},
+		{input: "5.285037066679592", want: "5.3"},
+		{input: "8", want: "8.0"},
+		{input: "NR", want: "NR"},
+		{input: "", want: ""},
+	}
+	for _, test := range cases {
+		item := normalizeItem(map[string]any{"guid": "item", "title": "Film", "rating": test.input})
+		if item.Rating != test.want {
+			t.Errorf("normalizeItem rating %q = %q, want %q", test.input, item.Rating, test.want)
+		}
+	}
+}
+
 func writeJSON(t *testing.T, w http.ResponseWriter, body string) {
 	t.Helper()
 	w.Header().Set("Content-Type", "application/json")

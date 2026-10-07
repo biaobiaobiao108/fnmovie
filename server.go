@@ -654,13 +654,25 @@ func normalizeItem(object map[string]any) MediaItem {
 	if len(item.Year) >= 4 {
 		item.Year = item.Year[:4]
 	}
-	item.Rating = firstString(object, "rating", "score", "vote_average")
+	item.Rating = formatRating(firstString(object, "rating", "score", "vote_average"))
 	item.Overview = firstString(object, "overview", "description", "summary", "plot")
 	item.Poster = firstString(object, "poster", "posters", "poster_url", "posterUrl", "image", "image_url", "cover")
 	item.Favorite = anyBool(object["favorite"]) || anyBool(object["is_favorite"]) || anyBool(object["isFavorite"])
 	item.Watched = anyBool(object["is_watched"]) || anyBool(object["watched"])
 	item.AddedAt = firstString(object, "create_time", "created_at", "ts", "release_date")
 	return item
+}
+
+func formatRating(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	rating, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		return value
+	}
+	return strconv.FormatFloat(rating, 'f', 1, 64)
 }
 
 func findObjects(value any) []map[string]any {

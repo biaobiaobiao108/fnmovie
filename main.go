@@ -325,7 +325,7 @@ func (a *appState) libraryView(c *ui.Context) {
 	if state != nil && !state.Exhausted {
 		gridCount++
 	}
-	ui.GridView(c, &a.grid, gridCount, 168, 326, func(i int) {
+	grid := ui.GridView(c, &a.grid, gridCount, 168, 326, func(i int) {
 		if i >= len(items) {
 			if state != nil && !state.Loading && !state.Exhausted && !state.PageAutoRequested && state.Err == "" {
 				a.loadNextCatalogPage(false)
@@ -371,6 +371,16 @@ func (a *appState) libraryView(c *ui.Context) {
 		if card.Clicked() {
 			a.openDetail(item)
 		}
+	})
+	background := t.Background
+	grid.DrawOver(func(p *ui.Painter, rect ui.Rect) {
+		const fadeHeight = 28
+		p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: fadeHeight}, ui.LinearGradient{
+			From: background, To: background.Alpha(0), Angle: 180,
+		}, 0)
+		p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y + rect.H - fadeHeight, W: rect.W, H: fadeHeight}, ui.LinearGradient{
+			From: background.Alpha(0), To: background, Angle: 180,
+		}, 0)
 	})
 }
 
