@@ -1,4 +1,4 @@
-name: Release Windows x64 and macOS arm64
+name: Release Windows x64
 
 on:
   push:
@@ -10,20 +10,8 @@ permissions:
 
 jobs:
   build:
-    name: Build ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows amd64
-            os: windows-latest
-            platform: windows/amd64
-            artifact: fnmovie-windows-amd64
-          - name: macOS arm64
-            os: macos-latest
-            platform: darwin/arm64
-            artifact: fnmovie-macos-arm64
+    name: Build Windows amd64
+    runs-on: windows-latest
     steps:
       - name: Check out source and Git LFS assets
         uses: actions/checkout@v7
@@ -37,10 +25,9 @@ jobs:
           cache: true
 
       - name: Build application
-        run: go tool mygo build -platform ${{ matrix.platform }} -o out/fnmovie-20261007
+        run: go tool mygo build -platform windows/amd64 -o out/fnmovie-20261007
 
       - name: Prepare Windows release assets
-        if: matrix.platform == 'windows/amd64'
         shell: pwsh
         run: |
           $config = Get-Content mygo.json -Raw | ConvertFrom-Json
@@ -69,37 +56,13 @@ jobs:
             (Join-Path $releaseDir 'player')
           ) -DestinationPath $portableZip -CompressionLevel Optimal
 
-      - name: Prepare macOS release assets
-        if: matrix.platform == 'darwin/arm64'
-        shell: bash
-        run: |
-          version="$(python3 -c 'import json; print(json.load(open("mygo.json"))["version"])')"
-          test "$GITHUB_REF_NAME" = "v$version"
-          app="out/fnmovie-20261007/darwin-arm64/FnMovie.app"
-          dmg="out/fnmovie-20261007/darwin-arm64/FnMovie $version.dmg"
-          test -d "$app"
-          test -f "$dmg"
-          ditto -c -k --sequesterRsrc --keepParent "$app" "out/fnmovie-20261007/darwin-arm64/FnMovie-$version-darwin-arm64-portable.zip"
-
       - name: Upload Windows build
-        if: matrix.platform == 'windows/amd64'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
+          name: fnmovie-windows-amd64
           path: |
             out/fnmovie-20261007/windows-amd64/FnMovie Setup *.exe
             out/fnmovie-20261007/windows-amd64/FnMovie-*-windows-amd64-portable.zip
-          if-no-files-found: error
-          retention-days: 1
-
-      - name: Upload macOS build
-        if: matrix.platform == 'darwin/arm64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.artifact }}
-          path: |
-            out/fnmovie-20261007/darwin-arm64/*.dmg
-            out/fnmovie-20261007/darwin-arm64/FnMovie-*-darwin-arm64-portable.zip
           if-no-files-found: error
           retention-days: 1
 
@@ -108,7 +71,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: Download Windows and macOS builds
+      - name: Download Windows build
         uses: actions/download-artifact@v4
         with:
           path: release-assets
