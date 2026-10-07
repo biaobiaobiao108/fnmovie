@@ -98,16 +98,21 @@ func (a *appState) playerOverlayContentHeight() int {
 	if a.playerOverlayMenu == "" {
 		return playerOverlayControlHeight
 	}
-	rows := 6
+	rows := 7
 	switch a.playerOverlayMenu {
 	case "audio":
-		rows = len(a.playback.AudioTracks) + 1
+		rows = len(a.playerMenuTracks)
 	case "subtitle":
-		rows = len(a.playback.SubtitleTracks) + 2
+		rows = len(a.playerMenuTracks) + 1
 	case "speed":
-		rows = 8
+		rows = 7
 	}
-	return min(640, max(250, 116+rows*29))
+	menuHeight := min(330, max(90, 34+rows*34))
+	height := playerOverlayControlHeight + 94 + menuHeight
+	if a.window != nil {
+		height = min(height, a.window.ContentBounds().Height)
+	}
+	return height
 }
 
 func (a *appState) startPlayerOverlayMonitor() {
@@ -270,16 +275,26 @@ func (a *appState) setPlayerOverlaySeeking(seeking bool) {
 }
 
 func (a *appState) playerOverlayView(c *ui.Context) {
-	c.SetTheme(ui.DarkTheme())
+	playerOverlayTheme := ui.DarkTheme()
+	playerOverlayTheme.Background = ui.Transparent
+	playerOverlayTheme.Surface = ui.Transparent
+	playerOverlayTheme.SurfaceHover = ui.RGBA(255, 255, 255, 0.10)
+	playerOverlayTheme.SurfacePressed = ui.RGBA(255, 255, 255, 0.16)
+	c.SetTheme(playerOverlayTheme)
 	a.playerShortcuts(c)
 	a.playerTransport(c)
 	a.playerPopover(c)
 }
 
 func (a *appState) playerHeaderView(c *ui.Context) {
-	c.SetTheme(ui.DarkTheme())
+	playerOverlayTheme := ui.DarkTheme()
+	playerOverlayTheme.Background = ui.Transparent
+	playerOverlayTheme.Surface = ui.Transparent
+	playerOverlayTheme.SurfaceHover = ui.RGBA(255, 255, 255, 0.10)
+	playerOverlayTheme.SurfacePressed = ui.RGBA(255, 255, 255, 0.16)
+	c.SetTheme(playerOverlayTheme)
 	ui.Row(c).Absolute().Top(6).Left(18).Gap(12).AlignItems(ui.Center).Padding(8, 12).Radius(11).
-		Background(ui.RGBA(18, 19, 21, 0.72)).Children(func() {
+		Background(ui.RGBA(18, 19, 21, 0.54)).Children(func() {
 		if playerIconButton(c, "back", "返回影片库").Clicked() {
 			a.stopPlayback()
 		}
@@ -300,7 +315,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 		a.seekSliderPosition = minFloat(maxPosition, maxFloat(0, a.playback.Position))
 	}
 	ui.Column(c).Absolute().Bottom(5).Left(18).Right(18).Padding(5, 12).Gap(2).Radius(11).
-		Background(ui.RGBA(18, 19, 21, 0.72)).Children(func() {
+		Background(ui.RGBA(18, 19, 21, 0.54)).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, formatClock(a.seekDisplayPosition())).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.9))
 			slider := ui.Slider(c, &a.seekSliderPosition, 0, maxPosition).Grow(1)
@@ -393,6 +408,13 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 			a.closePlayerOverlayMenu()
 		} else {
 			a.playerOverlayMenu = option
+			if option == "subtitle" {
+				a.playerMenuTracks = append(a.playerMenuTracks[:0], a.playback.SubtitleTracks...)
+			} else if option == "audio" {
+				a.playerMenuTracks = append(a.playerMenuTracks[:0], a.playback.AudioTracks...)
+			} else {
+				a.playerMenuTracks = nil
+			}
 			a.setPlayerOverlayPinned(true)
 		}
 		a.syncPlayerOverlay()
@@ -404,31 +426,51 @@ func (a *appState) playerPopover(c *ui.Context) {
 	if a.playerOverlayMenu == "" {
 		return
 	}
-	ui.Column(c).Absolute().Bottom(94).Right(25).Width(280).Padding(8).Gap(2).Radius(12).
-		Background(ui.RGBA(18, 19, 21, 0.96)).Children(func() {
+	rows := 7
+	if a.playerOverlayMenu == "audio" {
+		rows = len(a.playerMenuTracks)
+	} else if a.playerOverlayMenu == "subtitle" {
+		rows = len(a.playerMenuTracks) + 1
+	}
+	menuHeight := min(330, max(90, 34+rows*34))
+	ui.Column(c).Absolute().Bottom(94).Right(24).Width(320).Height(float32(menuHeight)).Padding(8).Gap(2).Radius(12).
+		Background(ui.RGBA(22, 23, 25, 0.78)).Children(func() {
+		var title string
 		switch a.playerOverlayMenu {
 		case "subtitle":
-			ui.Text(c, "字幕").Padding(7, 9).FontSize(10).Bold().TextColor(ui.RGBA(255, 255, 255, 0.64))
-			a.playerTrackMenuItem(c, "关闭字幕", 0, true, false)
-			for _, track := range a.playback.SubtitleTracks {
-				a.playerTrackMenuItem(c, playerTrackLabel(track), track.ID, track.Selected, true)
-			}
+			title = "字幕"
 		case "audio":
-			ui.Text(c, "音轨").Padding(7, 9).FontSize(10).Bold().TextColor(ui.RGBA(255, 255, 255, 0.64))
-			for _, track := range a.playback.AudioTracks {
-				a.playerTrackMenuItem(c, playerTrackLabel(track), track.ID, track.Selected, false)
-			}
+			title = "音轨"
 		case "speed":
-			ui.Text(c, "播放速度").Padding(7, 9).FontSize(10).Bold().TextColor(ui.RGBA(255, 255, 255, 0.64))
-			for _, speed := range []float64{0.5, 0.75, 1, 1.25, 1.5, 1.75, 2} {
-				label := fmt.Sprintf("%.2g×", speed)
-				if playerMenuItem(c, label, absFloat(a.playback.Speed-speed) < 0.01) {
-					a.player.SetSpeed(speed)
-					a.playback.Speed = speed
-					a.closePlayerOverlayMenu()
+			title = "播放速度"
+		}
+		ui.Text(c, title).Padding(7, 9).FontSize(11).Bold().TextColor(ui.RGBA(255, 255, 255, 0.68))
+		ui.Scroll(c).Height(float32(menuHeight - 38)).Children(func() {
+			switch a.playerOverlayMenu {
+			case "subtitle":
+				selected := true
+				for _, track := range a.playerMenuTracks {
+					selected = selected && !track.Selected
+				}
+				a.playerTrackMenuItem(c, "关闭字幕", 0, selected, true)
+				for _, track := range a.playerMenuTracks {
+					a.playerTrackMenuItem(c, playerTrackLabel(track), track.ID, track.Selected, true)
+				}
+			case "audio":
+				for _, track := range a.playerMenuTracks {
+					a.playerTrackMenuItem(c, playerTrackLabel(track), track.ID, track.Selected, false)
+				}
+			case "speed":
+				for _, speed := range []float64{0.5, 0.75, 1, 1.25, 1.5, 1.75, 2} {
+					label := fmt.Sprintf("%.2g×", speed)
+					if playerMenuItem(c, label, absFloat(a.playback.Speed-speed) < 0.01) {
+						a.player.SetSpeed(speed)
+						a.playback.Speed = speed
+						a.closePlayerOverlayMenu()
+					}
 				}
 			}
-		}
+		})
 	})
 }
 
@@ -452,13 +494,15 @@ func playerMenuItem(c *ui.Context, label string, selected bool) bool {
 }
 
 func playerTrackLabel(track PlayerTrack) string {
-	label := strings.TrimSpace(track.Title)
-	if label == "" {
-		label = strings.TrimSpace(track.Language)
+	parts := make([]string, 0, 3)
+	if language := strings.TrimSpace(track.Language); language != "" {
+		parts = append(parts, language)
 	}
-	if label == "" {
-		label = fmt.Sprintf("轨道 %d", track.ID)
+	if title := strings.TrimSpace(track.Title); title != "" && title != strings.TrimSpace(track.Language) {
+		parts = append(parts, title)
 	}
+	parts = append(parts, fmt.Sprintf("轨道 %d", track.ID))
+	label := strings.Join(parts, " · ")
 	if track.External {
 		label += " · 外挂"
 	}
@@ -467,6 +511,7 @@ func playerTrackLabel(track PlayerTrack) string {
 
 func (a *appState) closePlayerOverlayMenu() {
 	a.playerOverlayMenu = ""
+	a.playerMenuTracks = nil
 	a.syncPlayerOverlay()
 	a.setPlayerOverlayPinned(false)
 	a.markPlayerOverlayActivity()

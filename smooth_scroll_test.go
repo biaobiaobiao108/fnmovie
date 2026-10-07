@@ -6,27 +6,50 @@ import (
 	"time"
 )
 
-func TestSmoothScrollInterpolatesAndFinishesAtTarget(t *testing.T) {
+func TestSmoothScrollAccumulatesWheelInputWithoutRestartingMotion(t *testing.T) {
 	start := time.Unix(100, 0)
 	var scroll smoothScroll
-	scroll.Retarget(0, 120, start, catalogScrollDuration)
-	first, active := scroll.Position(start.Add(catalogScrollDuration / 2))
-	if !active || first <= 0 || first >= 120 {
-		t.Fatalf("mid-animation position=%v active=%v", first, active)
+	scroll.Add(0, 100, 500, start)
+	first, active := scroll.Advance(start.Add(35 * time.Millisecond))
+	if !active || first <= 0 || first >= 100 {
+		t.Fatalf("first spring position=%v active=%v", first, active)
 	}
-	last, active := scroll.Position(start.Add(catalogScrollDuration))
-	if active || math.Abs(float64(last-120)) > 0.01 {
-		t.Fatalf("finished position=%v active=%v", last, active)
+	scroll.Add(first, 100, 500, start.Add(35*time.Millisecond))
+	if scroll.Target != 200 {
+		t.Fatalf("accumulated target=%v, want 200", scroll.Target)
+	}
+	var last float32
+	for step := 1; step <= 60; step++ {
+		last, active = scroll.Advance(start.Add(time.Duration(step) * 16 * time.Millisecond))
+		if !active {
+			break
+		}
+	}
+	if active || math.Abs(float64(last-200)) > 0.01 {
+		t.Fatalf("settled position=%v active=%v", last, active)
 	}
 }
 
-func TestSmoothScrollRetargetStartsFromCurrentPosition(t *testing.T) {
+func TestSmoothScrollClampsAndCanReverse(t *testing.T) {
 	start := time.Unix(200, 0)
 	var scroll smoothScroll
-	scroll.Retarget(10, 110, start, catalogScrollDuration)
-	current, _ := scroll.Position(start.Add(50 * time.Millisecond))
-	scroll.Retarget(current, 210, start.Add(50*time.Millisecond), catalogScrollDuration)
-	if scroll.From != current || scroll.To != 210 {
-		t.Fatalf("retarget state = %#v", scroll)
+	scroll.Add(0, 900, 240, start)
+	if scroll.Target != 240 {
+		t.Fatalf("target=%v, want max 240", scroll.Target)
+	}
+	position, _ := scroll.Advance(start.Add(20 * time.Millisecond))
+	scroll.Add(position, -80, 240, start.Add(20*time.Millisecond))
+	if scroll.Target != 160 {
+		t.Fatalf("reversed target=%v, want 160", scroll.Target)
+	}
+	var active bool
+	for step := 1; step <= 60; step++ {
+		position, active = scroll.Advance(start.Add(20*time.Millisecond + time.Duration(step)*16*time.Millisecond))
+		if !active {
+			break
+		}
+	}
+	if math.Abs(float64(position-160)) > 0.01 {
+		t.Fatalf("reversed motion settled at %v, want 160", position)
 	}
 }

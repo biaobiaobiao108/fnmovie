@@ -89,3 +89,18 @@ func TestSeriesEpisodesWithoutNumberStillGroupByShow(t *testing.T) {
 		t.Fatalf("episodes with missing numbering should remain grouped: %+v", got)
 	}
 }
+
+func TestNormalizeItemRecognizesTVCategoryWhenTypeIsGeneric(t *testing.T) {
+	item := normalizeItem(map[string]any{"guid": "show", "title": "剧集", "type": "folder", "category": "TV"})
+	if item.Kind != "tv" || !item.IsSeries {
+		t.Fatalf("normalized show = %+v", item)
+	}
+}
+
+func TestNormalizeItemInfersSeasonAndEpisodeFromParentIDs(t *testing.T) {
+	season := normalizeItem(map[string]any{"guid": "season", "title": "第 1 季", "season_guid": "season"})
+	episode := normalizeItem(map[string]any{"guid": "episode", "title": "第 1 集", "tv_guid": "show"})
+	if season.Kind != "season" || episode.Kind != "episode" {
+		t.Fatalf("inferred hierarchy kinds season=%q episode=%q", season.Kind, episode.Kind)
+	}
+}

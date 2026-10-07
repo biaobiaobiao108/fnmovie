@@ -775,28 +775,13 @@ func normalizeItem(object map[string]any) MediaItem {
 	item.ID = firstString(object, "guid", "id", "media_id", "mediaId")
 	item.MediaID = firstString(object, "media_guid", "mediaGuid")
 	item.Title = firstString(object, "title", "name", "original_title", "display_name", "file_name")
-	item.Kind = strings.ToLower(strings.TrimSpace(firstString(object, "type", "media_type", "mediaType", "category")))
+	item.Kind = normalizeMediaKind(object)
 	item.SeriesTitle = firstString(object, "tv_title", "tvTitle", "series_title", "seriesTitle", "tv_name", "show_title", "showTitle")
 	item.SeriesID = firstString(object, "tv_guid", "tvGuid", "series_guid", "seriesGuid", "tv_id", "tvId", "series_id", "seriesId")
 	item.SeriesParentID = firstString(object, "parent_guid", "parentGuid")
 	item.SeasonNumber = parseMediaNumber(firstString(object, "season_number", "seasonNumber"))
 	item.EpisodeNumber = parseMediaNumber(firstString(object, "episode_number", "episodeNumber"))
-	switch {
-	case strings.Contains(item.Kind, "episode"):
-		item.Kind = "episode"
-	case strings.Contains(item.Kind, "season"):
-		item.Kind = "season"
-	case strings.Contains(item.Kind, "tv") || strings.Contains(item.Kind, "series") || strings.Contains(item.Kind, "show"):
-		item.Kind, item.IsSeries = "tv", true
-	case strings.Contains(item.Kind, "movie") || item.Kind == "video" || item.Kind == "film":
-		item.Kind = "movie"
-	case firstString(object, "tv_title", "series_title", "show_title") != "" || valueAt(object, "episode_number") != nil:
-		item.Kind = "episode"
-	case valueAt(object, "season_number") != nil:
-		item.Kind = "season"
-	default:
-		item.Kind = "movie"
-	}
+	item.IsSeries = item.Kind == "tv"
 	item.Year = firstString(object, "year", "release_date", "air_date")
 	if len(item.Year) >= 4 {
 		item.Year = item.Year[:4]
@@ -808,6 +793,44 @@ func normalizeItem(object map[string]any) MediaItem {
 	item.Watched = anyBool(object["is_watched"]) || anyBool(object["watched"])
 	item.AddedAt = firstString(object, "create_time", "created_at", "ts", "release_date")
 	return item
+}
+
+// normalizeMediaKind handles fnOS versions that expose the same hierarchy
+// classification in different fields. Prefer a recognized hierarchy type
+// over generic values such as "folder" or "video".
+func normalizeMediaKind(object map[string]any) string {
+	types := []string{
+		firstString(object, "type"), firstString(object, "media_type", "mediaType"),
+		firstString(object, "category"), firstString(object, "item_type", "itemType"),
+	}
+	for _, value := range types {
+		kind := strings.ToLower(strings.TrimSpace(value))
+		switch {
+		case strings.Contains(kind, "episode"):
+			return "episode"
+		case strings.Contains(kind, "season"):
+			return "season"
+		case strings.Contains(kind, "tv") || strings.Contains(kind, "series") || strings.Contains(kind, "show"):
+			return "tv"
+		case strings.Contains(kind, "movie") || kind == "film":
+			return "movie"
+		}
+	}
+	if firstString(object, "season_guid", "seasonGuid", "season_id", "seasonId") != "" ||
+		valueAt(object, "season_number") != nil {
+		return "season"
+	}
+	if firstString(object, "tv_guid", "tvGuid", "series_guid", "seriesGuid", "tv_id", "tvId", "series_id", "seriesId",
+		"tv_title", "series_title", "show_title") != "" || valueAt(object, "episode_number") != nil {
+		return "episode"
+	}
+	for _, value := range types {
+		kind := strings.ToLower(strings.TrimSpace(value))
+		if kind == "video" || kind == "movie" || kind == "film" {
+			return "movie"
+		}
+	}
+	return "movie"
 }
 
 func firstImagePath(object map[string]any, keys ...string) string {

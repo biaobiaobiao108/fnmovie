@@ -30,3 +30,33 @@ func TestCatalogCachePersistsDetailAndCastByServer(t *testing.T) {
 		t.Fatal("detail cache leaked across server URLs")
 	}
 }
+
+func TestCatalogCacheMigrationDropsOldHierarchyPagesButKeepsLibraries(t *testing.T) {
+	disk := catalogDisk{
+		Libraries: map[string][]MediaLibrary{"server": {{ID: "library", Name: "剧集"}}},
+		Pages:     map[string]CatalogPage{"server:library": {Items: []MediaItem{{ID: "old", Kind: "tv"}}}},
+		Details:   map[string]MediaItem{"server:old": {ID: "old"}},
+	}
+	migrateCatalogDisk(&disk)
+	if disk.Version != catalogCacheVersion || len(disk.Pages) != 0 || len(disk.Details) != 0 {
+		t.Fatalf("old hierarchy cache was not invalidated: %+v", disk)
+	}
+	if len(disk.Libraries["server"]) != 1 || disk.Libraries["server"][0].ID != "library" {
+		t.Fatalf("library cache should be retained: %+v", disk.Libraries)
+	}
+}
+
+func TestCatalogOnlyAutoLoadsMoreWhenProjectionIsEmptyAndCanContinue(t *testing.T) {
+	state := &CatalogState{NextPage: 2}
+	if !catalogNeedsMoreVisibleItems(0, state) {
+		t.Fatal("empty projection with additional pages should continue loading")
+	}
+	state.Loading = true
+	if catalogNeedsMoreVisibleItems(0, state) {
+		t.Fatal("must not start duplicate page requests")
+	}
+	state.Loading, state.Exhausted = false, true
+	if catalogNeedsMoreVisibleItems(0, state) {
+		t.Fatal("exhausted catalog should show the empty state")
+	}
+}

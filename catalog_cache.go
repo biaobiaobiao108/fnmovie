@@ -34,10 +34,13 @@ type CatalogState struct {
 }
 
 type catalogDisk struct {
+	Version   int                       `json:"version"`
 	Libraries map[string][]MediaLibrary `json:"libraries"`
 	Pages     map[string]CatalogPage    `json:"pages"`
 	Details   map[string]MediaItem      `json:"details"`
 }
+
+const catalogCacheVersion = 2
 
 type CatalogCache struct {
 	mu   sync.Mutex
@@ -55,27 +58,45 @@ func catalogPageExhausted(pageCount, loadedCount, total, pageSize int) bool {
 	return pageCount < pageSize
 }
 
+func catalogNeedsMoreVisibleItems(visibleCount int, state *CatalogState) bool {
+	return visibleCount == 0 && state != nil && !state.Loading && !state.Exhausted &&
+		state.Err == "" && !state.PageAutoRequested
+}
+
 func NewCatalogCache() *CatalogCache {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		return &CatalogCache{data: catalogDisk{Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}, Details: map[string]MediaItem{}}}
+		data := catalogDisk{Version: catalogCacheVersion, Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}, Details: map[string]MediaItem{}}
+		return &CatalogCache{data: data}
 	}
 	dir = filepath.Join(dir, "FnMovie")
 	_ = os.MkdirAll(dir, 0700)
-	c := &CatalogCache{path: filepath.Join(dir, "catalog.json"), data: catalogDisk{Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}, Details: map[string]MediaItem{}}}
+	c := &CatalogCache{path: filepath.Join(dir, "catalog.json"), data: catalogDisk{Version: catalogCacheVersion, Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}, Details: map[string]MediaItem{}}}
 	if raw, err := os.ReadFile(c.path); err == nil {
 		_ = json.Unmarshal(raw, &c.data)
 	}
-	if c.data.Pages == nil {
-		c.data.Pages = map[string]CatalogPage{}
-	}
-	if c.data.Libraries == nil {
-		c.data.Libraries = map[string][]MediaLibrary{}
-	}
-	if c.data.Details == nil {
-		c.data.Details = map[string]MediaItem{}
-	}
+	migrateCatalogDisk(&c.data)
 	return c
+}
+
+func migrateCatalogDisk(data *catalogDisk) {
+	if data.Version < catalogCacheVersion {
+		// Older caches stored hierarchy types before the current fnOS
+		// normalization rules. Re-fetch media/details while retaining the
+		// inexpensive library list.
+		data.Pages = map[string]CatalogPage{}
+		data.Details = map[string]MediaItem{}
+		data.Version = catalogCacheVersion
+	}
+	if data.Pages == nil {
+		data.Pages = map[string]CatalogPage{}
+	}
+	if data.Libraries == nil {
+		data.Libraries = map[string][]MediaLibrary{}
+	}
+	if data.Details == nil {
+		data.Details = map[string]MediaItem{}
+	}
 }
 
 func catalogServerKey(serverURL string) string {
@@ -138,6 +159,7 @@ func (c *CatalogCache) saveLocked() {
 	if c.path == "" {
 		return
 	}
+	c.data.Version = catalogCacheVersion
 	data, err := json.Marshal(c.data)
 	if err != nil {
 		return

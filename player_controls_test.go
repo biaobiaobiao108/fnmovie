@@ -52,3 +52,10 @@ func TestPlayerTrackSelectionProperty(t *testing.T) {
 		}
 	}
 }
+
+func TestPlayerTrackLabelContainsStableLanguageTitleAndID(t *testing.T) {
+	track := PlayerTrack{ID: 4, Language: "chi", Title: "AAC 5.1", External: true}
+	if got, want := playerTrackLabel(track), "chi · AAC 5.1 · 轨道 4 · 外挂"; got != want {
+		t.Fatalf("track label = %q, want %q", got, want)
+	}
+}
