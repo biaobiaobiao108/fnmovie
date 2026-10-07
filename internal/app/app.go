@@ -249,7 +249,8 @@ func (a *appState) sidebar(c *ui.Context) {
 				ui.Text(c, library.Name).FontSize(13).SingleLine()
 			})
 			if button.Clicked() {
-				a.section, a.libraryID, a.selected, a.query = "library", library.ID, nil, ""
+				a.closeDetail()
+				a.section, a.libraryID, a.query = "library", library.ID, ""
 				a.closePerson()
 				a.selectedTab = 0
 				a.grid = ui.GridState{}
@@ -305,7 +306,7 @@ func (a *appState) navButton(c *ui.Context, icon, label, key string) {
 	})
 	if e.Clicked() {
 		a.section = key
-		a.selected = nil
+		a.closeDetail()
 		a.closePerson()
 		a.query = ""
 		a.grid = ui.GridState{}
@@ -951,7 +952,7 @@ func (a *appState) detailBackButton(c *ui.Context) {
 		if a.playbackLoading {
 			a.cancelPlaybackLoading()
 		}
-		a.selected = nil
+		a.closeDetail()
 		a.castLoading = false
 		a.seriesLoading = false
 	}
@@ -1118,7 +1119,7 @@ func (a *appState) logout() {
 	a.libraries = nil
 	a.items = nil
 	a.catalogs = map[string]*CatalogState{}
-	a.selected = nil
+	a.closeDetail()
 	a.libraryID = ""
 	a.query = ""
 	a.password = ""
@@ -1555,7 +1556,7 @@ func (a *appState) login() {
 			a.cancelCatalogRequests()
 			a.catalogs = map[string]*CatalogState{}
 			a.items = nil
-			a.selected = nil
+			a.closeDetail()
 			a.section = "movies"
 			a.libraryID = ""
 			a.status = "连接成功，正在读取影视库…"
@@ -1681,6 +1682,7 @@ func (a *appState) loadLibrary() {
 		}
 	}
 	a.items = state.Items
+	a.trimCatalogStates(key)
 	if len(state.Items) > 0 {
 		a.status = ""
 	} else if state.Err != "" {
@@ -1987,6 +1989,7 @@ func (a *appState) startPlayback(item MediaItem) {
 				return
 			}
 			a.player = requestPlayer
+			a.posters.SetPlayback(true)
 			requestPlayer.ShowSurface()
 			a.playerProxy = proxy
 			a.playingItem = &item
@@ -2151,6 +2154,7 @@ func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64) {
 	a.playerProxy = nil
 	a.playingItem = nil
 	a.playback = PlaybackState{}
+	a.posters.SetPlayback(false)
 	return server, item, position, duration
 }
 

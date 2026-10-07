@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -17,6 +18,96 @@ import (
 
 	"github.com/egoist/mygo/ui"
 )
+
+func TestPlaybackDropsPostersAndRejectsObsoleteDecode(t *testing.T) {
+	var data bytes.Buffer
+	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 20, 30))); err != nil {
+		t.Fatal(err)
+	}
+	started, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int32
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	serverHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-release
+		}
+		_, _ = w.Write(data.Bytes())
+	}))
+	defer serverHTTP.Close()
+	defer unblock()
+	server := NewServer(serverHTTP.URL, "")
+	server.client = serverHTTP.Client()
+	loader := &PosterLoader{
+		queue: make(chan posterRequest, posterQueueLimit), pending: map[posterKey]uint64{},
+		failed: map[posterKey]time.Time{}, entries: map[posterKey]*list.Element{},
+		lru: list.New(), maxBytes: posterCacheBudget,
+	}
+	workerDone := make(chan struct{})
+	go func() { loader.worker(); close(workerDone) }()
+	defer func() { unblock(); close(loader.queue); <-workerDone }()
+	var obsoleteCallback atomic.Bool
+	loader.putLocked(posterKey{URL: "cached"}, ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1, 1))), 4)
+	loader.GetOrRequest(server, serverHTTP.URL, 20, 30, func() { obsoleteCallback.Store(true) })
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("initial image request did not start")
+	}
+	loader.GetOrRequest(server, serverHTTP.URL+"/queued", 20, 30, nil)
+	loader.SetPlayback(true)
+	if items, size, pending := loader.Stats(); items != 0 || size != 0 || pending != 0 || len(loader.queue) != 0 {
+		t.Fatalf("playback retained work: items=%d bytes=%d pending=%d", items, size, pending)
+	}
+	loader.GetOrRequest(server, serverHTTP.URL, 20, 30, nil)
+	if _, _, pending := loader.Stats(); pending != 0 {
+		t.Fatal("playback scheduled a poster request")
+	}
+	loader.SetPlayback(false)
+	loaded := make(chan struct{})
+	loader.GetOrRequest(server, serverHTTP.URL, 20, 30, func() { close(loaded) })
+	unblock()
+	select {
+	case <-loaded:
+	case <-time.After(3 * time.Second):
+		t.Fatal("return navigation did not reload the poster")
+	}
+	if obsoleteCallback.Load() || calls.Load() != 2 {
+		t.Fatalf("obsolete decode was accepted or queued work ran: callback=%v calls=%d", obsoleteCallback.Load(), calls.Load())
+	}
+	if items, size, pending := loader.Stats(); items != 1 || size <= 0 || pending != 0 {
+		t.Fatalf("resumed cache invalid: items=%d bytes=%d pending=%d", items, size, pending)
+	}
+}
+
+// Synthetic artwork isolates CPU cache retention, not whole-process/video memory.
+func BenchmarkPosterRetention(b *testing.B) {
+	for _, budget := range []struct {
+		name  string
+		bytes int64
+	}{
+		{"previous256MiB", 256 << 20}, {"current64MiB", posterCacheBudget},
+	} {
+		b.Run(budget.name, func(b *testing.B) {
+			for n := 0; n < b.N; n++ {
+				runtime.GC()
+				var before, after runtime.MemStats
+				runtime.ReadMemStats(&before)
+				loader := &PosterLoader{entries: map[posterKey]*list.Element{}, lru: list.New(), maxBytes: budget.bytes}
+				for i := 0; i < 120; i++ {
+					bitmap := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 512, 512)))
+					loader.putLocked(posterKey{Width: i}, bitmap, 512*512*4*4/3)
+				}
+				runtime.GC()
+				runtime.ReadMemStats(&after)
+				b.ReportMetric(float64(after.HeapAlloc-before.HeapAlloc)/(1<<20), "heap-MiB")
+				b.ReportMetric(float64(loader.used)/(1<<20), "budgeted-MiB")
+				runtime.KeepAlive(loader)
+			}
+		})
+	}
+}
 
 func TestFitPosterSizeDownscalesWithoutUpscaling(t *testing.T) {
 	tests := []struct {
@@ -71,7 +162,7 @@ func TestPosterLoaderReusesDiskSourceAcrossTargetSizes(t *testing.T) {
 
 func TestPosterLoaderEvictsLeastRecentlyUsed(t *testing.T) {
 	loader := &PosterLoader{
-		pending: map[posterKey]struct{}{}, failed: map[posterKey]time.Time{},
+		pending: map[posterKey]uint64{}, failed: map[posterKey]time.Time{},
 		entries: map[posterKey]*list.Element{}, lru: list.New(), maxBytes: 8,
 	}
 	bitmap := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1, 1)))

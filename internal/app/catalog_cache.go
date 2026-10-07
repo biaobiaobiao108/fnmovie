@@ -31,6 +31,7 @@ type CatalogState struct {
 	Err               string
 	Cancel            func()
 	UpdatedAt         time.Time
+	LastUsed          time.Time
 	Refreshed         bool
 }
 

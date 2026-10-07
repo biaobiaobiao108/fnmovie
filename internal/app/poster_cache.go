@@ -22,9 +22,9 @@ import (
 )
 
 const (
-	posterWorkers     = 4
+	posterWorkers     = 2
 	posterQueueLimit  = 64
-	posterCacheBudget = int64(256 << 20)
+	posterCacheBudget = int64(64 << 20)
 )
 
 type posterKey struct {
@@ -40,31 +40,34 @@ type posterEntry struct {
 }
 
 type posterRequest struct {
-	key      posterKey
-	server   *Server
-	url      string
-	onLoaded func()
+	generation uint64
+	key        posterKey
+	server     *Server
+	url        string
+	onLoaded   func()
 }
 
 // PosterLoader bounds both network/decode concurrency and retained bitmap
 // memory. Keys include the target pixel size so one poster can be reused at
 // card, hero, and detail sizes without retaining full-resolution artwork.
 type PosterLoader struct {
-	mu       sync.Mutex
-	queue    chan posterRequest
-	pending  map[posterKey]struct{}
-	failed   map[posterKey]time.Time
-	entries  map[posterKey]*list.Element
-	lru      *list.List
-	used     int64
-	maxBytes int64
-	diskDir  string
-	diskMu   sync.Mutex
+	mu         sync.Mutex
+	queue      chan posterRequest
+	pending    map[posterKey]uint64
+	failed     map[posterKey]time.Time
+	entries    map[posterKey]*list.Element
+	lru        *list.List
+	used       int64
+	maxBytes   int64
+	diskDir    string
+	diskMu     sync.Mutex
+	paused     bool
+	generation uint64
 }
 
 func NewPosterLoader() *PosterLoader {
 	p := &PosterLoader{
-		queue: make(chan posterRequest, posterQueueLimit), pending: map[posterKey]struct{}{},
+		queue: make(chan posterRequest, posterQueueLimit), pending: map[posterKey]uint64{},
 		failed: map[posterKey]time.Time{}, entries: map[posterKey]*list.Element{},
 		lru: list.New(), maxBytes: posterCacheBudget,
 	}
@@ -87,6 +90,10 @@ func (p *PosterLoader) GetOrRequest(server *Server, remoteURL string, width, hei
 	}
 	key := posterKey{URL: remoteURL, Width: width, Height: height}
 	p.mu.Lock()
+	if p.paused {
+		p.mu.Unlock()
+		return nil
+	}
 	if element := p.entries[key]; element != nil {
 		p.lru.MoveToFront(element)
 		bitmap := element.Value.(*posterEntry).bitmap
@@ -97,8 +104,8 @@ func (p *PosterLoader) GetOrRequest(server *Server, remoteURL string, width, hei
 		p.mu.Unlock()
 		return nil
 	}
-	p.pending[key] = struct{}{}
-	request := posterRequest{key: key, server: server, url: remoteURL, onLoaded: onLoaded}
+	p.pending[key] = p.generation
+	request := posterRequest{generation: p.generation, key: key, server: server, url: remoteURL, onLoaded: onLoaded}
 	select {
 	case p.queue <- request:
 		p.mu.Unlock()
@@ -111,8 +118,20 @@ func (p *PosterLoader) GetOrRequest(server *Server, remoteURL string, width, hei
 
 func (p *PosterLoader) worker() {
 	for request := range p.queue {
+		p.mu.Lock()
+		obsolete := p.paused || request.generation != p.generation
+		p.mu.Unlock()
+		if obsolete {
+			continue
+		}
 		bitmap, size, err := p.loadPoster(request)
 		p.mu.Lock()
+		// A decode already in flight may finish after playback starts or after
+		// browsing resumes. It must not refill the cache or erase a new request.
+		if p.paused || request.generation != p.generation {
+			p.mu.Unlock()
+			continue
+		}
 		delete(p.pending, request.key)
 		if err != nil {
 			p.failed[request.key] = time.Now().Add(5 * time.Second)
@@ -125,6 +144,35 @@ func (p *PosterLoader) worker() {
 			log.Printf("poster load failed: %v", err)
 		} else if request.onLoaded != nil {
 			request.onLoaded()
+		}
+	}
+}
+
+// SetPlayback releases browsing artwork and drops queued work while the video
+// owns the viewport. Sources remain on disk for inexpensive return navigation.
+func (p *PosterLoader) SetPlayback(active bool) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.paused == active {
+		return
+	}
+	p.paused = active
+	p.generation++
+	clear(p.pending)
+	clear(p.failed)
+	if active {
+		clear(p.entries)
+		p.lru.Init()
+		p.used = 0
+	}
+	for {
+		select {
+		case <-p.queue:
+		default:
+			return
 		}
 	}
 }
