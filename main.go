@@ -51,12 +51,18 @@ type appState struct {
 	seriesLoading            bool
 	seriesError              string
 	selectedSeasonID         string
+	seriesEpisodes           []MediaItem
+	seriesEpisodeCache       map[string][]MediaItem
+	seriesEpisodeLoading     bool
+	seriesEpisodeError       string
+	seriesEpisodeRequest     uint64
 	playback                 PlaybackState
 	selectedTab              int
 	playingItem              *MediaItem
 	icon                     *ui.Bitmap
 	displayScale             float64
 	playerOverlayWindow      *mygo.Window
+	playerHeaderWindow       *mygo.Window
 	playerOverlayHooks       bool
 	playerOverlayMonitorDone chan struct{}
 	overlayMu                sync.Mutex
@@ -65,6 +71,8 @@ type appState struct {
 	playerOverlaySeeking     bool
 	playerOverlayLastInput   time.Time
 	playerOverlayMenu        string
+	playerOverlayTransition  uint64
+	playerOverlayOpacity     float64
 	seekSliderPosition       float64
 	seekDragging             bool
 	volumeDragging           bool
@@ -382,8 +390,7 @@ func (a *appState) libraryView(c *ui.Context) {
 		if next := i + gridColumns; next < len(items) {
 			a.requestPoster(items[next], 168, 252)
 		}
-		card := ui.Button(c, "").Key(item.ID).Padding(0).BorderWidth(0).Background(ui.Color{}).TextColor(t.Text).
-			Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+		card := ui.Button(c, "").Key(item.ID).Padding(0).BorderWidth(0).Background(ui.Color{}).TextColor(t.Text)
 		card.Children(func() {
 			ui.Column(c).Gap(8).Center().Children(func() {
 				cover := ui.Box(c).Size(168, 252).Radius(10).Clip().BorderWidth(0)
@@ -497,6 +504,9 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 func (a *appState) openDetail(item MediaItem) {
 	a.selected = &item
 	a.seriesLoading, a.seriesError, a.selectedSeasonID = false, "", ""
+	a.seriesEpisodes, a.seriesEpisodeCache = nil, nil
+	a.seriesEpisodeLoading, a.seriesEpisodeError = false, ""
+	a.seriesEpisodeRequest++
 	if a.server == nil {
 		return
 	}
@@ -522,10 +532,10 @@ func (a *appState) openDetail(item MediaItem) {
 				}
 				updated := *a.selected
 				updated.Seasons = seasons
-				if len(seasons) > 0 {
-					a.selectedSeasonID = seasons[0].ID
-				}
 				a.selected = &updated
+				if len(seasons) > 0 {
+					a.selectSeriesSeason(seasons[0].ID)
+				}
 				if err != nil {
 					a.seriesError = "部分剧集读取失败：" + err.Error()
 				}
@@ -619,40 +629,56 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 			}
 			ui.Row(c).Gap(8).Children(func() {
 				for _, season := range item.Seasons {
-					button := ui.Button(c, season.Title).Padding(7, 11).BorderWidth(0).Radius(8)
+					label := season.Title
+					if strings.TrimSpace(label) == "" {
+						label = fmt.Sprintf("第%d季", season.Number)
+					}
+					button := ui.Button(c, label).Padding(7, 11).BorderWidth(0).Radius(8)
 					if a.selectedSeasonID == season.ID {
 						button.Background(t.Accent).TextColor(t.AccentText)
 					} else {
 						button.Background(ui.Hex("#eeece6")).TextColor(t.TextMuted)
 					}
 					if button.Clicked() {
-						a.selectedSeasonID = season.ID
+						a.selectSeriesSeason(season.ID)
 					}
 				}
 			})
 			ui.Scroll(c).Grow(1).Children(func() {
-				for _, season := range item.Seasons {
-					if season.ID != a.selectedSeasonID {
-						continue
-					}
-					for _, episode := range season.Episodes {
-						ui.Row(c).Padding(8, 10).Gap(10).AlignItems(ui.Center).Children(func() {
-							number := episode.EpisodeNumber
-							if number == 0 {
-								number = 1
-							}
-							ui.Text(c, fmt.Sprintf("%02d", number)).Width(30).FontSize(12).TextColor(t.TextMuted)
-							ui.Column(c).Grow(1).Gap(2).Children(func() {
-								ui.Text(c, episode.Title).FontSize(13).Bold().SingleLine()
-								if overview := firstString(episode.Raw, "overview", "description", "summary"); overview != "" {
-									ui.Text(c, overview).FontSize(10).TextColor(t.TextMuted).MaxLines(1)
-								}
-							})
-							if ui.Button(c, "播放").Clicked() {
-								a.startPlayback(episode)
+				if a.seriesEpisodeLoading {
+					ui.Text(c, "正在读取本季集数…").Padding(12, 10).FontSize(12).TextColor(t.TextMuted)
+					return
+				}
+				if a.seriesEpisodeError != "" {
+					ui.Row(c).Padding(12, 10).Gap(8).Children(func() {
+						ui.Text(c, a.seriesEpisodeError).Grow(1).FontSize(11).TextColor(ui.Hex("#ad5148"))
+						if ui.Button(c, "重试").Clicked() {
+							a.loadSeriesSeason(a.selectedSeasonID, true)
+						}
+					})
+					return
+				}
+				if len(a.seriesEpisodes) == 0 {
+					ui.Text(c, "这个季度还没有集数").Padding(12, 10).FontSize(12).TextColor(t.TextMuted)
+					return
+				}
+				for _, episode := range a.seriesEpisodes {
+					ui.Row(c).Padding(8, 10).Gap(10).AlignItems(ui.Center).Children(func() {
+						number := ""
+						if episode.EpisodeNumber > 0 {
+							number = fmt.Sprintf("%02d", episode.EpisodeNumber)
+						}
+						ui.Text(c, number).Width(30).FontSize(12).TextColor(t.TextMuted)
+						ui.Column(c).Grow(1).Gap(2).Children(func() {
+							ui.Text(c, episode.Title).FontSize(13).Bold().SingleLine()
+							if overview := firstString(episode.Raw, "overview", "description", "summary"); overview != "" {
+								ui.Text(c, overview).FontSize(10).TextColor(t.TextMuted).MaxLines(1)
 							}
 						})
-					}
+						if ui.Button(c, "播放").Clicked() {
+							a.startPlayback(episode)
+						}
+					})
 				}
 			})
 			ui.Spacer(c)
@@ -661,6 +687,58 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 			}
 		})
 	})
+}
+
+func (a *appState) selectSeriesSeason(seasonID string) {
+	a.selectedSeasonID = seasonID
+	a.seriesEpisodes = nil
+	a.seriesEpisodeError = ""
+	if items, ok := a.seriesEpisodeCache[seasonID]; ok {
+		a.seriesEpisodes = items
+		a.seriesEpisodeLoading = false
+		return
+	}
+	a.loadSeriesSeason(seasonID, false)
+}
+
+func (a *appState) loadSeriesSeason(seasonID string, force bool) {
+	if a.server == nil || seasonID == "" {
+		return
+	}
+	if !force {
+		if items, ok := a.seriesEpisodeCache[seasonID]; ok {
+			a.seriesEpisodes = items
+			a.seriesEpisodeLoading = false
+			return
+		}
+	}
+	server := a.server
+	a.seriesEpisodeRequest++
+	requestID := a.seriesEpisodeRequest
+	selectedID := ""
+	if a.selected != nil {
+		selectedID = a.selected.ID
+	}
+	a.seriesEpisodeLoading = true
+	a.seriesEpisodeError = ""
+	go func() {
+		items, err := server.SeasonEpisodes(seasonID)
+		a.window.Update(func() {
+			if a.selected == nil || a.selected.ID != selectedID || a.selectedSeasonID != seasonID || requestID != a.seriesEpisodeRequest {
+				return
+			}
+			a.seriesEpisodeLoading = false
+			if err != nil {
+				a.seriesEpisodeError = "集数读取失败：" + err.Error()
+				return
+			}
+			if a.seriesEpisodeCache == nil {
+				a.seriesEpisodeCache = map[string][]MediaItem{}
+			}
+			a.seriesEpisodeCache[seasonID] = items
+			a.seriesEpisodes = items
+		})
+	}()
 }
 
 func (a *appState) settingsView(c *ui.Context) {

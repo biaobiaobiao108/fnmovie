@@ -146,6 +146,27 @@ func TestLibraryPageContextRequestsOnlyOnePage(t *testing.T) {
 	}
 }
 
+func TestSeasonEpisodesRequestsOnlySelectedSeasonAndSortsEpisodes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/episode/list/season-2" {
+			t.Errorf("unexpected season endpoint %q", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(t, w, `{"code":0,"data":{"list":[{"guid":"e2","title":"Episode 2","type":"TV","episode_number":2},{"guid":"e1","title":"Episode 1","type":"TV","episode_number":1}]}}`)
+	}))
+	defer server.Close()
+	client := NewServer(server.URL, "token")
+	client.client = server.Client()
+	items, err := client.SeasonEpisodes("season-2")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("season episodes=%#v err=%v", items, err)
+	}
+	if items[0].ID != "e1" || items[1].ID != "e2" {
+		t.Fatalf("episodes are not sorted within selected season: %#v", items)
+	}
+}
+
 func TestLibraryPageContextDoesNotMixLibraries(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/item/list" {

@@ -57,3 +57,29 @@ func TestEpisodicMediaCollapseIntoSeriesCardsInAnyLibrary(t *testing.T) {
 		t.Fatalf("episodes not retained in source order: %#v", series.Episodes)
 	}
 }
+
+func TestSeriesGroupsUseSeriesIDAcrossSeasonsAndKeepRemakesSeparate(t *testing.T) {
+	items := []MediaItem{
+		{ID: "s1e1", Kind: "tv", SeriesID: "series-a", SeriesTitle: "同名剧", SeasonNumber: 1, EpisodeNumber: 1},
+		{ID: "s2e1", Kind: "tv", SeriesID: "series-a", SeriesTitle: "同名剧", SeasonNumber: 2, EpisodeNumber: 1},
+		{ID: "remake", Kind: "tv", SeriesID: "series-b", SeriesTitle: "同名剧", SeasonNumber: 1, EpisodeNumber: 1},
+	}
+	got := groupSeriesEpisodes(items)
+	if len(got) != 2 {
+		t.Fatalf("expected two distinct shows, got %d: %+v", len(got), got)
+	}
+	if len(got[0].Episodes) != 2 || len(got[1].Episodes) != 1 {
+		t.Fatalf("episodes from seasons/remake grouped incorrectly: %+v", got)
+	}
+}
+
+func TestSeriesEpisodesWithoutNumberStillGroupByShow(t *testing.T) {
+	items := []MediaItem{
+		{ID: "one", Kind: "tv", SeriesTitle: "小镇", Raw: map[string]any{"season_number": "1"}},
+		{ID: "two", Kind: "tv", SeriesTitle: "小镇", Raw: map[string]any{"season_number": "2"}},
+	}
+	got := groupSeriesEpisodes(items)
+	if len(got) != 1 || !got[0].IsSeries || len(got[0].Episodes) != 2 {
+		t.Fatalf("episodes with missing numbering should remain grouped: %+v", got)
+	}
+}

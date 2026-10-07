@@ -90,14 +90,12 @@ func (p *Player) Start(streamURL string, parent uintptr, duration, resumeAt floa
 	if p.active {
 		p.process.stop()
 	}
-	findMpv := func() string {
+	findLibMpv := func() string {
 		resourceDir, _ := mygo.App.Path(mygo.PathResources)
 		candidates := []string{
-			filepath.Join(resourceDir, "player", "mpv.exe"),
-			filepath.Join(resourceDir, "windows-amd64", "player", "mpv.exe"),
-			filepath.Join("player", "mpv.exe"),
-			filepath.Join("resources", "player", "mpv.exe"),
-			"mpv.exe",
+			filepath.Join(resourceDir, "player", "libmpv-2.dll"),
+			filepath.Join(resourceDir, "windows-amd64", "player", "libmpv-2.dll"),
+			filepath.Join("resources", "windows-amd64", "player", "libmpv-2.dll"),
 		}
 		for _, candidate := range candidates {
 			if _, err := os.Stat(candidate); err == nil {
@@ -106,11 +104,11 @@ func (p *Player) Start(streamURL string, parent uintptr, duration, resumeAt floa
 		}
 		return ""
 	}
-	binary := findMpv()
-	if binary == "" {
-		return fmt.Errorf("找不到播放器文件 player\\mpv.exe；请将 mpv Windows 发行版放入 player 目录")
+	dll := findLibMpv()
+	if dll == "" {
+		return fmt.Errorf("找不到 libmpv-2.dll；请检查应用资源目录")
 	}
-	if err := p.process.start(binary, streamURL, parent, resumeAt); err != nil {
+	if err := p.process.start(dll, streamURL, parent, resumeAt); err != nil {
 		p.process.stop()
 		return err
 	}

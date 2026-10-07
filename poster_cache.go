@@ -187,7 +187,11 @@ func loadPoster(server *Server, remoteURL string, maxWidth, maxHeight int) (*ui.
 	var resized image.Image = source
 	if imageSize != source.Bounds().Size() {
 		dst := image.NewRGBA(image.Rect(0, 0, imageSize.X, imageSize.Y))
-		draw.CatmullRom.Scale(dst, dst.Bounds(), source, source.Bounds(), draw.Over, nil)
+		// Poster thumbnails are intentionally bounded to card size. A bicubic
+		// filter adds noticeable CPU work when several newly-visible posters
+		// arrive during a fling; bilinear keeps those updates cheap while the
+		// original-resolution artwork remains untouched in the catalog.
+		draw.ApproxBiLinear.Scale(dst, dst.Bounds(), source, source.Bounds(), draw.Over, nil)
 		resized = dst
 	}
 	bitmap := ui.NewBitmap(resized)

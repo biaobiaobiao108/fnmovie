@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -11,7 +10,12 @@ import (
 )
 
 const playerOverlayHideDelay = 2500 * time.Millisecond
-const playerOverlayHeight = 204
+const (
+	playerOverlayHeaderHeight  = 66
+	playerOverlayControlHeight = 124
+	playerOverlayFadeDuration  = 180 * time.Millisecond
+	playerOverlayTargetOpacity = 0.88
+)
 
 var playerOverlayIcons = map[string]*ui.SVG{
 	"back":       ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/><path d="M9 12h11"/></svg>`)),
@@ -28,25 +32,30 @@ func (a *appState) createPlayerOverlay() {
 		return
 	}
 	bounds := a.window.ContentBounds()
-	height := min(playerOverlayHeight, bounds.Height)
+	controlHeight := min(playerOverlayControlHeight, bounds.Height)
+	headerHeight := min(playerOverlayHeaderHeight, bounds.Height-controlHeight)
 	a.playerOverlayWindow = mygo.NewWindow(mygo.WindowOptions{
-		Title: "播放控件", X: bounds.X, Y: bounds.Y + bounds.Height - height, Width: bounds.Width, Height: height,
-		Parent: a.window, Frameless: true, Transparent: true, SkipTaskbar: true,
-		BackgroundColor: "#ff00ff", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
+		Title: "播放控件", X: bounds.X, Y: bounds.Y + bounds.Height - controlHeight, Width: bounds.Width, Height: controlHeight,
+		Parent: a.window, Frameless: true, SkipTaskbar: true, Opacity: 0,
+		BackgroundColor: "#151617", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: ui.View(a.playerOverlayView),
 	})
-	if err := setPlayerOverlayColorKey(a.playerOverlayWindow.NativeHandle()); err != nil {
-		// The compact HUD still leaves the full video viewport exposed if a
-		// Windows version cannot apply color-key transparency.
-		log.Printf("player overlay transparency unavailable: %v", err)
-	}
+	a.playerHeaderWindow = mygo.NewWindow(mygo.WindowOptions{
+		Title: "播放信息", X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: headerHeight,
+		Parent: a.window, Frameless: true, SkipTaskbar: true, Opacity: 0,
+		BackgroundColor: "#151617", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
+		Content: ui.View(a.playerHeaderView),
+	})
 	a.registerPlayerOverlayHooks()
 	a.syncPlayerOverlay()
 	a.overlayMu.Lock()
 	a.playerOverlayVisible = true
 	a.playerOverlayLastInput = time.Now()
+	a.playerOverlayOpacity = 0
 	a.overlayMu.Unlock()
 	a.playerOverlayWindow.Show()
+	a.playerHeaderWindow.Show()
+	a.animatePlayerOverlay(playerOverlayTargetOpacity)
 }
 
 func (a *appState) registerPlayerOverlayHooks() {
@@ -70,11 +79,15 @@ func (a *appState) syncPlayerOverlay() {
 		return
 	}
 	bounds := a.window.ContentBounds()
-	height := min(playerOverlayHeight, bounds.Height)
-	bounds.Y += bounds.Height - height
-	bounds.Height = height
-	a.playerOverlayWindow.SetContentBounds(bounds)
+	controlBounds := bounds
+	controlBounds.Y += bounds.Height - min(playerOverlayControlHeight, bounds.Height)
+	controlBounds.Height = min(playerOverlayControlHeight, bounds.Height)
+	headerBounds := bounds
+	headerBounds.Height = min(playerOverlayHeaderHeight, bounds.Height-controlBounds.Height)
+	a.playerOverlayWindow.SetContentBounds(controlBounds)
+	a.playerHeaderWindow.SetContentBounds(headerBounds)
 	a.playerOverlayWindow.Invalidate()
+	a.playerHeaderWindow.Invalidate()
 	if a.player != nil {
 		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
 		a.player.SetViewport(ui.Rect{W: float32(width), H: float32(height)})
@@ -123,23 +136,77 @@ func (a *appState) showPlayerOverlay() {
 	a.overlayMu.Unlock()
 	if !wasVisible {
 		a.playerOverlayWindow.Show()
+		a.playerHeaderWindow.Show()
 		a.playerOverlayWindow.Focus()
+		a.animatePlayerOverlay(playerOverlayTargetOpacity)
 	} else {
 		a.playerOverlayWindow.Invalidate()
 	}
 }
 
 func (a *appState) hidePlayerOverlay(returnFocus bool) {
-	if a.playerOverlayWindow == nil {
+	if a.playerOverlayWindow == nil || !a.playerOverlayVisible {
 		return
 	}
 	a.overlayMu.Lock()
 	a.playerOverlayVisible = false
 	a.overlayMu.Unlock()
-	a.playerOverlayWindow.Hide()
-	if returnFocus && a.window != nil {
-		a.window.Focus()
+	if returnFocus {
+		a.animatePlayerOverlay(0)
+	} else {
+		a.playerOverlayWindow.Hide()
+		a.playerHeaderWindow.Hide()
+		a.playerOverlayWindow.SetOpacity(0)
+		a.playerHeaderWindow.SetOpacity(0)
+		a.overlayMu.Lock()
+		a.playerOverlayOpacity = 0
+		a.overlayMu.Unlock()
 	}
+}
+
+func (a *appState) animatePlayerOverlay(target float64) {
+	a.overlayMu.Lock()
+	a.playerOverlayTransition++
+	transition := a.playerOverlayTransition
+	from := a.playerOverlayOpacity
+	a.overlayMu.Unlock()
+	go func() {
+		started := time.Now()
+		ticker := time.NewTicker(16 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			progress := float64(time.Since(started)) / float64(playerOverlayFadeDuration)
+			if progress > 1 {
+				progress = 1
+			}
+			eased := progress * progress * (3 - 2*progress)
+			alpha := from + (target-from)*eased
+			if a.window != nil {
+				a.window.Update(func() {
+					a.overlayMu.Lock()
+					valid := transition == a.playerOverlayTransition
+					if valid {
+						a.playerOverlayOpacity = alpha
+					}
+					a.overlayMu.Unlock()
+					if !valid || a.playerOverlayWindow == nil || a.playerHeaderWindow == nil {
+						return
+					}
+					a.playerOverlayWindow.SetOpacity(alpha)
+					a.playerHeaderWindow.SetOpacity(alpha)
+					if progress >= 1 && target == 0 {
+						a.playerOverlayWindow.Hide()
+						a.playerHeaderWindow.Hide()
+						a.window.Focus()
+					}
+				})
+			}
+			if progress >= 1 {
+				return
+			}
+			<-ticker.C
+		}
+	}()
 }
 
 func (a *appState) closePlayerOverlay() {
@@ -151,8 +218,13 @@ func (a *appState) closePlayerOverlay() {
 		a.playerOverlayWindow.Destroy()
 		a.playerOverlayWindow = nil
 	}
+	if a.playerHeaderWindow != nil {
+		a.playerHeaderWindow.Destroy()
+		a.playerHeaderWindow = nil
+	}
 	a.overlayMu.Lock()
 	a.playerOverlayVisible, a.playerOverlayPinned, a.playerOverlaySeeking = false, false, false
+	a.playerOverlayTransition++
 	a.overlayMu.Unlock()
 	a.playerOverlayMenu = ""
 	a.seekDragging = false
@@ -184,8 +256,15 @@ func (a *appState) setPlayerOverlaySeeking(seeking bool) {
 func (a *appState) playerOverlayView(c *ui.Context) {
 	c.SetTheme(ui.DarkTheme())
 	a.playerShortcuts(c)
-	ui.Box(c).Fill().Background(ui.Hex("#ff00ff"))
-	ui.Row(c).Absolute().Top(10).Left(18).Gap(12).AlignItems(ui.Center).Padding(8, 12).Radius(11).
+	ui.Box(c).Fill().Background(ui.Hex("#151617"))
+	a.playerTransport(c)
+	a.playerPopover(c)
+}
+
+func (a *appState) playerHeaderView(c *ui.Context) {
+	c.SetTheme(ui.DarkTheme())
+	ui.Box(c).Fill().Background(ui.Hex("#151617"))
+	ui.Row(c).Absolute().Top(6).Left(18).Gap(12).AlignItems(ui.Center).Padding(8, 12).Radius(11).
 		Background(ui.RGBA(18, 19, 21, 0.84)).Children(func() {
 		if playerIconButton(c, "back", "返回影片库").Clicked() {
 			a.stopPlayback()
@@ -199,8 +278,6 @@ func (a *appState) playerOverlayView(c *ui.Context) {
 			ui.Text(c, quality).FontSize(10).TextColor(ui.RGBA(255, 255, 255, 0.72)).SingleLine()
 		})
 	})
-	a.playerTransport(c)
-	a.playerPopover(c)
 }
 
 func (a *appState) playerTransport(c *ui.Context) {

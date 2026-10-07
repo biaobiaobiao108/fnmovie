@@ -40,6 +40,7 @@ type MediaItem struct {
 	Title          string
 	Kind           string
 	SeriesTitle    string
+	SeriesID       string
 	SeriesParentID string
 	SeasonNumber   int
 	EpisodeNumber  int
@@ -356,8 +357,8 @@ func (s *Server) Detail(item MediaItem) (MediaItem, error) {
 }
 
 // SeriesSeasons follows fnOS's hierarchy: an episode points to its season,
-// the season detail points to its TV series, then each season exposes its
-// episodes through the dedicated endpoints used by the web client.
+// and the season detail points to the TV series. Episode data is requested
+// separately when the user selects a season.
 func (s *Server) SeriesSeasons(episode MediaItem) ([]MediaSeason, error) {
 	seasonID := firstString(episode.Raw, "parent_guid", "parentGuid")
 	if seasonID == "" {
@@ -387,48 +388,26 @@ func (s *Server) SeriesSeasons(episode MediaItem) ([]MediaSeason, error) {
 	if len(seasons) == 0 {
 		return nil, fmt.Errorf("服务器没有返回该剧集的季列表")
 	}
-	// The endpoint is lightweight, so load seasons concurrently while keeping
-	// pressure on the NAS bounded.
-	jobs := make(chan int)
-	var workers sync.WaitGroup
-	var resultMu sync.Mutex
-	var firstErr error
-	for range min(4, len(seasons)) {
-		workers.Add(1)
-		go func() {
-			defer workers.Done()
-			for index := range jobs {
-				season := seasons[index]
-				var episodeResponse any
-				requestErr := s.request("GET", "v1", "episode/list/"+url.PathEscape(season.ID), nil, &episodeResponse, s.tokenValue())
-				if requestErr != nil {
-					resultMu.Lock()
-					if firstErr == nil {
-						firstErr = requestErr
-					}
-					resultMu.Unlock()
-					continue
-				}
-				season.Episodes = normalizeItems(unwrapData(episodeResponse))
-				sort.SliceStable(season.Episodes, func(i, j int) bool {
-					return season.Episodes[i].EpisodeNumber < season.Episodes[j].EpisodeNumber
-				})
-				resultMu.Lock()
-				seasons[index] = season
-				resultMu.Unlock()
-			}
-		}()
-	}
-	for index := range seasons {
-		jobs <- index
-	}
-	close(jobs)
-	workers.Wait()
 	sort.SliceStable(seasons, func(i, j int) bool { return seasons[i].Number < seasons[j].Number })
-	if firstErr != nil {
-		return seasons, firstErr
-	}
 	return seasons, nil
+}
+
+func (s *Server) SeasonEpisodes(seasonID string) ([]MediaItem, error) {
+	if strings.TrimSpace(seasonID) == "" {
+		return nil, fmt.Errorf("季度缺少服务器标识")
+	}
+	var response any
+	if err := s.request("GET", "v1", "episode/list/"+url.PathEscape(seasonID), nil, &response, s.tokenValue()); err != nil {
+		return nil, err
+	}
+	items := normalizeItems(findItemsList(unwrapData(response)))
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].EpisodeNumber != items[j].EpisodeNumber {
+			return items[i].EpisodeNumber < items[j].EpisodeNumber
+		}
+		return items[i].Title < items[j].Title
+	})
+	return items, nil
 }
 
 func (s *Server) Playback(item MediaItem) (PlaybackResult, error) {
@@ -735,7 +714,8 @@ func normalizeItem(object map[string]any) MediaItem {
 	item.MediaID = firstString(object, "media_guid", "mediaGuid")
 	item.Title = firstString(object, "title", "name", "original_title", "display_name", "file_name")
 	item.Kind = strings.ToLower(firstString(object, "type", "media_type", "mediaType", "category"))
-	item.SeriesTitle = firstString(object, "tv_title", "tvTitle")
+	item.SeriesTitle = firstString(object, "tv_title", "tvTitle", "series_title", "seriesTitle", "tv_name", "show_title", "showTitle")
+	item.SeriesID = firstString(object, "tv_guid", "tvGuid", "series_guid", "seriesGuid", "tv_id", "tvId", "series_id", "seriesId")
 	item.SeriesParentID = firstString(object, "parent_guid", "parentGuid")
 	item.SeasonNumber = parseMediaNumber(firstString(object, "season_number", "seasonNumber"))
 	item.EpisodeNumber = parseMediaNumber(firstString(object, "episode_number", "episodeNumber"))

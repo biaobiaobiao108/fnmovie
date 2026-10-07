@@ -3,190 +3,448 @@
 package main
 
 import (
-	"bufio"
-	"encoding/json"
+	"encoding/binary"
 	"fmt"
-	"io"
 	"log"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
 
+	"github.com/ebitengine/purego"
 	"github.com/egoist/mygo/ui"
 )
 
 var (
-	user32Player                   = syscall.NewLazyDLL("user32.dll")
-	procEnumChildWindows           = user32Player.NewProc("EnumChildWindows")
-	procGetWindowThreadPID         = user32Player.NewProc("GetWindowThreadProcessId")
-	procGetDPIForWindow            = user32Player.NewProc("GetDpiForWindow")
-	procGetClassNameW              = user32Player.NewProc("GetClassNameW")
-	procGetWindowRect              = user32Player.NewProc("GetWindowRect")
-	procGetCursorPos               = user32Player.NewProc("GetCursorPos")
-	procSetWindowPos               = user32Player.NewProc("SetWindowPos")
-	procIsWindow                   = user32Player.NewProc("IsWindow")
-	procGetWindowLongPtrW          = user32Player.NewProc("GetWindowLongPtrW")
-	procSetWindowLongPtrW          = user32Player.NewProc("SetWindowLongPtrW")
-	procSetLayeredWindowAttributes = user32Player.NewProc("SetLayeredWindowAttributes")
+	user32Player           = syscall.NewLazyDLL("user32.dll")
+	procEnumChildWindows   = user32Player.NewProc("EnumChildWindows")
+	procGetWindowThreadPID = user32Player.NewProc("GetWindowThreadProcessId")
+	procGetDPIForWindow    = user32Player.NewProc("GetDpiForWindow")
+	procGetClassNameW      = user32Player.NewProc("GetClassNameW")
+	procGetWindowRect      = user32Player.NewProc("GetWindowRect")
+	procGetCursorPos       = user32Player.NewProc("GetCursorPos")
+	procSetWindowPos       = user32Player.NewProc("SetWindowPos")
+	procIsWindow           = user32Player.NewProc("IsWindow")
+	procReadProcessMemory  = syscall.NewLazyDLL("kernel32.dll").NewProc("ReadProcessMemory")
 )
 
-func setPlayerOverlayColorKey(hwnd uintptr) error {
-	const (
-		gwlExStyle  = uintptr(^uintptr(19)) // -20
-		wsExLayered = uintptr(0x00080000)
-	)
-	style, _, _ := procGetWindowLongPtrW.Call(hwnd, gwlExStyle)
-	style |= wsExLayered
-	previous, _, err := procSetWindowLongPtrW.Call(hwnd, gwlExStyle, style)
-	if previous == 0 && err != syscall.Errno(0) {
-		return fmt.Errorf("设置播放控件分层窗口失败：%w", err)
-	}
-	const swpNoSizeMoveZOrder = uintptr(0x0001 | 0x0002 | 0x0004 | 0x0020)
-	procSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0, swpNoSizeMoveZOrder)
-	// LWA_COLORKEY removes the exact RGB magenta background used by the
-	// overlay surface, leaving the mpv child window visible underneath.
-	const lwaColorKey = uintptr(0x00000001)
-	const chromaKeyMagenta = uintptr(0x00FF00FF)
-	result, _, err := procSetLayeredWindowAttributes.Call(hwnd, chromaKeyMagenta, 255, lwaColorKey)
-	if result == 0 {
-		if err != syscall.Errno(0) && err != nil {
-			return fmt.Errorf("设置播放控件透明色失败：%w", err)
+type mpvAPI struct {
+	dll            *syscall.DLL
+	create         func() uintptr
+	setOption      func(uintptr, uintptr, uintptr) int32
+	initialize     func(uintptr) int32
+	command        func(uintptr, uintptr) int32
+	waitEvent      func(uintptr, float64) uintptr
+	getProperty    func(uintptr, uintptr, int32, uintptr) int32
+	getPropertyStr func(uintptr, uintptr) uintptr
+	free           func(uintptr)
+	freeNode       func(uintptr)
+	wakeup         func(uintptr)
+	terminate      func(uintptr)
+	errorString    func(int32) uintptr
+}
+
+var mpvLoadOnce sync.Once
+var mpvLoaded *mpvAPI
+var mpvLoadErr error
+
+func loadMpvAPI(path string) (*mpvAPI, error) {
+	mpvLoadOnce.Do(func() {
+		dll, err := syscall.LoadDLL(path)
+		if err != nil {
+			mpvLoadErr = fmt.Errorf("加载 libmpv 失败：%w", err)
+			return
 		}
-		return fmt.Errorf("设置播放控件透明色失败")
-	}
-	return nil
+		api := &mpvAPI{dll: dll}
+		register := func(name string, target any) error {
+			proc, e := dll.FindProc(name)
+			if e != nil {
+				return e
+			}
+			purego.RegisterFunc(target, proc.Addr())
+			return nil
+		}
+		functions := []struct {
+			name string
+			fn   any
+		}{
+			{"mpv_create", &api.create}, {"mpv_set_option_string", &api.setOption}, {"mpv_initialize", &api.initialize},
+			{"mpv_command", &api.command}, {"mpv_wait_event", &api.waitEvent}, {"mpv_get_property", &api.getProperty},
+			{"mpv_get_property_string", &api.getPropertyStr}, {"mpv_free", &api.free}, {"mpv_free_node_contents", &api.freeNode},
+			{"mpv_wakeup", &api.wakeup}, {"mpv_terminate_destroy", &api.terminate}, {"mpv_error_string", &api.errorString},
+		}
+		for _, function := range functions {
+			if err := register(function.name, function.fn); err != nil {
+				mpvLoadErr = fmt.Errorf("加载 libmpv 接口 %s 失败：%w", function.name, err)
+				_ = dll.Release()
+				return
+			}
+		}
+		mpvLoaded = api
+	})
+	return mpvLoaded, mpvLoadErr
+}
+
+type mpvNode struct {
+	value  uintptr
+	format int32
+	pad    int32
+}
+
+type mpvNodeList struct {
+	num    int32
+	pad    int32
+	values uintptr
+	keys   uintptr
+}
+
+type mpvEvent struct {
+	id       int32
+	error    int32
+	userdata uint64
+	data     uintptr
 }
 
 type playerProcess struct {
-	cmd           *exec.Cmd
-	pipeName      string
-	parent        uintptr
-	child         uintptr
-	pid           uint32
-	viewport      ui.Rect
+	api           *mpvAPI
+	ctx           uintptr
+	host          uintptr
 	done          chan struct{}
-	ipcMu         sync.Mutex
-	writeMu       sync.Mutex
-	ipc           *os.File
-	positionBits  atomic.Uint64
-	durationBits  atomic.Uint64
-	positionSeen  atomic.Bool
 	loaded        chan struct{}
 	loadOnce      sync.Once
-	pointerDone   chan struct{}
+	events        chan struct{}
 	pointerEvents chan struct{}
+	pointerDone   chan struct{}
 	stateMu       sync.RWMutex
 	state         PlayerSnapshot
 	exitStatus    string
-	logPath       string
+	positionBits  uint64
+	durationBits  uint64
+	positionSeen  bool
+	stopOnce      sync.Once
+	viewport      ui.Rect
+	resumeAt      float64
 }
 
-func (p *playerProcess) start(binary, streamURL string, parent uintptr, resumeAt float64) error {
-	// MyGo paints native UI into its MyGoSurface child HWND. Hosting mpv in
-	// the top-level window puts the UI surface in front of the video, leaving
-	// a black viewport even while mpv decodes. Give mpv the drawing surface.
-	surface := findMyGoSurface(parent)
-	if surface == 0 {
-		return fmt.Errorf("无法找到 MyGo 原生绘制区域，无法嵌入播放器")
+func (p *playerProcess) start(dllPath, streamURL string, parent uintptr, resumeAt float64) error {
+	api, err := loadMpvAPI(dllPath)
+	if err != nil {
+		return err
 	}
-	parent = surface
-	pipeName := fmt.Sprintf(`\\.\pipe\fnmovie-mpv-%d-%d`, os.Getpid(), time.Now().UnixNano())
+	host := findMyGoSurface(parent)
+	if host == 0 {
+		return fmt.Errorf("无法找到 MyGo 原生绘制区域，无法嵌入 libmpv")
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
-		return fmt.Errorf("定位播放器日志目录失败：%w", err)
+		return fmt.Errorf("定位播放器配置目录失败：%w", err)
 	}
-	configDir = filepath.Join(configDir, "FnMovie")
+	configDir = filepath.Join(configDir, "FnMovie", "mpv")
 	if err := os.MkdirAll(configDir, 0700); err != nil {
-		return fmt.Errorf("创建播放器日志目录失败：%w", err)
-	}
-	logPath := filepath.Join(configDir, "mpv.log")
-	mpvConfigDir := filepath.Join(configDir, "mpv")
-	if err := os.MkdirAll(mpvConfigDir, 0700); err != nil {
 		return fmt.Errorf("创建播放器配置目录失败：%w", err)
 	}
-	inputConf := filepath.Join(mpvConfigDir, "input.conf")
-	if err := os.WriteFile(inputConf, []byte("MBTN_LEFT cycle pause\n"), 0600); err != nil {
-		return fmt.Errorf("写入播放器鼠标快捷键失败：%w", err)
+	ctx := api.create()
+	if ctx == 0 {
+		return fmt.Errorf("libmpv 无法创建播放器实例")
 	}
-	args := []string{
-		"--force-window=yes", "--no-border", "--osc=no", "--osd-level=0", "--keepaspect=yes",
-		"--input-default-bindings=no", "--input-vo-keyboard=no", "--input-cursor=yes", "--input-conf=" + inputConf,
-		// Use the maintained Windows GPU backend, preferring safe hardware
-		// decoding and falling back to software decoding when unsupported.
-		"--vo=gpu-next", "--gpu-context=d3d11", "--hwdec=auto-safe",
-		// Decode compressed audio in mpv and send PCM to the Windows default
-		// output. This avoids requiring an AVR or sound card to support passthrough.
-		"--ao=wasapi", "--audio-channels=auto-safe",
-		"--no-config", "--config-dir=" + mpvConfigDir,
-		"--wid=" + strconv.FormatUint(uint64(parent), 10),
-		"--input-ipc-server=" + pipeName,
-		"--title=飞牛影视播放器",
-		"--log-file=" + logPath, "--msg-level=all=warn,ao=info,ad=info,vd=info,ffmpeg=info",
+	options := [][2]string{
+		{"config", "no"}, {"config-dir", configDir}, {"vo", "gpu-next"}, {"gpu-context", "d3d11"},
+		{"hwdec", "auto-safe"}, {"ao", "wasapi"}, {"audio-channels", "auto-safe"},
+		{"osc", "no"}, {"osd-level", "0"}, {"input-default-bindings", "no"}, {"input-vo-keyboard", "no"},
+		{"keepaspect", "yes"}, {"force-window", "yes"}, {"wid", strconv.FormatUint(uint64(host), 10)},
+		{"log-file", filepath.Join(configDir, "mpv.log")}, {"msg-level", "all=warn,ao=info,ad=info,vd=info,ffmpeg=info"},
 	}
-	if resumeAt > 0 {
-		args = append(args, "--start="+strconv.FormatFloat(resumeAt, 'f', 2, 64))
+	for _, option := range options {
+		if code := setMpvOption(api, ctx, option[0], option[1]); code < 0 {
+			api.terminate(ctx)
+			return fmt.Errorf("设置 libmpv 参数 %s 失败：%s", option[0], mpvError(api, code))
+		}
 	}
-	args = append(args, streamURL)
-	cmd := exec.Command(binary, args...)
-	cmd.Stdin = nil
-	cmd.Stdout = io.Discard
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("启动 mpv 失败：%w", err)
+	if code := api.initialize(ctx); code < 0 {
+		api.terminate(ctx)
+		return fmt.Errorf("初始化 libmpv 失败：%s", mpvError(api, code))
 	}
-	p.cmd, p.pipeName, p.parent, p.pid, p.done = cmd, pipeName, parent, uint32(cmd.Process.Pid), make(chan struct{})
-	p.loaded, p.loadOnce, p.logPath = make(chan struct{}), sync.Once{}, logPath
-	p.stateMu.Lock()
-	p.state = PlayerSnapshot{}
-	p.stateMu.Unlock()
-	p.positionBits.Store(math.Float64bits(resumeAt))
-	p.durationBits.Store(0)
-	p.positionSeen.Store(false)
-	p.pointerEvents = make(chan struct{}, 1)
-	go func() {
-		waitErr := cmd.Wait()
+	p.api, p.ctx, p.host = api, ctx, host
+	p.done, p.loaded, p.events = make(chan struct{}), make(chan struct{}), make(chan struct{}, 1)
+	p.pointerEvents, p.pointerDone, p.resumeAt = make(chan struct{}, 1), make(chan struct{}), resumeAt
+	p.stopOnce = sync.Once{}
+	p.state = PlayerSnapshot{Volume: 100, Speed: 1}
+	go p.eventLoop()
+	if code := p.command("loadfile", streamURL, "replace"); code < 0 {
+		p.stop()
+		return fmt.Errorf("libmpv 载入播放地址失败：%s", mpvError(api, code))
+	}
+	select {
+	case <-p.loaded:
+		go p.watchPointer(p.done, host, p.pointerDone)
+		return nil
+	case <-p.done:
+		return fmt.Errorf("libmpv 在媒体载入前退出")
+	case <-time.After(25 * time.Second):
+		p.stop()
+		return fmt.Errorf("等待 libmpv 媒体载入超时")
+	}
+}
+
+func setMpvOption(api *mpvAPI, ctx uintptr, name, value string) int32 {
+	n, _ := syscall.BytePtrFromString(name)
+	v, _ := syscall.BytePtrFromString(value)
+	code := api.setOption(ctx, uintptr(unsafe.Pointer(n)), uintptr(unsafe.Pointer(v)))
+	runtime.KeepAlive(n)
+	runtime.KeepAlive(v)
+	return code
+}
+
+func mpvError(api *mpvAPI, code int32) string {
+	ptr := api.errorString(code)
+	if ptr == 0 {
+		return fmt.Sprintf("错误 %d", code)
+	}
+	return cString(ptr)
+}
+
+func cString(ptr uintptr) string {
+	if ptr == 0 {
+		return ""
+	}
+	var result strings.Builder
+	for offset := uintptr(0); ; offset += 128 {
+		buffer, ok := readCBytes(ptr+offset, 128)
+		if !ok {
+			break
+		}
+		if end := strings.IndexByte(string(buffer), 0); end >= 0 {
+			result.Write(buffer[:end])
+			break
+		}
+		result.Write(buffer)
+	}
+	return result.String()
+}
+
+func readCBytes(address uintptr, size int) ([]byte, bool) {
+	if address == 0 || size <= 0 {
+		return nil, false
+	}
+	buffer := make([]byte, size)
+	var read uintptr
+	process, _ := syscall.GetCurrentProcess()
+	ok, _, _ := procReadProcessMemory.Call(uintptr(process), address,
+		uintptr(unsafe.Pointer(&buffer[0])), uintptr(size), uintptr(unsafe.Pointer(&read)))
+	return buffer, ok != 0 && read == uintptr(size)
+}
+
+func (p *playerProcess) command(args ...any) int32 {
+	if p.api == nil || p.ctx == 0 {
+		return -20
+	}
+	stringsArg := make([]string, 0, len(args))
+	for _, arg := range args {
+		stringsArg = append(stringsArg, fmt.Sprint(arg))
+	}
+	if len(stringsArg) > 0 && stringsArg[0] == "set_property" {
+		stringsArg[0] = "set"
+	}
+	ptrs := make([]*byte, len(stringsArg)+1)
+	for i, arg := range stringsArg {
+		ptrs[i], _ = syscall.BytePtrFromString(arg)
+	}
+	code := p.api.command(p.ctx, uintptr(unsafe.Pointer(&ptrs[0])))
+	runtime.KeepAlive(ptrs)
+	return code
+}
+
+func (p *playerProcess) eventLoop() {
+	defer func() {
 		p.stateMu.Lock()
-		if waitErr != nil {
-			p.exitStatus = waitErr.Error()
-		} else {
-			p.exitStatus = "exit code 0"
+		if p.exitStatus == "" {
+			p.exitStatus = "libmpv event loop exited"
 		}
 		p.stateMu.Unlock()
 		close(p.done)
 	}()
-	go p.connectIPC()
-	go func() {
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			if p.child = findPlayerChild(parent, p.pid); p.child != 0 {
-				p.setViewport(p.viewport)
-				return
+	ticker := time.NewTicker(180 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-p.events:
+			return
+		case <-ticker.C:
+		}
+		if p.ctx == 0 {
+			return
+		}
+		eventPtr := p.api.waitEvent(p.ctx, 0.02)
+		if eventPtr != 0 {
+			eventBytes, ok := readCBytes(eventPtr, 24)
+			if !ok {
+				continue
 			}
-			select {
-			case <-p.done:
+			event := *(*mpvEvent)(unsafe.Pointer(&eventBytes[0]))
+			switch event.id {
+			case 1:
 				return
-			case <-time.After(50 * time.Millisecond):
+			case 7:
+				if event.data != 0 {
+					endBytes, _ := readCBytes(event.data, 8)
+					if len(endBytes) < 8 {
+						continue
+					}
+					end := [2]int32{int32(binary.LittleEndian.Uint32(endBytes)), int32(binary.LittleEndian.Uint32(endBytes[4:]))}
+					if end[0] == 4 {
+						p.stateMu.Lock()
+						p.state.Error = mpvError(p.api, end[1])
+						p.stateMu.Unlock()
+					}
+				}
+			case 8:
+				if p.resumeAt > 0 {
+					if code := p.command("seek", strconv.FormatFloat(p.resumeAt, 'f', 2, 64), "absolute", "exact"); code < 0 {
+						log.Printf("libmpv resume seek failed: %s", mpvError(p.api, code))
+					}
+					p.resumeAt = 0
+				}
+				p.loadOnce.Do(func() { close(p.loaded) })
 			}
 		}
-	}()
-	select {
-	case <-p.loaded:
-		p.pointerDone = make(chan struct{})
-		go p.watchPointer(p.done, p.parent, p.pid, p.pointerDone)
-		return nil
-	case <-p.done:
-		return fmt.Errorf("mpv 未能载入媒体：%s", p.logSummary())
-	case <-time.After(25 * time.Second):
-		return fmt.Errorf("等待 mpv 载入媒体超时：%s", p.logSummary())
+		p.refreshState()
 	}
+}
+
+func (p *playerProcess) refreshState() {
+	position := p.getFloat("time-pos", 0)
+	duration := p.getFloat("duration", 0)
+	p.stateMu.Lock()
+	p.positionBits, p.durationBits, p.positionSeen = math.Float64bits(position), math.Float64bits(duration), duration > 0
+	p.state.Loaded = duration > 0
+	p.state.Position, p.state.Duration = position, duration
+	p.state.Paused = p.getFlag("pause")
+	p.state.Muted = p.getFlag("mute")
+	p.state.Volume = p.getFloat("volume", 100)
+	p.state.Speed = p.getFloat("speed", 1)
+	p.state.AudioOutput = p.getString("current-ao")
+	p.state.AudioParams = p.getString("audio-params")
+	p.state.AudioTracks, p.state.SubtitleTracks = p.getTracks()
+	p.stateMu.Unlock()
+	if duration > 0 {
+		p.loadOnce.Do(func() { close(p.loaded) })
+	}
+}
+
+func (p *playerProcess) getFloat(name string, fallback float64) float64 {
+	var value float64
+	if p.getRaw(name, 5, uintptr(unsafe.Pointer(&value))) < 0 {
+		return fallback
+	}
+	return value
+}
+
+func (p *playerProcess) getFlag(name string) bool {
+	var value int32
+	if p.getRaw(name, 3, uintptr(unsafe.Pointer(&value))) < 0 {
+		return false
+	}
+	return value != 0
+}
+
+func (p *playerProcess) getString(name string) string {
+	ptr := p.api.getPropertyStr(p.ctx, cPtr(name))
+	if ptr == 0 {
+		return ""
+	}
+	value := cString(ptr)
+	p.api.free(ptr)
+	return value
+}
+
+func cPtr(value string) uintptr {
+	ptr, _ := syscall.BytePtrFromString(value)
+	return uintptr(unsafe.Pointer(ptr))
+}
+
+func (p *playerProcess) getRaw(name string, format int32, data uintptr) int32 {
+	return p.api.getProperty(p.ctx, cPtr(name), format, data)
+}
+
+func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack) {
+	var node mpvNode
+	if p.getRaw("track-list", 6, uintptr(unsafe.Pointer(&node))) < 0 || node.format != 7 || node.value == 0 {
+		return nil, nil
+	}
+	defer p.api.freeNode(uintptr(unsafe.Pointer(&node)))
+	listBytes, ok := readCBytes(node.value, 24)
+	if !ok {
+		return nil, nil
+	}
+	list := *(*mpvNodeList)(unsafe.Pointer(&listBytes[0]))
+	if list.num <= 0 || list.num > 1024 {
+		return nil, nil
+	}
+	valueBytes, ok := readCBytes(list.values, int(list.num)*16)
+	if !ok {
+		return nil, nil
+	}
+	audio, subtitles := make([]PlayerTrack, 0), make([]PlayerTrack, 0)
+	values := unsafe.Slice((*mpvNode)(unsafe.Pointer(&valueBytes[0])), int(list.num))
+	for _, value := range values {
+		if value.format != 8 || value.value == 0 {
+			continue
+		}
+		fieldsBytes, valid := readCBytes(value.value, 24)
+		if !valid {
+			continue
+		}
+		fields := *(*mpvNodeList)(unsafe.Pointer(&fieldsBytes[0]))
+		if fields.num < 0 || fields.num > 64 || fields.num == 0 {
+			continue
+		}
+		fieldBytes, valid := readCBytes(fields.values, int(fields.num)*16)
+		keyBytes, keysValid := readCBytes(fields.keys, int(fields.num)*8)
+		if !valid || !keysValid {
+			continue
+		}
+		fieldValues := unsafe.Slice((*mpvNode)(unsafe.Pointer(&fieldBytes[0])), int(fields.num))
+		track := PlayerTrack{}
+		kind := ""
+		for i, field := range fieldValues {
+			key := cString(uintptr(binary.LittleEndian.Uint64(keyBytes[i*8:])))
+			str := ""
+			if field.format == 1 {
+				str = cString(field.value)
+			}
+			switch key {
+			case "id":
+				if field.format == 4 {
+					track.ID = int(int64(field.value))
+				}
+			case "title":
+				track.Title = str
+			case "lang":
+				track.Language = str
+			case "type":
+				kind = str
+			case "selected":
+				track.Selected = field.value != 0
+			case "external":
+				track.External = field.value != 0
+			}
+		}
+		if track.Title == "" {
+			track.Title = track.Language
+		}
+		if kind == "audio" {
+			audio = append(audio, track)
+		} else if kind == "sub" {
+			subtitles = append(subtitles, track)
+		}
+	}
+	return audio, subtitles
 }
 
 func (p *playerProcess) running() bool {
@@ -201,418 +459,114 @@ func (p *playerProcess) running() bool {
 	}
 }
 
-func (p *playerProcess) stop() {
-	if p.cmd == nil || p.cmd.Process == nil {
-		return
+func (p *playerProcess) exitSummary() string {
+	p.stateMu.RLock()
+	defer p.stateMu.RUnlock()
+	if p.exitStatus == "" {
+		return "libmpv is running"
 	}
-	quitErr := p.sendCommand(map[string]any{"command": []any{"quit"}})
-	if quitErr != nil {
-		// If the IPC pipe is wedged, stop the owned process directly instead
-		// of leaving the UI blocked while trying to write a graceful quit.
-		_ = p.cmd.Process.Kill()
-	}
-	select {
-	case <-p.done:
-	case <-time.After(func() time.Duration {
-		if quitErr != nil {
-			return 2 * time.Second
-		}
-		return 1500 * time.Millisecond
-	}()):
-		_ = p.cmd.Process.Kill()
-		select {
-		case <-p.done:
-		case <-time.After(2 * time.Second):
-			_ = exec.Command("taskkill.exe", "/PID", strconv.Itoa(p.cmd.Process.Pid), "/T", "/F").Run()
-			select {
-			case <-p.done:
-			case <-time.After(2 * time.Second):
-				log.Printf("mpv process %d did not exit after forced shutdown", p.cmd.Process.Pid)
-			}
-		}
-	}
-	if p.pointerDone != nil {
-		select {
-		case <-p.pointerDone:
-		case <-time.After(2300 * time.Millisecond):
-		}
-		p.pointerDone = nil
-	}
-	p.ipcMu.Lock()
-	if p.ipc != nil {
-		_ = p.ipc.Close()
-		p.ipc = nil
-	}
-	p.ipcMu.Unlock()
-	p.cmd = nil
-	p.child = 0
+	return p.exitStatus
 }
 
-// watchPointer reports pointer movement over the embedded video rectangle.
-// This remains reliable when the transparent MyGo control window is hidden.
-func (p *playerProcess) watchPointer(done <-chan struct{}, parent uintptr, pid uint32, finished chan<- struct{}) {
+func (p *playerProcess) stop() {
+	p.stopOnce.Do(func() {
+		if p.ctx == 0 {
+			return
+		}
+		p.command("quit")
+		p.api.wakeup(p.ctx)
+		if p.events != nil {
+			select {
+			case p.events <- struct{}{}:
+			default:
+			}
+		}
+		if p.done != nil {
+			select {
+			case <-p.done:
+			case <-time.After(time.Second):
+			}
+		}
+		p.api.terminate(p.ctx)
+		p.ctx = 0
+		if p.pointerDone != nil {
+			select {
+			case <-p.pointerDone:
+			case <-time.After(time.Second):
+			}
+		}
+	})
+}
+
+func (p *playerProcess) setProperty(name string, value any) {
+	if p.ctx == 0 {
+		return
+	}
+	p.command("set", name, value)
+}
+
+func (p *playerProcess) runningCommand(args ...any) {
+	if code := p.command(args...); code < 0 {
+		log.Printf("libmpv command %q failed: %s", strings.Join(toStrings(args), " "), mpvError(p.api, code))
+	}
+}
+
+func (p *playerProcess) watchPointer(done <-chan struct{}, host uintptr, finished chan<- struct{}) {
 	defer close(finished)
-	ticker := time.NewTicker(40 * time.Millisecond)
+	ticker := time.NewTicker(35 * time.Millisecond)
 	defer ticker.Stop()
 	type point struct{ X, Y int32 }
-	var last point
-	hasLast := false
-	lastActivity := time.Time{}
+	var previous point
+	seen := false
 	for {
 		select {
 		case <-done:
 			return
 		case <-ticker.C:
 		}
-		select {
-		case <-done:
-			return
-		default:
-		}
-
 		var cursor point
-		if ok, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor))); ok == 0 {
+		if ok, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursor))); ok == 0 || seen && cursor == previous {
 			continue
 		}
-		moved := !hasLast || cursor != last
-		last, hasLast = cursor, true
-		if !moved {
-			continue
-		}
-
-		child := findPlayerChild(parent, pid)
-		if child == 0 {
-			continue
-		}
+		previous, seen = cursor, true
 		var rect [4]int32
-		if ok, _, _ := procGetWindowRect.Call(child, uintptr(unsafe.Pointer(&rect[0]))); ok == 0 {
-			continue
-		}
-		if cursor.X < rect[0] || cursor.X >= rect[2] || cursor.Y < rect[1] || cursor.Y >= rect[3] {
-			continue
-		}
-		if time.Since(lastActivity) < 30*time.Millisecond {
+		if ok, _, _ := procGetWindowRect.Call(host, uintptr(unsafe.Pointer(&rect[0]))); ok == 0 || cursor.X < rect[0] || cursor.X >= rect[2] || cursor.Y < rect[1] || cursor.Y >= rect[3] {
 			continue
 		}
 		select {
 		case p.pointerEvents <- struct{}{}:
 		default:
 		}
-		lastActivity = time.Now()
 	}
 }
 
-func (p *playerProcess) command(args ...any) {
-	if err := p.sendCommand(map[string]any{"command": args}); err != nil {
-		name := "unknown"
-		if len(args) > 0 {
-			if command, ok := args[0].(string); ok {
-				name = command
-			}
-		}
-		log.Printf("mpv IPC %s command failed: %v", name, err)
+func toStrings(values []any) []string {
+	result := make([]string, len(values))
+	for i, value := range values {
+		result[i] = fmt.Sprint(value)
 	}
-}
-
-func (p *playerProcess) sendCommand(payload map[string]any) error {
-	if p.pipeName == "" || !p.running() {
-		return fmt.Errorf("mpv is not running")
-	}
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	p.ipcMu.Lock()
-	file := p.ipc
-	p.ipcMu.Unlock()
-	if file == nil {
-		return fmt.Errorf("mpv control channel is not ready")
-	}
-	written := make(chan error, 1)
-	go func() {
-		_, writeErr := file.Write(data)
-		written <- writeErr
-	}()
-	select {
-	case err = <-written:
-		if err != nil {
-			return err
-		}
-	case <-p.done:
-		return fmt.Errorf("mpv exited before accepting the command")
-	case <-time.After(2 * time.Second):
-		p.ipcMu.Lock()
-		if p.ipc == file {
-			p.ipc = nil
-		}
-		p.ipcMu.Unlock()
-		_ = file.Close() // Closing the Windows pipe interrupts a blocked write.
-		return fmt.Errorf("mpv control channel write timed out")
-	}
-	return nil
-}
-
-func (p *playerProcess) connectIPC() {
-	for p.running() {
-		file, err := os.OpenFile(p.pipeName, os.O_RDWR, 0)
-		if err != nil {
-			select {
-			case <-p.done:
-				return
-			case <-time.After(100 * time.Millisecond):
-				continue
-			}
-		}
-		p.ipcMu.Lock()
-		if !p.running() {
-			p.ipcMu.Unlock()
-			_ = file.Close()
-			return
-		}
-		p.ipc = file
-		p.ipcMu.Unlock()
-		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 1, "time-pos"}})
-		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 2, "duration"}})
-		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 3, "pause"}})
-		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 4, "volume"}})
-		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 5, "track-list"}})
-		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 6, "mute"}})
-		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 7, "speed"}})
-		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 8, "current-ao"}})
-		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 9, "audio-params"}})
-		p.readIPC(file)
-		p.ipcMu.Lock()
-		if p.ipc == file {
-			p.ipc = nil
-		}
-		p.ipcMu.Unlock()
-		_ = file.Close()
-		select {
-		case <-p.done:
-			return
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-}
-
-func (p *playerProcess) readIPC(file *os.File) {
-	reader := bufio.NewReader(file)
-	for {
-		line, err := reader.ReadBytes('\n')
-		if err != nil {
-			return
-		}
-		var event struct {
-			Event  string          `json:"event"`
-			Name   string          `json:"name"`
-			Data   json.RawMessage `json:"data"`
-			Reason string          `json:"reason"`
-			Error  string          `json:"error"`
-		}
-		if json.Unmarshal(line, &event) != nil {
-			continue
-		}
-		switch event.Event {
-		case "file-loaded", "playback-restart":
-			p.stateMu.Lock()
-			p.state.Loaded = true
-			p.state.Error = ""
-			p.stateMu.Unlock()
-			p.loadOnce.Do(func() { close(p.loaded) })
-			continue
-		case "end-file":
-			log.Printf("mpv end-file: reason=%s error=%s", event.Reason, event.Error)
-			if event.Reason == "error" {
-				message := strings.TrimSpace(event.Error)
-				if message == "" {
-					message = p.logSummary()
-				}
-				p.stateMu.Lock()
-				p.state.Error = message
-				p.stateMu.Unlock()
-			}
-			continue
-		case "property-change":
-		default:
-			continue
-		}
-		if event.Name == "track-list" {
-			p.updateTracks(event.Data)
-			continue
-		}
-		if event.Name == "current-ao" {
-			var output string
-			if json.Unmarshal(event.Data, &output) == nil {
-				p.stateMu.Lock()
-				p.state.AudioOutput = output
-				p.stateMu.Unlock()
-			}
-			continue
-		}
-		if event.Name == "audio-params" {
-			p.stateMu.Lock()
-			p.state.AudioParams = strings.TrimSpace(string(event.Data))
-			p.stateMu.Unlock()
-			continue
-		}
-		var value float64
-		switch event.Name {
-		case "time-pos":
-			if json.Unmarshal(event.Data, &value) == nil {
-				p.positionBits.Store(math.Float64bits(value))
-				p.positionSeen.Store(true)
-				p.stateMu.Lock()
-				p.state.Loaded = true
-				p.stateMu.Unlock()
-				p.loadOnce.Do(func() { close(p.loaded) })
-			}
-		case "duration":
-			if json.Unmarshal(event.Data, &value) == nil {
-				p.durationBits.Store(math.Float64bits(value))
-			}
-		case "pause":
-			var paused bool
-			if json.Unmarshal(event.Data, &paused) == nil {
-				p.stateMu.Lock()
-				p.state.Paused = paused
-				p.stateMu.Unlock()
-			}
-		case "volume":
-			if json.Unmarshal(event.Data, &value) == nil {
-				p.stateMu.Lock()
-				p.state.Volume = value
-				p.stateMu.Unlock()
-			}
-		case "mute":
-			var muted bool
-			if json.Unmarshal(event.Data, &muted) == nil {
-				p.stateMu.Lock()
-				p.state.Muted = muted
-				p.stateMu.Unlock()
-			}
-		case "speed":
-			if json.Unmarshal(event.Data, &value) == nil {
-				p.stateMu.Lock()
-				p.state.Speed = value
-				p.stateMu.Unlock()
-			}
-		}
-	}
-}
-
-func (p *playerProcess) updateTracks(data json.RawMessage) {
-	var values []map[string]any
-	if json.Unmarshal(data, &values) != nil {
-		return
-	}
-	audio, subtitles := make([]PlayerTrack, 0), make([]PlayerTrack, 0)
-	for _, value := range values {
-		track := PlayerTrack{
-			ID: int(intValue(value["id"])), Title: firstString(value, "title", "lang", "codec"),
-			Language: firstString(value, "lang"), Selected: anyBool(value["selected"]), External: anyBool(value["external"]),
-		}
-		if name := firstString(value, "title"); name != "" && track.Language != "" && name != track.Language {
-			track.Title = name + " · " + track.Language
-		}
-		switch strings.ToLower(firstString(value, "type")) {
-		case "audio":
-			audio = append(audio, track)
-		case "sub":
-			subtitles = append(subtitles, track)
-		}
-	}
-	p.stateMu.Lock()
-	p.state.AudioTracks, p.state.SubtitleTracks = audio, subtitles
-	p.stateMu.Unlock()
-}
-
-func intValue(value any) int64 {
-	switch v := value.(type) {
-	case float64:
-		return int64(v)
-	case int:
-		return int64(v)
-	case json.Number:
-		n, _ := v.Int64()
-		return n
-	}
-	return 0
-}
-
-func (p *playerProcess) snapshot() PlayerSnapshot {
-	position, duration, _ := p.position()
-	p.stateMu.RLock()
-	state := p.state
-	state.AudioTracks = append([]PlayerTrack(nil), state.AudioTracks...)
-	state.SubtitleTracks = append([]PlayerTrack(nil), state.SubtitleTracks...)
-	p.stateMu.RUnlock()
-	state.Position, state.Duration = position, duration
-	if state.Duration <= 0 {
-		state.Duration = duration
-	}
-	return state
-}
-
-func (p *playerProcess) logSummary() string {
-	data, err := os.ReadFile(p.logPath)
-	if err != nil {
-		return "请检查 NAS 网络及视频格式"
-	}
-	text := strings.TrimSpace(string(data))
-	if len(text) > 600 {
-		text = text[len(text)-600:]
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return "请检查 NAS 网络及视频格式"
-	}
-	return text
-}
-
-func (p *playerProcess) exitSummary() string {
-	p.stateMu.RLock()
-	defer p.stateMu.RUnlock()
-	if p.exitStatus == "" {
-		return "process still running"
-	}
-	return p.exitStatus
+	return result
 }
 
 func (p *playerProcess) position() (float64, float64, bool) {
-	return math.Float64frombits(p.positionBits.Load()), math.Float64frombits(p.durationBits.Load()), p.positionSeen.Load()
+	p.stateMu.RLock()
+	defer p.stateMu.RUnlock()
+	return math.Float64frombits(p.positionBits), math.Float64frombits(p.durationBits), p.positionSeen
+}
+
+func (p *playerProcess) snapshot() PlayerSnapshot {
+	p.stateMu.RLock()
+	defer p.stateMu.RUnlock()
+	state := p.state
+	state.AudioTracks = append([]PlayerTrack(nil), state.AudioTracks...)
+	state.SubtitleTracks = append([]PlayerTrack(nil), state.SubtitleTracks...)
+	return state
 }
 
 func (p *playerProcess) setViewport(rect ui.Rect) {
 	p.viewport = rect
-	if p.child == 0 || procIsWindow.Find() != nil {
-		return
-	}
-	valid, _, _ := procIsWindow.Call(p.child)
-	if valid == 0 {
-		p.child = findPlayerChild(p.parent, p.pid)
-	}
-	if p.child == 0 {
-		return
-	}
-	dpi := uintptr(96)
-	if value, _, _ := procGetDPIForWindow.Call(p.parent); value > 0 {
-		dpi = value
-	}
-	scale := float64(dpi) / 96.0
-	x, y := int32(float64(rect.X)*scale), int32(float64(rect.Y)*scale)
-	w, h := int32(float64(rect.W)*scale), int32(float64(rect.H)*scale)
-	const swpNoActivate = 0x0010
-	const swpShowWindow = 0x0040
-	procSetWindowPos.Call(p.child, 0, uintptr(x), uintptr(y), uintptr(w), uintptr(h), swpNoActivate|swpShowWindow)
-	if os.Getenv("FNMOVIE_DEBUG_PLAYER_WINDOW") == "1" {
-		var hostRect, childRect [4]int32
-		procGetWindowRect.Call(p.parent, uintptr(unsafe.Pointer(&hostRect[0])))
-		procGetWindowRect.Call(p.child, uintptr(unsafe.Pointer(&childRect[0])))
-		log.Printf("mpv embed geometry: host=%v child=%v viewport=%v dpi=%d", hostRect, childRect, rect, dpi)
-	}
+	// libmpv renders directly into the MyGoSurface HWND supplied as wid. MyGo
+	// owns its sizing, so no extra child window should be moved over the UI.
 }
 
 func (p *playerProcess) pointerActivity() <-chan struct{} { return p.pointerEvents }
@@ -627,37 +581,12 @@ func windowScale(handle uintptr) float64 {
 	return 1
 }
 
-func findPlayerChild(parent uintptr, pid uint32) uintptr {
-	var result uintptr
-	callback := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
-		var processID uint32
-		procGetWindowThreadPID.Call(hwnd, uintptr(unsafe.Pointer(&processID)))
-		if processID == pid {
-			result = hwnd
-			return 0
-		}
-		return 1
-	})
-	procEnumChildWindows.Call(parent, callback, 0)
-	return result
-}
-
 func findMyGoSurface(parent uintptr) uintptr {
 	var result uintptr
-	debug := os.Getenv("FNMOVIE_DEBUG_PLAYER_WINDOW") == "1"
-	if debug {
-		var parentClass [128]uint16
-		length, _, _ := procGetClassNameW.Call(parent, uintptr(unsafe.Pointer(&parentClass[0])), uintptr(len(parentClass)))
-		log.Printf("looking for MyGo surface under hwnd=%#x class=%q", parent, syscall.UTF16ToString(parentClass[:length]))
-	}
 	callback := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
 		className := make([]uint16, 128)
 		length, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&className[0])), uintptr(len(className)))
-		name := syscall.UTF16ToString(className[:length])
-		if debug {
-			log.Printf("player host child hwnd=%#x class=%q", hwnd, name)
-		}
-		if length > 0 && name == "MyGoSurface" {
+		if length > 0 && syscall.UTF16ToString(className[:length]) == "MyGoSurface" {
 			result = hwnd
 			return 0
 		}

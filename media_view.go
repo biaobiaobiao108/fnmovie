@@ -84,19 +84,24 @@ func groupSeriesEpisodes(items []MediaItem) []MediaItem {
 	for _, episode := range items {
 		seriesTitle := strings.TrimSpace(episode.SeriesTitle)
 		if seriesTitle == "" {
-			seriesTitle = firstString(episode.Raw, "parent_title", "parentTitle")
+			seriesTitle = firstString(episode.Raw, "tv_name", "series_title", "seriesTitle", "show_title", "showTitle")
 		}
 		if episode.EpisodeNumber == 0 {
 			episode.EpisodeNumber = parseMediaNumber(firstString(episode.Raw, "episode_number", "episodeNumber"))
 		}
-		if seriesTitle == "" || episode.EpisodeNumber == 0 {
+		if seriesTitle == "" {
 			grouped = append(grouped, episode)
 			continue
 		}
 		// Episode records can carry per-episode air dates in Year. Use the
 		// normalized series title so those dates do not split one show into
 		// dozens of cards across the catalog.
-		key := strings.ToLower(strings.Join(strings.Fields(seriesTitle), " "))
+		key := strings.TrimSpace(episode.SeriesID)
+		if key == "" {
+			key = "title:" + strings.ToLower(strings.Join(strings.Fields(seriesTitle), " "))
+		} else {
+			key = "id:" + key
+		}
 		index, exists := indices[key]
 		if !exists {
 			series := episode
