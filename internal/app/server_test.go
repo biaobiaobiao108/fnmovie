@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -585,6 +587,159 @@ func TestExternalPosterDoesNotReceiveServerCredentials(t *testing.T) {
 	client.client = imageServer.Client()
 	if _, err := client.FetchImage(imageServer.URL + "/poster"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPosterRedirectDoesNotForwardCredentialsAcrossPorts(t *testing.T) {
+	imageServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" || r.Header.Get("authx") != "" {
+			t.Error("redirect forwarded NAS credentials to a different origin")
+		}
+		_, _ = w.Write([]byte("image"))
+	}))
+	defer imageServer.Close()
+	nas := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "session-token" {
+			t.Error("initial NAS request did not receive credentials")
+		}
+		http.Redirect(w, r, imageServer.URL+"/image", http.StatusFound)
+	}))
+	defer nas.Close()
+	client := NewServer(nas.URL, "session-token")
+	data, err := client.FetchImage(nas.URL + "/poster")
+	if err != nil || string(data) != "image" {
+		t.Fatalf("redirected image failed: data=%q err=%v", data, err)
+	}
+}
+
+func TestAuthenticatedAPIRedirectDoesNotChangeNASOrigin(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" || r.Header.Get("authx") != "" {
+			t.Error("API redirect forwarded NAS credentials")
+		}
+		writeJSON(t, w, `{"code":0,"data":[]}`)
+	}))
+	defer target.Close()
+	nas := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.Path, http.StatusFound)
+	}))
+	defer nas.Close()
+	client := NewServer(nas.URL, "session-token")
+	for range 2 {
+		if _, err := client.Libraries(); err != nil {
+			t.Fatal(err)
+		}
+		if client.baseURLValue() != nas.URL {
+			t.Fatal("authenticated redirect changed the trusted NAS origin")
+		}
+	}
+}
+
+func TestLibrarySearchRequiresVerifiedLibraryScope(t *testing.T) {
+	for _, method := range []string{"page", "all"} {
+		for _, hasLibrary := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/library-fields-%t", method, hasLibrary), func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path != "/api/v1/search/list" || r.URL.Query().Get("ancestor_guid") != "selected" || r.URL.Query().Get("q") != "keyword" {
+						t.Errorf("search request lost selected library scope: %s", r.URL)
+					}
+					if hasLibrary {
+						writeJSON(t, w, `{"code":0,"data":{"list":[{"guid":"keep","title":"Selected","type":"Movie","ancestor_guid":"selected"},{"guid":"drop","title":"Foreign","type":"Movie","ancestor_guid":"other"}]}}`)
+					} else {
+						writeJSON(t, w, `{"code":0,"data":{"list":[{"guid":"unknown","title":"Unknown library","type":"Movie"}]}}`)
+					}
+				}))
+				defer server.Close()
+				client := NewServer(server.URL, "session-token")
+				var items []MediaItem
+				var err error
+				if method == "page" {
+					items, _, err = client.LibraryPageContext(t.Context(), "selected", "keyword", 1, 100)
+				} else {
+					items, err = client.LibraryItems("selected", "keyword")
+				}
+				if !hasLibrary {
+					if err == nil || len(items) != 0 {
+						t.Fatalf("unverified global search escaped into library: items=%v err=%v", items, err)
+					}
+				} else if err != nil || len(items) != 1 || items[0].ID != "keep" {
+					t.Fatalf("verified search scope failed: items=%v err=%v", items, err)
+				}
+			})
+		}
+	}
+}
+
+func TestMalformedPlaybackURLReturnsError(t *testing.T) {
+	client := NewServer("http://nas.example", "session-token")
+	if _, proxy, err := client.ProxyPlayback("%invalid"); err == nil || proxy != nil {
+		t.Fatalf("malformed proxy URL should fail: proxy=%v err=%v", proxy, err)
+	}
+	if _, err := client.FetchImage("%invalid"); err == nil {
+		t.Fatal("malformed image URL should fail")
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/play/info":
+			writeJSON(t, w, `{"code":0,"data":{"media_guid":"media"}}`)
+		case "/api/v1/stream":
+			writeJSON(t, w, `{"code":0,"data":{"direct_link_qualities":[{"url":"%invalid"}]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	if _, err := NewServer(server.URL, "session-token").Playback(MediaItem{ID: "movie"}); err == nil {
+		t.Fatal("malformed direct playback URL should return an error")
+	}
+}
+
+func TestSessionRequestsHonorCancellation(t *testing.T) {
+	for _, operation := range []string{"login", "libraries"} {
+		t.Run(operation, func(t *testing.T) {
+			started := make(chan struct{})
+			release := make(chan struct{})
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				close(started)
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+			}))
+			defer server.Close()
+			defer close(release)
+			client := NewServer(server.URL, "previous-token")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			done := make(chan error, 1)
+			go func() {
+				var err error
+				if operation == "login" {
+					_, err = client.LoginContext(ctx, "user", "password")
+				} else {
+					_, err = client.LibrariesContext(ctx)
+				}
+				done <- err
+			}()
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+				t.Fatal("request did not start")
+			}
+			cancel()
+			select {
+			case err := <-done:
+				if !errors.Is(err, context.Canceled) {
+					t.Fatalf("request did not return cancellation: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("canceled session request did not finish")
+			}
+			if client.tokenValue() != "previous-token" {
+				t.Fatal("canceled login replaced the current session token")
+			}
+		})
 	}
 }
 

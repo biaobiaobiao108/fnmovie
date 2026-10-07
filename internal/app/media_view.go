@@ -79,9 +79,9 @@ func deriveVisibleItems(source []MediaItem, key mediaViewKey) []MediaItem {
 			return out[i].AddedAt > out[j].AddedAt
 		})
 	}
-	if key.GroupEpisodes {
-		out = groupSeriesEpisodes(out)
-	}
+	// Server hierarchy nodes already carry their real identities. In particular,
+	// favorites may contain episodes that must remain independently actionable.
+	// Never turn catalog nodes into synthetic series before passing them to APIs.
 	return out
 }
 

@@ -3,6 +3,7 @@
 package app
 
 import (
+	"context"
 	"encoding/binary"
 	"fmt"
 	"log"
@@ -22,16 +23,22 @@ import (
 )
 
 var (
-	user32Player           = syscall.NewLazyDLL("user32.dll")
-	procEnumChildWindows   = user32Player.NewProc("EnumChildWindows")
-	procGetWindowThreadPID = user32Player.NewProc("GetWindowThreadProcessId")
-	procGetDPIForWindow    = user32Player.NewProc("GetDpiForWindow")
-	procGetClassNameW      = user32Player.NewProc("GetClassNameW")
-	procGetWindowRect      = user32Player.NewProc("GetWindowRect")
-	procGetCursorPos       = user32Player.NewProc("GetCursorPos")
-	procSetWindowPos       = user32Player.NewProc("SetWindowPos")
-	procIsWindow           = user32Player.NewProc("IsWindow")
-	procReadProcessMemory  = syscall.NewLazyDLL("kernel32.dll").NewProc("ReadProcessMemory")
+	user32Player            = syscall.NewLazyDLL("user32.dll")
+	procEnumChildWindows    = user32Player.NewProc("EnumChildWindows")
+	procGetWindowThreadPID  = user32Player.NewProc("GetWindowThreadProcessId")
+	procGetDPIForWindow     = user32Player.NewProc("GetDpiForWindow")
+	procGetClassNameW       = user32Player.NewProc("GetClassNameW")
+	procGetWindowRect       = user32Player.NewProc("GetWindowRect")
+	procGetCursorPos        = user32Player.NewProc("GetCursorPos")
+	procSetWindowPos        = user32Player.NewProc("SetWindowPos")
+	procIsWindow            = user32Player.NewProc("IsWindow")
+	procCreatePlayerWindow  = user32Player.NewProc("CreateWindowExW")
+	procDestroyPlayerWindow = user32Player.NewProc("DestroyWindow")
+	procShowPlayerWindow    = user32Player.NewProc("ShowWindow")
+	procGetPlayerClientRect = user32Player.NewProc("GetClientRect")
+	procGetPlayerParent     = user32Player.NewProc("GetParent")
+	procGetPlayerModule     = syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW")
+	procReadProcessMemory   = syscall.NewLazyDLL("kernel32.dll").NewProc("ReadProcessMemory")
 )
 
 type mpvAPI struct {
@@ -112,6 +119,7 @@ type mpvEvent struct {
 }
 
 type playerProcess struct {
+	commandMu     sync.Mutex
 	api           *mpvAPI
 	ctx           uintptr
 	host          uintptr
@@ -133,6 +141,13 @@ type playerProcess struct {
 }
 
 func (p *playerProcess) start(dllPath, streamURL string, parent uintptr, resumeAt float64) error {
+	return p.startContext(context.Background(), dllPath, streamURL, parent, resumeAt)
+}
+
+func (p *playerProcess) startContext(playbackCtx context.Context, dllPath, streamURL string, parent uintptr, resumeAt float64) error {
+	if err := playbackCtx.Err(); err != nil {
+		return err
+	}
 	api, err := loadMpvAPI(dllPath)
 	if err != nil {
 		return err
@@ -170,18 +185,18 @@ func (p *playerProcess) start(dllPath, streamURL string, parent uintptr, resumeA
 		api.terminate(ctx)
 		return fmt.Errorf("初始化 libmpv 失败：%s", mpvError(api, code))
 	}
-	p.api, p.ctx, p.host = api, ctx, host
-	p.done, p.loaded, p.events = make(chan struct{}), make(chan struct{}), make(chan struct{}, 1)
-	p.pointerEvents, p.pointerDone, p.resumeAt = make(chan struct{}, 1), make(chan struct{}), resumeAt
-	p.stopOnce = sync.Once{}
-	p.state = PlayerSnapshot{Volume: 100, Speed: 1}
+	p.resetSession(api, ctx, host, resumeAt)
 	go p.eventLoop()
 	if code := p.command("loadfile", streamURL, "replace"); code < 0 {
 		p.stop()
 		return fmt.Errorf("libmpv 载入播放地址失败：%s", mpvError(api, code))
 	}
 	select {
+	case <-playbackCtx.Done():
+		p.stop()
+		return playbackCtx.Err()
 	case <-p.loaded:
+		p.pointerDone = make(chan struct{})
 		go p.watchPointer(p.done, host, p.pointerDone)
 		return nil
 	case <-p.done:
@@ -190,6 +205,18 @@ func (p *playerProcess) start(dllPath, streamURL string, parent uintptr, resumeA
 		p.stop()
 		return fmt.Errorf("等待 libmpv 媒体载入超时")
 	}
+}
+
+func (p *playerProcess) resetSession(api *mpvAPI, ctx, host uintptr, resumeAt float64) {
+	p.api, p.ctx, p.host = api, ctx, host
+	p.done, p.loaded, p.events = make(chan struct{}), make(chan struct{}), make(chan struct{}, 1)
+	p.pointerEvents, p.pointerDone, p.resumeAt = make(chan struct{}, 1), nil, resumeAt
+	p.stopOnce, p.loadOnce = sync.Once{}, sync.Once{}
+	p.stateMu.Lock()
+	p.exitStatus = ""
+	p.positionBits, p.durationBits, p.positionSeen = 0, 0, false
+	p.state = PlayerSnapshot{Volume: 100, Speed: 1}
+	p.stateMu.Unlock()
 }
 
 func setMpvOption(api *mpvAPI, ctx uintptr, name, value string) int32 {
@@ -241,6 +268,8 @@ func readCBytes(address uintptr, size int) ([]byte, bool) {
 }
 
 func (p *playerProcess) command(args ...any) int32 {
+	p.commandMu.Lock()
+	defer p.commandMu.Unlock()
 	if p.api == nil || p.ctx == 0 {
 		return -20
 	}
@@ -297,10 +326,8 @@ func (p *playerProcess) eventLoop() {
 						continue
 					}
 					end := [2]int32{int32(binary.LittleEndian.Uint32(endBytes)), int32(binary.LittleEndian.Uint32(endBytes[4:]))}
-					if end[0] == 4 {
-						p.stateMu.Lock()
-						p.state.Error = mpvError(p.api, end[1])
-						p.stateMu.Unlock()
+					if p.finishMedia(end[0], end[1]) {
+						return
 					}
 				}
 			case 8:
@@ -317,9 +344,33 @@ func (p *playerProcess) eventLoop() {
 	}
 }
 
+// Redirects open another playlist entry; only terminal end-file events end
+// this playback session. Retain the final snapshot after mpv clears properties.
+func (p *playerProcess) finishMedia(reason, code int32) bool {
+	if reason == 5 {
+		return false
+	}
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	if reason == 4 {
+		p.state.Error = mpvError(p.api, code)
+	}
+	if reason == 0 && p.state.Duration > 0 {
+		p.state.Position = p.state.Duration
+		p.positionBits = math.Float64bits(p.state.Position)
+		p.durationBits = math.Float64bits(p.state.Duration)
+		p.positionSeen = true
+	}
+	p.exitStatus = fmt.Sprintf("libmpv end-file reason=%d", reason)
+	return true
+}
+
 func (p *playerProcess) refreshState() {
-	position := p.getFloat("time-pos", 0)
-	duration := p.getFloat("duration", 0)
+	p.stateMu.RLock()
+	previous := p.state
+	p.stateMu.RUnlock()
+	position := p.getFloat("time-pos", previous.Position)
+	duration := p.getFloat("duration", previous.Duration)
 	p.stateMu.Lock()
 	p.positionBits, p.durationBits, p.positionSeen = math.Float64bits(position), math.Float64bits(duration), duration > 0
 	p.state.Loaded = duration > 0
@@ -339,7 +390,7 @@ func (p *playerProcess) refreshState() {
 
 func (p *playerProcess) getFloat(name string, fallback float64) float64 {
 	var value float64
-	if p.getRaw(name, 5, uintptr(unsafe.Pointer(&value))) < 0 {
+	if p.getRaw(name, 5, unsafe.Pointer(&value)) < 0 {
 		return fallback
 	}
 	return value
@@ -347,14 +398,16 @@ func (p *playerProcess) getFloat(name string, fallback float64) float64 {
 
 func (p *playerProcess) getFlag(name string) bool {
 	var value int32
-	if p.getRaw(name, 3, uintptr(unsafe.Pointer(&value))) < 0 {
+	if p.getRaw(name, 3, unsafe.Pointer(&value)) < 0 {
 		return false
 	}
 	return value != 0
 }
 
 func (p *playerProcess) getString(name string) string {
-	ptr := p.api.getPropertyStr(p.ctx, cPtr(name))
+	key, _ := syscall.BytePtrFromString(name)
+	ptr := p.api.getPropertyStr(p.ctx, uintptr(unsafe.Pointer(key)))
+	runtime.KeepAlive(key)
 	if ptr == 0 {
 		return ""
 	}
@@ -363,21 +416,23 @@ func (p *playerProcess) getString(name string) string {
 	return value
 }
 
-func cPtr(value string) uintptr {
-	ptr, _ := syscall.BytePtrFromString(value)
-	return uintptr(unsafe.Pointer(ptr))
-}
-
-func (p *playerProcess) getRaw(name string, format int32, data uintptr) int32 {
-	return p.api.getProperty(p.ctx, cPtr(name), format, data)
+func (p *playerProcess) getRaw(name string, format int32, data unsafe.Pointer) int32 {
+	key, _ := syscall.BytePtrFromString(name)
+	code := p.api.getProperty(p.ctx, uintptr(unsafe.Pointer(key)), format, uintptr(data))
+	runtime.KeepAlive(key)
+	runtime.KeepAlive(data)
+	return code
 }
 
 func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack) {
 	var node mpvNode
-	if p.getRaw("track-list", 6, uintptr(unsafe.Pointer(&node))) < 0 || node.format != 7 || node.value == 0 {
+	if p.getRaw("track-list", 6, unsafe.Pointer(&node)) < 0 || node.format != 7 || node.value == 0 {
 		return nil, nil
 	}
-	defer p.api.freeNode(uintptr(unsafe.Pointer(&node)))
+	defer func() {
+		p.api.freeNode(uintptr(unsafe.Pointer(&node)))
+		runtime.KeepAlive(&node)
+	}()
 	listBytes, ok := readCBytes(node.value, 24)
 	if !ok {
 		return nil, nil
@@ -482,13 +537,12 @@ func (p *playerProcess) stop() {
 			}
 		}
 		if p.done != nil {
-			select {
-			case <-p.done:
-			case <-time.After(time.Second):
-			}
+			<-p.done
 		}
+		p.commandMu.Lock()
 		p.api.terminate(p.ctx)
 		p.ctx = 0
+		p.commandMu.Unlock()
 		if p.pointerDone != nil {
 			select {
 			case <-p.pointerDone:
@@ -565,8 +619,50 @@ func (p *playerProcess) snapshot() PlayerSnapshot {
 
 func (p *playerProcess) setViewport(rect ui.Rect) {
 	p.viewport = rect
-	// libmpv renders directly into the MyGoSurface HWND supplied as wid. MyGo
-	// owns its sizing, so no extra child window should be moved over the UI.
+	fitPlayerSurface(p.host)
+}
+
+// Reuse MyGo's registered surface class, but leave this child out of MyGo's
+// renderer registry. Its default window procedure has no second swap chain.
+func createPlayerSurface(parent uintptr) (uintptr, error) {
+	parent = findMyGoSurface(parent)
+	if parent == 0 {
+		return 0, fmt.Errorf("无法找到 MyGo 原生绘制区域")
+	}
+	class, _ := syscall.UTF16PtrFromString("MyGoSurface")
+	module, _, _ := procGetPlayerModule.Call(0)
+	host, _, err := procCreatePlayerWindow.Call(0, uintptr(unsafe.Pointer(class)), 0,
+		0x40000000|0x02000000|0x04000000, 0, 0, 0, 0, parent, 0, module, 0)
+	runtime.KeepAlive(class)
+	if host == 0 {
+		return 0, fmt.Errorf("创建独立视频绘制区域失败：%w", err)
+	}
+	fitPlayerSurface(host)
+	return host, nil
+}
+
+func fitPlayerSurface(host uintptr) {
+	if host == 0 {
+		return
+	}
+	parent, _, _ := procGetPlayerParent.Call(host)
+	var rect [4]int32
+	if ok, _, _ := procGetPlayerClientRect.Call(parent, uintptr(unsafe.Pointer(&rect[0]))); ok != 0 {
+		procSetWindowPos.Call(host, 0, 0, 0, uintptr(rect[2]), uintptr(rect[3]), 0x0010|0x0004)
+	}
+}
+
+func showPlayerSurface(host uintptr) {
+	if host != 0 {
+		fitPlayerSurface(host)
+		procShowPlayerWindow.Call(host, 5)
+	}
+}
+
+func destroyPlayerSurface(host uintptr) {
+	if host != 0 {
+		procDestroyPlayerWindow.Call(host)
+	}
 }
 
 func (p *playerProcess) pointerActivity() <-chan struct{} { return p.pointerEvents }
@@ -582,6 +678,11 @@ func windowScale(handle uintptr) float64 {
 }
 
 func findMyGoSurface(parent uintptr) uintptr {
+	className := make([]uint16, 128)
+	length, _, _ := procGetClassNameW.Call(parent, uintptr(unsafe.Pointer(&className[0])), uintptr(len(className)))
+	if length > 0 && syscall.UTF16ToString(className[:length]) == "MyGoSurface" {
+		return parent
+	}
 	var result uintptr
 	callback := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
 		className := make([]uint16, 128)

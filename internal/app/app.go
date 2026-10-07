@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	overlay "github.com/egoist/mygo/fnmovieoverlay"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -18,78 +19,88 @@ import (
 var appIconPNG []byte
 
 type appState struct {
-	window                   *mygo.Window
-	settings                 Settings
-	server                   *Server
-	player                   *Player
-	playerProxy              *PlaybackProxy
-	section                  string
-	query                    string
-	username                 string
-	password                 string
-	status                   string
-	busy                     bool
-	libraryLoading           bool
-	libraryErr               string
-	loggedIn                 bool
-	loginOpen                bool
-	libraries                []MediaLibrary
-	libraryID                string
-	items                    []MediaItem
-	catalogs                 map[string]*CatalogState
-	catalogCache             *CatalogCache
-	mediaView                mediaViewCache
-	dataRevision             uint64
-	searchChangedAt          time.Time
-	searchPending            bool
-	grid                     ui.GridState
-	catalogScroll            ui.ScrollState
-	catalogScrollKey         string
-	catalogScrollAnimation   smoothScroll
-	posters                  *PosterLoader
-	selected                 *MediaItem
-	seriesLoading            bool
-	seriesError              string
-	castLoading              bool
-	castError                string
-	selectedSeasonID         string
-	seriesEpisodes           []MediaItem
-	seriesEpisodeCache       map[string][]MediaItem
-	seriesEpisodeLoading     bool
-	seriesEpisodeError       string
-	seriesEpisodeRequest     uint64
-	favoritePending          map[string]bool
-	playback                 PlaybackState
-	selectedTab              int
-	playingItem              *MediaItem
-	icon                     *ui.Bitmap
-	displayScale             float64
-	playerOverlayWindow      *mygo.Window
-	playerHeaderWindow       *mygo.Window
-	playerOverlayHooks       bool
-	playerOverlayMonitorDone chan struct{}
-	overlayMu                sync.Mutex
-	playerOverlayVisible     bool
-	playerOverlayPinned      bool
-	playerOverlaySeeking     bool
-	playerOverlayLastInput   time.Time
-	playerOverlayMenu        string
-	playerMenuTracks         []PlayerTrack
-	playerOverlayTransition  uint64
-	playerOverlayOpacity     float64
-	seekSliderPosition       float64
-	seekDragging             bool
-	volumeDragging           bool
-	playbackLoading          bool
-	playbackLoadingID        string
-	playbackLoadingTitle     string
-	playbackCancel           context.CancelFunc
-	selectedPerson           *CastMember
-	personItems              []MediaItem
-	personLoading            bool
-	personError              string
-	personRequest            uint64
-	personGrid               ui.GridState
+	window                       *mygo.Window
+	settings                     Settings
+	serverAddress                string
+	server                       *Server
+	player                       *Player
+	playerProxy                  *PlaybackProxy
+	section                      string
+	query                        string
+	username                     string
+	password                     string
+	status                       string
+	busy                         bool
+	loginCancel                  context.CancelFunc
+	libraryLoading               bool
+	libraryCancel                context.CancelFunc
+	libraryErr                   string
+	loggedIn                     bool
+	loginOpen                    bool
+	libraries                    []MediaLibrary
+	libraryID                    string
+	items                        []MediaItem
+	catalogs                     map[string]*CatalogState
+	catalogCache                 *CatalogCache
+	mediaView                    mediaViewCache
+	dataRevision                 uint64
+	searchChangedAt              time.Time
+	searchPending                bool
+	grid                         ui.GridState
+	catalogScroll                ui.ScrollState
+	catalogScrollKey             string
+	catalogScrollAnimation       smoothScroll
+	posters                      *PosterLoader
+	selected                     *MediaItem
+	seriesLoading                bool
+	seriesError                  string
+	castLoading                  bool
+	castError                    string
+	selectedSeasonID             string
+	seriesEpisodes               []MediaItem
+	seriesEpisodeCache           map[string][]MediaItem
+	seriesEpisodeLoading         bool
+	seriesEpisodeError           string
+	seriesEpisodeRequest         uint64
+	favoritePending              map[string]bool
+	playback                     PlaybackState
+	selectedTab                  int
+	playingItem                  *MediaItem
+	icon                         *ui.Bitmap
+	displayScale                 float64
+	playerOverlayWindow          *mygo.Window
+	playerHeaderWindow           *mygo.Window
+	playerOverlayContent         *overlay.Content
+	playerHeaderContent          *overlay.Content
+	playerOverlayHooks           bool
+	playerOverlayMonitorDone     chan struct{}
+	overlayMu                    sync.Mutex
+	playerOverlayVisible         bool
+	playerOverlayPinned          bool
+	playerOverlaySeeking         bool
+	playerOverlayLastInput       time.Time
+	playerOverlayMenu            string
+	playerMenuTracks             []PlayerTrack
+	playerOverlayTransition      uint64
+	playerOverlayOpacity         float64
+	playerOverlayAnimationStart  time.Time
+	playerOverlayAnimationFrom   float64
+	playerOverlayAnimationTarget float64
+	seekSliderPosition           float64
+	seekDragging                 bool
+	volumeDragging               bool
+	playbackLoading              bool
+	playbackLoadingID            string
+	playbackLoadingTitle         string
+	playbackCancel               context.CancelFunc
+	playbackRequest              uint64
+	playbackTrackCancel          context.CancelFunc
+	selectedPerson               *CastMember
+	personItems                  []MediaItem
+	personLoading                bool
+	personError                  string
+	personRequest                uint64
+	personGrid                   ui.GridState
 }
 
 // Run starts the native desktop application.
@@ -102,7 +113,7 @@ func Run() {
 	if iconErr != nil {
 		log.Printf("app icon: %v", iconErr)
 	}
-	app := &appState{settings: settings, section: "movies", status: "连接飞牛影视服务器后开始浏览", loginOpen: true, player: NewPlayer(), posters: NewPosterLoader(), catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache(), favoritePending: map[string]bool{}, icon: icon}
+	app := &appState{settings: settings, serverAddress: settings.ServerURL, section: "movies", status: "连接飞牛影视服务器后开始浏览", loginOpen: true, player: NewPlayer(), posters: NewPosterLoader(), catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache(), favoritePending: map[string]bool{}, icon: icon}
 	if settings.ServerURL != "" {
 		app.server = NewServer(settings.ServerURL, "")
 		if settings.Username != "" {
@@ -301,7 +312,7 @@ func (a *appState) topbar(c *ui.Context) {
 		})
 		if state := a.catalogs[a.currentCatalogKey()]; state != nil && state.Err != "" && len(state.Items) > 0 {
 			if ui.Button(c, "重试").Padding(5, 9).Clicked() {
-				a.loadLibrary()
+				a.loadNextCatalogPage(true)
 			}
 		}
 		if a.libraryErr != "" && !a.libraryLoading {
@@ -336,7 +347,7 @@ func (a *appState) connectionView(c *ui.Context) {
 		ui.Column(c).Width(440).Padding(34).Gap(16).Radius(16).Background(t.Surface).Border(1, t.Border).Children(func() {
 			ui.Text(c, "连接你的影视库").FontSize(22).Bold()
 			ui.Text(c, "输入飞牛影视地址和账户信息，完成连接后即可浏览与播放媒体。").FontSize(12).TextColor(t.TextMuted)
-			ui.TextInput(c, &a.settings.ServerURL).Placeholder("http://192.168.31.86/v").Label("服务器地址")
+			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
 			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
 			ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted()
 			if a.status != "" {
@@ -355,7 +366,7 @@ func (a *appState) loginModal(c *ui.Context) {
 		ui.Column(c).Width(430).Padding(28, 30).Gap(15).Radius(16).Background(t.Surface).Border(1, t.Border).Children(func() {
 			ui.Text(c, "连接飞牛影视").FontSize(22).Bold()
 			ui.Text(c, "登录后浏览你的媒体库并在本机播放影片。").FontSize(12).TextColor(t.TextMuted)
-			ui.TextInput(c, &a.settings.ServerURL).Placeholder("http://192.168.31.86:5666/v").Label("服务器地址")
+			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
 			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
 			ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted()
 			if a.status != "" && !a.loggedIn {
@@ -586,9 +597,10 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 func (a *appState) openDetail(item MediaItem) {
 	a.closePerson()
 	serverURL := a.settings.ServerURL
+	username := a.settings.Username
 	cachedDetail := false
 	if a.server != nil && a.catalogCache != nil {
-		if cached, ok := a.catalogCache.Detail(serverURL, item.ID); ok {
+		if cached, ok := a.catalogCache.Detail(serverURL, item.ID, username); ok {
 			item = cached
 			cachedDetail = true
 		}
@@ -625,10 +637,10 @@ func (a *appState) openDetail(item MediaItem) {
 			}
 			if detailErr == nil {
 				detail.Seasons = seasons
-				cache.SetDetail(serverURL, detail)
+				cache.SetDetail(serverURL, detail, username)
 			}
 			a.window.Update(func() {
-				if a.selected == nil || a.selected.ID != item.ID {
+				if a.server != server || a.selected == nil || a.selected.ID != item.ID {
 					return
 				}
 				a.seriesLoading = false
@@ -661,10 +673,10 @@ func (a *appState) openDetail(item MediaItem) {
 			} else {
 				detail.Cast = item.Cast
 			}
-			cache.SetDetail(serverURL, detail)
+			cache.SetDetail(serverURL, detail, username)
 		}
 		a.window.Update(func() {
-			if a.selected == nil || a.selected.ID != item.ID {
+			if a.server != server || a.selected == nil || a.selected.ID != item.ID {
 				return
 			}
 			a.castLoading = false
@@ -924,7 +936,7 @@ func (a *appState) loadSeriesSeason(seasonID string, force bool) {
 	go func() {
 		items, err := server.SeasonEpisodes(seasonID)
 		a.window.Update(func() {
-			if a.selected == nil || a.selected.ID != selectedID || a.selectedSeasonID != seasonID || requestID != a.seriesEpisodeRequest {
+			if a.server != server || a.selected == nil || a.selected.ID != selectedID || a.selectedSeasonID != seasonID || requestID != a.seriesEpisodeRequest {
 				return
 			}
 			a.seriesEpisodeLoading = false
@@ -951,19 +963,7 @@ func (a *appState) settingsView(c *ui.Context) {
 				a.loginOpen = true
 			}
 			if ui.Button(c, "退出登录").Clicked() {
-				a.loggedIn = false
-				a.items = nil
-				a.libraries = nil
-				a.cancelCatalogRequests()
-				a.catalogs = map[string]*CatalogState{}
-				a.selected = nil
-				a.mediaView.Invalidate()
-				a.dataRevision++
-				a.server = nil
-				_ = DeleteCredential(a.settings.ServerURL)
-				_ = SaveSettings(a.settings)
-				a.status = "已退出登录"
-				a.loginOpen = true
+				a.logout()
 			}
 		})
 		ui.Text(c, "账户凭据由 Windows 凭据管理器保护；服务器地址与界面偏好保存在本机。").FontSize(11).TextColor(t.TextMuted).MaxLines(2)
@@ -975,6 +975,17 @@ func (a *appState) settingsView(c *ui.Context) {
 
 func (a *appState) logout() {
 	serverURL := a.settings.ServerURL
+	if a.loginCancel != nil {
+		a.loginCancel()
+		a.loginCancel = nil
+	}
+	a.busy = false
+	a.cancelPlaybackLoading()
+	a.closePerson()
+	if a.libraryCancel != nil {
+		a.libraryCancel()
+		a.libraryCancel = nil
+	}
 	a.cancelCatalogRequests()
 	a.loggedIn = false
 	a.loginOpen = true
@@ -989,6 +1000,8 @@ func (a *appState) logout() {
 	a.mediaView.Invalidate()
 	a.dataRevision++
 	a.server = nil
+	a.favoritePending = map[string]bool{}
+	a.seriesEpisodeRequest++
 	a.section = "movies"
 	a.status = "已退出登录"
 	_ = DeleteCredential(serverURL)
@@ -1170,7 +1183,7 @@ func (a *appState) openPerson(person CastMember) {
 	go func() {
 		items, err := server.PersonItems(personID)
 		a.window.Update(func() {
-			if a.selectedPerson == nil || a.selectedPerson.ID != personID || a.personRequest != reqID {
+			if a.server != server || a.selectedPerson == nil || a.selectedPerson.ID != personID || a.personRequest != reqID {
 				return
 			}
 			a.personLoading = false
@@ -1187,6 +1200,7 @@ func (a *appState) openPerson(person CastMember) {
 }
 
 func (a *appState) closePerson() {
+	a.personRequest++
 	a.selectedPerson = nil
 	a.personItems = nil
 	a.personLoading = false
@@ -1350,8 +1364,13 @@ func (a *appState) login() {
 	if a.busy {
 		return
 	}
+	serverURL := strings.TrimSpace(a.serverAddress)
+	if serverURL == "" {
+		a.status = "请输入服务器地址后再连接"
+		return
+	}
 	if a.password == "" {
-		if credentials, err := ReadCredential(a.settings.ServerURL); err == nil {
+		if credentials, err := ReadCredential(serverURL); err == nil && credentials.Username == a.username {
 			a.password = credentials.Password
 		}
 	}
@@ -1361,22 +1380,30 @@ func (a *appState) login() {
 	}
 	a.busy = true
 	a.status = "正在连接服务器…"
-	serverURL, username, password := a.settings.ServerURL, a.username, a.password
+	username, password := a.username, a.password
 	settings := a.settings
+	settings.ServerURL = serverURL
+	ctx, cancel := context.WithCancel(context.Background())
+	a.loginCancel = cancel
 	if a.window != nil {
 		a.window.Invalidate()
 	}
 	go func() {
 		server := NewServer(serverURL, "")
-		result, err := server.Login(username, password)
-		if err == nil {
-			settings.Username = username
-			err = WriteCredential(serverURL, Credential{Username: username, Password: password, Token: result.Token})
-			if err == nil {
-				err = SaveSettings(settings)
-			}
-		}
+		result, err := server.LoginContext(ctx, username, password)
 		a.window.Update(func() {
+			if ctx.Err() != nil {
+				return
+			}
+			a.loginCancel = nil
+			defer cancel()
+			if err == nil {
+				settings.Username = username
+				err = WriteCredential(serverURL, Credential{Username: username, Password: password, Token: result.Token})
+				if err == nil {
+					err = SaveSettings(settings)
+				}
+			}
 			a.busy = false
 			if err != nil {
 				a.status = "连接失败：" + err.Error()
@@ -1385,6 +1412,15 @@ func (a *appState) login() {
 			}
 			a.server = server
 			a.settings = settings
+			if a.libraryCancel != nil {
+				a.libraryCancel()
+				a.libraryCancel = nil
+			}
+			a.libraryLoading = false
+			a.libraries = nil
+			a.closePerson()
+			a.favoritePending = map[string]bool{}
+			a.seriesEpisodeRequest++
 			a.loggedIn = true
 			a.loginOpen = false
 			a.mediaView.Invalidate()
@@ -1408,24 +1444,37 @@ func (a *appState) loadLibraries() {
 	a.libraryLoading = true
 	a.libraryErr = ""
 	server := a.server
-	serverURL, username, password := a.settings.ServerURL, a.username, a.password
-	if cached := a.catalogCache.Libraries(serverURL); len(a.libraries) == 0 && len(cached) > 0 {
+	serverURL, username, password := a.settings.ServerURL, a.settings.Username, a.password
+	ctx, cancel := context.WithCancel(context.Background())
+	a.libraryCancel = cancel
+	if cached := a.catalogCache.Libraries(serverURL, username); len(a.libraries) == 0 && len(cached) > 0 {
 		a.libraries = cached
 		a.loadLibrary()
 	}
 	a.window.Invalidate()
 	go func() {
-		libraries, err := server.Libraries()
+		libraries, err := server.LibrariesContext(ctx)
+		var refreshedToken string
 		if err != nil && isAuthError(err) && username != "" && password != "" {
-			if result, loginErr := server.Login(username, password); loginErr == nil {
-				_ = WriteCredential(serverURL, Credential{Username: username, Password: password, Token: result.Token})
-				libraries, err = server.Libraries()
+			if result, loginErr := server.LoginContext(ctx, username, password); loginErr == nil {
+				refreshedToken = result.Token
+				libraries, err = server.LibrariesContext(ctx)
 			}
 		}
+		if ctx.Err() != nil {
+			return
+		}
 		if err == nil {
-			a.catalogCache.SetLibraries(serverURL, libraries)
+			a.catalogCache.SetLibraries(serverURL, libraries, username)
 		}
 		a.window.Update(func() {
+			if ctx.Err() != nil || a.server != server {
+				return
+			}
+			if refreshedToken != "" {
+				_ = WriteCredential(serverURL, Credential{Username: username, Password: password, Token: refreshedToken})
+			}
+			a.libraryCancel = nil
 			a.libraryLoading = false
 			if err != nil {
 				a.libraryErr = err.Error()
@@ -1480,6 +1529,7 @@ func (a *appState) loadLibrary() {
 	server, libraryID, query := a.server, a.libraryID, strings.TrimSpace(a.query)
 	mediaType := a.currentMediaType()
 	serverURL := a.settings.ServerURL
+	username := a.settings.Username
 	key := catalogStateKey(libraryID, mediaType, query)
 	for otherKey, other := range a.catalogs {
 		if otherKey != key && other.Cancel != nil {
@@ -1493,7 +1543,7 @@ func (a *appState) loadLibrary() {
 		state = &CatalogState{NextPage: 1}
 		a.catalogs[key] = state
 		if query == "" {
-			if cached, ok := a.catalogCache.Page(serverURL, catalogCacheScope(libraryID, mediaType)); ok {
+			if cached, ok := a.catalogCache.Page(serverURL, catalogCacheScope(libraryID, mediaType), username); ok {
 				state.Items = cached.Items
 				state.Total = cached.Total
 				state.NextPage = 2
@@ -1515,7 +1565,7 @@ func (a *appState) loadLibrary() {
 		a.window.Invalidate()
 		return
 	}
-	if state.Refreshed && !state.UpdatedAt.IsZero() && time.Since(state.UpdatedAt) < 5*time.Minute {
+	if state.Err == "" && state.Refreshed && !state.UpdatedAt.IsZero() && time.Since(state.UpdatedAt) < 5*time.Minute {
 		a.window.Invalidate()
 		return
 	}
@@ -1588,12 +1638,15 @@ func (a *appState) currentCatalogLoading() bool {
 }
 
 func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Server, serverURL, libraryID, mediaType, query string, page int, first bool) {
+	username := a.settings.Username
 	go func() {
+		var refreshedCredential *Credential
 		items, total, err := server.MediaPageContext(ctx, libraryID, mediaType, query, page, catalogPageSize)
 		if err != nil && isAuthError(err) {
-			if credentials, readErr := ReadCredential(serverURL); readErr == nil && credentials.Password != "" {
-				if result, loginErr := server.Login(credentials.Username, credentials.Password); loginErr == nil {
-					_ = WriteCredential(serverURL, Credential{Username: credentials.Username, Password: credentials.Password, Token: result.Token})
+			if credentials, readErr := ReadCredential(serverURL); readErr == nil && credentials.Username == username && credentials.Password != "" {
+				if result, loginErr := server.LoginContext(ctx, credentials.Username, credentials.Password); loginErr == nil {
+					credentials.Token = result.Token
+					refreshedCredential = &credentials
 					items, total, err = server.MediaPageContext(ctx, libraryID, mediaType, query, page, catalogPageSize)
 				}
 			}
@@ -1602,12 +1655,18 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 			return
 		}
 		a.window.Update(func() {
+			if a.server != server {
+				return
+			}
 			state := a.catalogs[key]
 			if state == nil {
 				return
 			}
 			if ctx.Err() != nil {
 				return
+			}
+			if refreshedCredential != nil {
+				_ = WriteCredential(serverURL, *refreshedCredential)
 			}
 			state.Loading = false
 			state.Cancel = nil
@@ -1639,7 +1698,7 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 			state.Err = ""
 			if first && query == "" {
 				pageItems := append([]MediaItem(nil), state.Items...)
-				go a.catalogCache.SetPage(serverURL, catalogCacheScope(libraryID, mediaType), CatalogPage{Items: pageItems, Total: total})
+				go a.catalogCache.SetPage(serverURL, catalogCacheScope(libraryID, mediaType), CatalogPage{Items: pageItems, Total: total}, username)
 			}
 			if key == a.currentCatalogKey() {
 				a.items = state.Items
@@ -1694,10 +1753,15 @@ func (a *appState) startPlayback(item MediaItem) {
 	if a.server == nil {
 		return
 	}
+	if a.playback.Active {
+		a.stopPlayback()
+	}
 	if a.playbackCancel != nil {
 		a.playbackCancel()
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	a.playbackRequest++
+	requestID := a.playbackRequest
 	a.playbackCancel = cancel
 	a.playbackLoading = true
 	a.playbackLoadingID = item.ID
@@ -1710,12 +1774,24 @@ func (a *appState) startPlayback(item MediaItem) {
 	if a.window != nil {
 		nativeHandle = a.window.NativeHandle()
 	}
+	requestPlayer := NewPlayer()
+	if err := requestPlayer.PrepareSurface(nativeHandle); err != nil {
+		a.cancelPlaybackLoading()
+		a.status = "播放器绘制区域创建失败：" + err.Error()
+		return
+	}
+	cleanup := func() {
+		requestPlayer.Stop()
+		a.window.Update(func() { requestPlayer.ReleaseSurface() })
+	}
 	go func() {
 		stream, err := server.Playback(item)
 		if ctx.Err() != nil {
+			cleanup()
 			return
 		}
 		if err != nil {
+			cleanup()
 			a.window.Update(func() {
 				if ctx.Err() != nil {
 					return
@@ -1734,9 +1810,11 @@ func (a *appState) startPlayback(item MediaItem) {
 			if proxy != nil {
 				proxy.Close()
 			}
+			cleanup()
 			return
 		}
 		if err != nil {
+			cleanup()
 			a.window.Update(func() {
 				if ctx.Err() != nil {
 					return
@@ -1753,21 +1831,24 @@ func (a *appState) startPlayback(item MediaItem) {
 		}
 
 		// 在后台 goroutine 中等待媒体载入，绝不在 UI 线程中阻塞！
-		startErr := a.player.Start(localURL, nativeHandle, stream.Duration, stream.ResumeAt)
+		startErr := requestPlayer.StartContext(ctx, localURL, nativeHandle, stream.Duration, stream.ResumeAt)
 		if ctx.Err() != nil {
 			proxy.Close()
-			a.player.Stop()
+			cleanup()
 			return
 		}
 
 		a.window.Update(func() {
-			if ctx.Err() != nil {
+			if ctx.Err() != nil || a.server != server || a.playbackRequest != requestID {
 				proxy.Close()
-				a.player.Stop()
+				requestPlayer.Stop()
+				requestPlayer.ReleaseSurface()
 				return
 			}
 			if startErr != nil {
 				proxy.Close()
+				requestPlayer.Stop()
+				requestPlayer.ReleaseSurface()
 				a.playerProxy = nil
 				a.playbackLoading = false
 				a.playbackLoadingID = ""
@@ -1778,6 +1859,8 @@ func (a *appState) startPlayback(item MediaItem) {
 				a.status = "播放器启动失败：" + startErr.Error()
 				return
 			}
+			a.player = requestPlayer
+			requestPlayer.ShowSurface()
 			a.playerProxy = proxy
 			a.playingItem = &item
 			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
@@ -1789,12 +1872,15 @@ func (a *appState) startPlayback(item MediaItem) {
 			a.window.Invalidate()
 			a.createPlayerOverlay()
 			a.startPlayerOverlayMonitor()
-			go a.trackPlayback(item, a.server)
+			trackCtx, trackCancel := context.WithCancel(context.Background())
+			a.playbackTrackCancel = trackCancel
+			go a.trackPlayback(trackCtx, item, server, requestPlayer)
 		})
 	}()
 }
 
 func (a *appState) cancelPlaybackLoading() {
+	a.playbackRequest++
 	if a.playbackCancel != nil {
 		a.playbackCancel()
 		a.playbackCancel = nil
@@ -1827,19 +1913,23 @@ func (a *appState) playbackLoadingOverlay(c *ui.Context) {
 	}
 }
 
-func (a *appState) trackPlayback(item MediaItem, server *Server) {
+func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Server, player *Player) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	lastProgress := time.Now()
-	for a.player.Running() {
-		<-ticker.C
-		if !a.player.Running() {
+	for player.Running() {
+		select {
+		case <-ctx.Done():
 			return
+		case <-ticker.C:
 		}
-		snapshot := a.player.Snapshot()
+		if !player.Running() {
+			break
+		}
+		snapshot := player.Snapshot()
 		position, duration := snapshot.Position, snapshot.Duration
 		a.window.Update(func() {
-			if !a.playback.Active || a.playingItem == nil || a.playingItem.ID != item.ID {
+			if ctx.Err() != nil || a.player != player || !a.playback.Active || a.playingItem == nil || a.playingItem.ID != item.ID {
 				return
 			}
 			a.playback.Position = position
@@ -1865,17 +1955,26 @@ func (a *appState) trackPlayback(item MediaItem, server *Server) {
 		if time.Since(lastProgress) >= 30*time.Second {
 			lastProgress = time.Now()
 			go func() {
-				if err := server.UpdateProgress(item.ID, item.MediaID, position, duration); err != nil {
-					a.window.Update(func() { a.status = "进度同步失败：" + err.Error() })
+				if err := server.UpdateProgressContext(ctx, item.ID, item.MediaID, position, duration); err != nil && ctx.Err() == nil {
+					a.window.Update(func() {
+						if ctx.Err() == nil && a.player == player {
+							a.status = "进度同步失败：" + err.Error()
+						}
+					})
 				}
 			}()
 		}
 	}
-	snapshot := a.player.Snapshot()
+	if ctx.Err() != nil {
+		return
+	}
+	snapshot := player.Snapshot()
 	a.window.Update(func() {
-		if a.playback.Active && a.playingItem != nil && a.playingItem.ID == item.ID {
+		if ctx.Err() == nil && a.player == player && a.playback.Active && a.playingItem != nil && a.playingItem.ID == item.ID {
 			if snapshot.Error != "" {
-				a.playback.Error = snapshot.Error
+				a.stopPlayback()
+				a.playback = PlaybackState{Active: true, Title: item.Title, Error: snapshot.Error}
+				a.window.Invalidate()
 			} else {
 				// A clean mpv exit (including natural completion) returns to the
 				// library instead of leaving a frozen video surface behind.
@@ -1890,7 +1989,11 @@ func (a *appState) stopPlayback() {
 	if server != nil && item != nil {
 		go func() {
 			if err := server.UpdateProgress(item.ID, item.MediaID, position, duration); err != nil {
-				a.window.Update(func() { a.status = "进度同步失败：" + err.Error() })
+				a.window.Update(func() {
+					if a.server == server {
+						a.status = "进度同步失败：" + err.Error()
+					}
+				})
 			}
 		}()
 	}
@@ -1911,6 +2014,11 @@ func (a *appState) stopPlaybackAndWait() {
 }
 
 func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64) {
+	a.cancelPlaybackLoading()
+	if a.playbackTrackCancel != nil {
+		a.playbackTrackCancel()
+		a.playbackTrackCancel = nil
+	}
 	var server *Server
 	var item *MediaItem
 	var position, duration float64
@@ -1922,6 +2030,7 @@ func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64) {
 	}
 	a.closePlayerOverlay()
 	a.player.Stop()
+	a.player.ReleaseSurface()
 	a.playerProxy.Close()
 	a.playerProxy = nil
 	a.playingItem = nil
@@ -1944,19 +2053,25 @@ func (a *appState) toggleFavorite(item MediaItem) {
 	go func() {
 		if err := server.ToggleFavorite(item); err != nil {
 			a.window.Update(func() {
+				if a.server != server {
+					return
+				}
 				delete(a.favoritePending, item.ID)
 				a.status = "收藏状态更新失败：" + err.Error()
 			})
 			return
 		}
 		a.window.Update(func() {
+			if a.server != server {
+				return
+			}
 			favorite := !item.Favorite
 			delete(a.favoritePending, item.ID)
 			a.updateFavoriteProjection(item.ID, favorite)
 			if a.selected != nil && a.selected.ID == item.ID {
 				a.selected.Favorite = favorite
 				if a.catalogCache != nil {
-					a.catalogCache.SetDetail(a.settings.ServerURL, *a.selected)
+					a.catalogCache.SetDetail(a.settings.ServerURL, *a.selected, a.settings.Username)
 				}
 			}
 			a.status = "收藏状态已更新"

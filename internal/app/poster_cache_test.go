@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -84,5 +85,58 @@ func TestPosterLoaderEvictsLeastRecentlyUsed(t *testing.T) {
 	}
 	if loader.used != 8 {
 		t.Fatalf("cache uses %d bytes, want 8", loader.used)
+	}
+}
+
+func TestPosterDiskWritesEnforceBudgetAcrossConcurrentWorkers(t *testing.T) {
+	loader := &PosterLoader{diskDir: t.TempDir()}
+	oldPath := posterSourcePath(loader.diskDir, "old")
+	old, err := os.Create(oldPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := old.Truncate(posterDiskCacheBudget - 2*1024); err != nil {
+		_ = old.Close()
+		t.Fatal(err)
+	}
+	if err := old.Close(); err != nil {
+		t.Fatal(err)
+	}
+	past := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(oldPath, past, past); err != nil {
+		t.Fatal(err)
+	}
+	loader.prunePosterDisk()
+	var workers sync.WaitGroup
+	for _, name := range []string{"a", "b", "c", "d"} {
+		workers.Add(1)
+		go func(name string) {
+			defer workers.Done()
+			loader.cachePosterSource(posterSourcePath(loader.diskDir, name), make([]byte, 1024))
+		}(name)
+	}
+	workers.Wait()
+	entries, err := os.ReadDir(loader.diskDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total int64
+	for _, entry := range entries {
+		info, err := entry.Info()
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += info.Size()
+	}
+	if total > posterDiskCacheBudget {
+		t.Fatalf("concurrent writes exceeded disk budget: %d", total)
+	}
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("oldest source should be evicted, stat error=%v", err)
+	}
+	for _, name := range []string{"a", "b", "c", "d"} {
+		if info, err := os.Stat(posterSourcePath(loader.diskDir, name)); err != nil || info.Size() != 1024 {
+			t.Fatalf("new source %q was not retained: %v", name, err)
+		}
 	}
 }

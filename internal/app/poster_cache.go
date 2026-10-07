@@ -59,7 +59,7 @@ type PosterLoader struct {
 	used     int64
 	maxBytes int64
 	diskDir  string
-	prunedAt time.Time
+	diskMu   sync.Mutex
 }
 
 func NewPosterLoader() *PosterLoader {
@@ -74,6 +74,7 @@ func NewPosterLoader() *PosterLoader {
 			p.diskDir = ""
 		}
 	}
+	p.prunePosterDisk()
 	for i := 0; i < posterWorkers; i++ {
 		go p.worker()
 	}
@@ -149,9 +150,7 @@ func (p *PosterLoader) loadPoster(request posterRequest) (*ui.Bitmap, int64, err
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := writePosterSource(path, data); err == nil {
-		p.prunePosterDisk()
-	}
+	p.cachePosterSource(path, data)
 	return bitmap, size, nil
 }
 
@@ -187,18 +186,32 @@ func writePosterSource(path string, data []byte) error {
 	return nil
 }
 
-func (p *PosterLoader) prunePosterDisk() {
-	p.mu.Lock()
-	if time.Since(p.prunedAt) < time.Hour {
-		p.mu.Unlock()
+// cachePosterSource reserves space before creating the temporary file. Serialize
+// disk writes and eviction so concurrent workers cannot each spend the same
+// remaining budget. Network requests and image decoding remain concurrent.
+func (p *PosterLoader) cachePosterSource(path string, data []byte) {
+	p.diskMu.Lock()
+	defer p.diskMu.Unlock()
+	if int64(len(data)) > posterDiskCacheBudget {
 		return
 	}
-	p.prunedAt = time.Now()
+	_ = os.Remove(path)
+	if p.prunePosterDiskLocked(int64(len(data))) {
+		_ = writePosterSource(path, data)
+	}
+}
+
+func (p *PosterLoader) prunePosterDisk() {
+	p.diskMu.Lock()
+	defer p.diskMu.Unlock()
+	p.prunePosterDiskLocked(0)
+}
+
+func (p *PosterLoader) prunePosterDiskLocked(reserved int64) bool {
 	dir := p.diskDir
-	p.mu.Unlock()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return
+		return false
 	}
 	type diskEntry struct {
 		path string
@@ -216,25 +229,25 @@ func (p *PosterLoader) prunePosterDisk() {
 		if err != nil {
 			continue
 		}
-		if time.Since(info.ModTime()) > 30*24*time.Hour {
-			_ = os.Remove(path)
+		if time.Since(info.ModTime()) > 30*24*time.Hour && os.Remove(path) == nil {
 			continue
 		}
 		files = append(files, diskEntry{path: path, size: info.Size(), at: info.ModTime()})
 		total += info.Size()
 	}
-	if total <= posterDiskCacheBudget {
-		return
+	if total+reserved <= posterDiskCacheBudget {
+		return true
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].at.Before(files[j].at) })
 	for _, file := range files {
-		if total <= posterDiskCacheBudget {
+		if total+reserved <= posterDiskCacheBudget {
 			break
 		}
 		if os.Remove(file.path) == nil {
 			total -= file.size
 		}
 	}
+	return total+reserved <= posterDiskCacheBudget
 }
 
 func (p *PosterLoader) putLocked(key posterKey, bitmap *ui.Bitmap, size int64) {

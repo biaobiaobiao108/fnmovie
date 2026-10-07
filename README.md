@@ -4,17 +4,18 @@
 
 ## 当前功能
 
-- 首次使用或登录状态失效时通过原生弹窗登录；默认地址为 `http://192.168.31.86:5666/v`，可修改部署地址和前缀。
+- 首次使用或登录状态失效时通过原生弹窗登录；输入自己的 NAS 地址（例如 `http://nas.example:5666/v`）、账户和密码。
 - 左侧按当前账户权限展示服务器返回的影视库，选择影视库后仅加载该库媒体。
 - 按选中影视库浏览影片网格、详情和海报；支持关键词搜索、收藏与观看记录。
 - 通过飞牛播放接口获取播放信息和媒体流，使用本机随机地址代理 Range 请求，避免把凭据写进播放 URL 或 mpv 命令行。
-- 播放页由 MyGo 原生控件覆盖 `MyGoSurface` 中的 libmpv 视频画面，顶部显示影片信息和返回按钮，底部控件渐入渐出，支持进度、音量、倍速、字幕/音轨切换和全屏；同步播放进度并在退出时清理 libmpv 与本地代理。
+- 播放页使用独立的 `MyGoSurface` 子窗口承载 libmpv 视频；顶部信息与底部控件使用逐像素透明的 MyGo 原生附属窗口悬浮在画面上，闲置 2.5 秒渐隐，支持进度、音量、倍速、字幕/音轨切换和全屏；同步播放进度并在退出时清理 libmpv 与本地代理。
 - Windows 凭据管理器保存密码和会话令牌；服务器地址与用户名保存在 `%APPDATA%\FnMovie\settings.json`。
 
 ## 代码结构
 
 - `main.go` 是精简启动入口，应用实现与 Go 测试集中在 `internal/app`。
 - `internal/app/app.go` 管理 MyGo 原生界面和应用状态；`server.go` 管理飞牛接口；`player*.go` 管理 libmpv 与播放控件；`config.go`、`credentials_*.go` 管理设置和凭据；缓存、媒体视图和滚动各自放在对应文件中。
+- `internal/mygooverlay` 是匹配 MyGo 版本的本地透明合成桥接模块：只为播放控件呈现原生 UI 的透明 BGRA 像素，使用 Windows `UpdateLayeredWindow`，没有修改依赖缓存或使用色键。
 - `resources` 保存 MyGo 随包资源及 Windows 播放依赖；应用内嵌图标源文件位于 `internal/app/assets`。
 
 ## 开发与构建

@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -65,15 +66,18 @@ func formatClock(value float64) string {
 }
 
 type Player struct {
-	mu       sync.Mutex
-	url      string
-	active   bool
-	position float64
-	duration float64
-	paused   bool
-	viewport ui.Rect
-	started  time.Time
-	process  playerProcess
+	mu          sync.Mutex
+	url         string
+	active      bool
+	position    float64
+	duration    float64
+	paused      bool
+	viewport    ui.Rect
+	started     time.Time
+	process     *playerProcess
+	startCancel context.CancelFunc
+	generation  uint64
+	surface     uintptr
 }
 
 func NewPlayer() *Player { return &Player{} }
@@ -81,14 +85,31 @@ func NewPlayer() *Player { return &Player{} }
 func (p *Player) Running() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.active && p.process.running()
+	return p.active && p.process != nil && p.process.running()
 }
 
 func (p *Player) Start(streamURL string, parent uintptr, duration, resumeAt float64) error {
+	return p.StartContext(context.Background(), streamURL, parent, duration, resumeAt)
+}
+
+func (p *Player) StartContext(ctx context.Context, streamURL string, parent uintptr, duration, resumeAt float64) error {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.active {
-		p.process.stop()
+	if p.startCancel != nil {
+		p.startCancel()
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	p.startCancel = cancel
+	p.generation++
+	generation := p.generation
+	if p.surface != 0 {
+		parent = p.surface
+	}
+	previous := p.process
+	p.process, p.active = nil, false
+	p.mu.Unlock()
+	defer cancel()
+	if previous != nil {
+		previous.stop()
 	}
 	findLibMpv := func() string {
 		resourceDir, _ := mygo.App.Path(mygo.PathResources)
@@ -108,10 +129,20 @@ func (p *Player) Start(streamURL string, parent uintptr, duration, resumeAt floa
 	if dll == "" {
 		return fmt.Errorf("找不到 libmpv-2.dll；请检查应用资源目录")
 	}
-	if err := p.process.start(dll, streamURL, parent, resumeAt); err != nil {
-		p.process.stop()
+	process := &playerProcess{}
+	if err := process.startContext(ctx, dll, streamURL, parent, resumeAt); err != nil {
+		process.stop()
 		return err
 	}
+	p.mu.Lock()
+	if generation != p.generation || ctx.Err() != nil {
+		p.mu.Unlock()
+		process.stop()
+		return context.Canceled
+	}
+	defer p.mu.Unlock()
+	p.startCancel = nil
+	p.process = process
 	p.active = true
 	p.url = streamURL
 	p.position, p.duration, p.paused = resumeAt, duration, false
@@ -119,17 +150,53 @@ func (p *Player) Start(streamURL string, parent uintptr, duration, resumeAt floa
 	return nil
 }
 
-func (p *Player) Stop() {
+// PrepareSurface and ReleaseSurface must run on the window's UI thread.
+func (p *Player) PrepareSurface(parent uintptr) error {
+	surface, err := createPlayerSurface(parent)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.surface = surface
+	p.mu.Unlock()
+	return nil
+}
+
+func (p *Player) ShowSurface() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.process.stop()
+	showPlayerSurface(p.surface)
+}
+
+func (p *Player) ReleaseSurface() {
+	p.mu.Lock()
+	surface := p.surface
+	p.surface = 0
+	p.mu.Unlock()
+	destroyPlayerSurface(surface)
+}
+
+func (p *Player) Stop() {
+	p.mu.Lock()
+	if p.startCancel != nil {
+		p.startCancel()
+		p.startCancel = nil
+	}
+	p.generation++
+	process := p.process
 	p.active = false
+	p.mu.Unlock()
+	if process != nil {
+		process.stop()
+	}
 }
 
 func (p *Player) TogglePause() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.process.command("cycle", "pause")
+	if p.process != nil {
+		p.process.command("cycle", "pause")
+	}
 }
 func (p *Player) ToggleMute() { p.command("cycle", "mute") }
 func (p *Player) AdjustVolume(delta int) {
@@ -161,7 +228,9 @@ func (p *Player) Seek(seconds float64) {
 	if p.duration > 0 && p.position > p.duration {
 		p.position = p.duration
 	}
-	p.process.command("seek", strconv.FormatFloat(seconds, 'f', 1, 64), "relative")
+	if p.process != nil {
+		p.process.command("seek", strconv.FormatFloat(seconds, 'f', 1, 64), "relative")
+	}
 }
 
 func (p *Player) SeekTo(seconds float64) {
@@ -175,7 +244,9 @@ func (p *Player) SeekTo(seconds float64) {
 	}
 	p.position = seconds
 	p.started = time.Now()
-	p.process.command("seek", strconv.FormatFloat(seconds, 'f', 1, 64), "absolute")
+	if p.process != nil {
+		p.process.command("seek", strconv.FormatFloat(seconds, 'f', 1, 64), "absolute")
+	}
 }
 
 func (p *Player) SetVolume(value float64) {
@@ -205,9 +276,12 @@ func playerTrackSelection(kind string, id int) (property string, value any) {
 }
 
 func (p *Player) Snapshot() PlayerSnapshot {
-	_, _ = p.Position()
-	state := p.process.snapshot()
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.process == nil {
+		return PlayerSnapshot{Position: p.position, Duration: p.duration}
+	}
+	state := p.process.snapshot()
 	if p.active {
 		p.paused = state.Paused
 		if state.Duration > 0 {
@@ -215,14 +289,13 @@ func (p *Player) Snapshot() PlayerSnapshot {
 		}
 		p.position = state.Position
 	}
-	p.mu.Unlock()
 	return state
 }
 
 func (p *Player) Position() (float64, float64) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.active {
+	if p.process == nil {
 		return p.position, p.duration
 	}
 	actualPosition, actualDuration, observed := p.process.position()
@@ -242,14 +315,25 @@ func (p *Player) Position() (float64, float64) {
 func (p *Player) SetViewport(rect ui.Rect) {
 	p.mu.Lock()
 	p.viewport = rect
-	p.process.setViewport(rect)
+	if p.process != nil {
+		p.process.setViewport(rect)
+	}
 	p.mu.Unlock()
 }
 
-func (p *Player) PointerActivity() <-chan struct{} { return p.process.pointerActivity() }
+func (p *Player) PointerActivity() <-chan struct{} {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.process == nil {
+		return nil
+	}
+	return p.process.pointerActivity()
+}
 
 func (p *Player) command(args ...any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.process.command(args...)
+	if p.process != nil {
+		p.process.command(args...)
+	}
 }

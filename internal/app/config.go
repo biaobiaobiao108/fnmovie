@@ -30,16 +30,13 @@ func LoadSettings() (Settings, error) {
 	}
 	data, err := os.ReadFile(filename)
 	if os.IsNotExist(err) {
-		return Settings{ServerURL: "http://192.168.31.86:5666/v"}, nil
+		return Settings{}, nil
 	}
 	if err != nil {
 		return Settings{}, err
 	}
 	var settings Settings
 	err = json.Unmarshal(data, &settings)
-	if settings.ServerURL == "" {
-		settings.ServerURL = "http://192.168.31.86:5666/v"
-	}
 	return settings, err
 }
 

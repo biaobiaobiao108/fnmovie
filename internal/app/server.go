@@ -171,13 +171,17 @@ func (s *Server) endpoint(apiVersion, route string) string {
 }
 
 func (s *Server) Login(username, password string) (LoginResult, error) {
+	return s.LoginContext(context.Background(), username, password)
+}
+
+func (s *Server) LoginContext(ctx context.Context, username, password string) (LoginResult, error) {
 	var response any
 	body := struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 		AppName  string `json:"app_name"`
 	}{username, password, "fnmovie"}
-	if err := s.request("POST", "v1", "login", body, &response, ""); err != nil {
+	if err := s.requestContext(ctx, "POST", "v1", "login", body, &response, ""); err != nil {
 		return LoginResult{}, err
 	}
 	data := firstObject(unwrapData(response))
@@ -185,13 +189,20 @@ func (s *Server) Login(username, password string) (LoginResult, error) {
 	if token == "" {
 		return LoginResult{}, errors.New("登录成功响应中没有会话令牌")
 	}
+	if err := ctx.Err(); err != nil {
+		return LoginResult{}, err
+	}
 	s.SetToken(token)
 	return LoginResult{Token: token}, nil
 }
 
 func (s *Server) Libraries() ([]MediaLibrary, error) {
+	return s.LibrariesContext(context.Background())
+}
+
+func (s *Server) LibrariesContext(ctx context.Context) ([]MediaLibrary, error) {
 	var response any
-	if err := s.request("GET", "v1", "mdb/list", nil, &response, s.tokenValue()); err != nil {
+	if err := s.requestContext(ctx, "GET", "v1", "mdb/list", nil, &response, s.tokenValue()); err != nil {
 		return nil, err
 	}
 	objects := findObjects(unwrapData(response))
@@ -229,12 +240,12 @@ func (s *Server) Library(query string) ([]MediaItem, error) {
 func (s *Server) LibraryItems(libraryID, query string) ([]MediaItem, error) {
 	if strings.TrimSpace(query) != "" {
 		var response any
-		route := "search/list?q=" + url.QueryEscape(strings.TrimSpace(query))
+		route := searchRoute(libraryID, query)
 		if err := s.request("GET", "v1", route, nil, &response, s.tokenValue()); err != nil {
 			return nil, err
 		}
 		items := normalizeItems(unwrapData(response))
-		return filterLibraryItems(items, libraryID), nil
+		return filterSearchLibraryItems(items, libraryID)
 	}
 	const pageSize = 500
 	items := make([]MediaItem, 0, pageSize)
@@ -283,11 +294,15 @@ func (s *Server) MediaPageContext(ctx context.Context, libraryID, mediaType, que
 	}
 	if strings.TrimSpace(query) != "" {
 		var response any
-		route := "search/list?q=" + url.QueryEscape(strings.TrimSpace(query))
+		route := searchRoute(libraryID, query)
 		if err := s.requestContext(ctx, "GET", "v1", route, nil, &response, s.tokenValue()); err != nil {
 			return nil, 0, err
 		}
-		items := filterMediaItems(filterLibraryItems(normalizeItems(unwrapData(response)), libraryID), mediaType)
+		items, err := filterSearchLibraryItems(normalizeItems(unwrapData(response)), libraryID)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = filterMediaItems(items, mediaType)
 		if mediaType == "favorite" || mediaType == "watched" {
 			filtered := items[:0]
 			for _, item := range items {
@@ -392,6 +407,29 @@ func filterLibraryItems(items []MediaItem, libraryID string) []MediaItem {
 		return items
 	}
 	return out
+}
+
+func searchRoute(libraryID, query string) string {
+	values := url.Values{"q": {strings.TrimSpace(query)}}
+	if libraryID != "" {
+		values.Set("ancestor_guid", libraryID)
+	}
+	return "search/list?" + values.Encode()
+}
+
+// Unlike item/list, search/list may ignore the requested library scope. Never
+// trust an unlabelled global search response as belonging to the selected library.
+func filterSearchLibraryItems(items []MediaItem, libraryID string) ([]MediaItem, error) {
+	if libraryID == "" {
+		return items, nil
+	}
+	for _, item := range items {
+		id, _ := itemLibrary(item.Raw)
+		if id == "" {
+			return nil, errors.New("搜索结果缺少影视库标识，无法确认所选影视库范围")
+		}
+	}
+	return filterLibraryItems(items, libraryID), nil
 }
 
 func itemLibrary(raw map[string]any) (string, bool) {
@@ -658,7 +696,10 @@ func (s *Server) Playback(item MediaItem) (PlaybackResult, error) {
 		resumeAt = 0
 	}
 	if selected != nil {
-		candidate := s.absoluteURL(firstString(selected, "url"))
+		candidate, err := s.absoluteURL(firstString(selected, "url"))
+		if err != nil {
+			return PlaybackResult{}, fmt.Errorf("服务器返回了无效的播放地址：%w", err)
+		}
 		candidateURL, _ := url.Parse(candidate)
 		baseURL, _ := url.Parse(s.baseURLValue())
 		// Flymoo's direct links can point at an external cloud host and may
@@ -676,7 +717,11 @@ func (s *Server) Playback(item MediaItem) (PlaybackResult, error) {
 // the server token in its command line. Range headers and response bodies pass
 // through unchanged, allowing mpv to seek in the original NAS file.
 func (s *Server) ProxyPlayback(upstream string) (string, *PlaybackProxy, error) {
-	target, err := url.Parse(s.absoluteURL(upstream))
+	absolute, err := s.absoluteURL(upstream)
+	if err != nil {
+		return "", nil, errors.New("服务器返回了无效的播放地址")
+	}
+	target, err := url.Parse(absolute)
 	if err != nil || target.Host == "" || (target.Scheme != "http" && target.Scheme != "https") {
 		return "", nil, errors.New("服务器返回了无效的播放地址")
 	}
@@ -691,7 +736,7 @@ func (s *Server) ProxyPlayback(upstream string) (string, *PlaybackProxy, error) 
 	}
 	base, _ := url.Parse(s.baseURLValue())
 	token := s.tokenValue()
-	attachToken := base != nil && strings.EqualFold(base.Host, target.Host)
+	attachToken := sameOrigin(base, target)
 	proxy := &httputil.ReverseProxy{
 		Director: func(request *http.Request) {
 			request.URL.Scheme = target.Scheme
@@ -754,17 +799,27 @@ func (s *Server) UpdateProgressContext(ctx context.Context, itemGuid, mediaGuid 
 	return s.requestContext(ctx, "POST", "v1", "play/record", body, &response, s.tokenValue())
 }
 
-func (s *Server) absoluteURL(value string) string {
-	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
-		return value
+func (s *Server) absoluteURL(value string) (string, error) {
+	base, err := url.Parse(s.baseURLValue())
+	if err != nil {
+		return "", err
 	}
-	base, _ := url.Parse(s.baseURLValue())
-	ref, _ := url.Parse(value)
-	return base.ResolveReference(ref).String()
+	ref, err := url.Parse(value)
+	if err != nil {
+		return "", err
+	}
+	resolved := base.ResolveReference(ref)
+	if resolved.Host == "" || (resolved.Scheme != "http" && resolved.Scheme != "https") {
+		return "", errors.New("无效的服务器地址")
+	}
+	return resolved.String(), nil
 }
 
 func (s *Server) FetchImage(value string) ([]byte, error) {
-	imageURL := s.absoluteURL(value)
+	imageURL, err := s.absoluteURL(value)
+	if err != nil {
+		return nil, err
+	}
 	parsed, err := url.Parse(imageURL)
 	if err != nil {
 		return nil, err
@@ -777,11 +832,11 @@ func (s *Server) FetchImage(value string) ([]byte, error) {
 	req.Header.Set("X-Trim-Client-Version", "631")
 	base, _ := url.Parse(s.baseURLValue())
 	token := s.tokenValue()
-	if token != "" && base != nil && strings.EqualFold(parsed.Host, base.Host) {
+	if token != "" && sameOrigin(parsed, base) {
 		req.Header.Set("authx", signature(parsed, http.MethodGet, nil))
 		req.Header.Set("Authorization", token)
 	}
-	response, err := s.client.Do(req)
+	response, err := s.doRequest(req)
 	if err != nil {
 		return nil, err
 	}
@@ -790,6 +845,46 @@ func (s *Server) FetchImage(value string) ([]byte, error) {
 		return nil, fmt.Errorf("图片请求失败：HTTP %d", response.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(response.Body, 8<<20))
+}
+
+func sameOrigin(a, b *url.URL) bool {
+	return a != nil && b != nil && strings.EqualFold(a.Scheme, b.Scheme) && strings.EqualFold(a.Host, b.Host)
+}
+
+// net/http forwards Authorization to the same hostname even when its port or
+// scheme changes. Apply the stricter NAS origin boundary on every redirect.
+func (s *Server) doRequest(req *http.Request) (*http.Response, error) {
+	client := *s.client
+	previousCheck := client.CheckRedirect
+	client.CheckRedirect = func(next *http.Request, via []*http.Request) error {
+		if previousCheck != nil {
+			if err := previousCheck(next, via); err != nil {
+				return err
+			}
+		} else if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if !sameOrigin(req.URL, next.URL) {
+			next.Header.Del("Authorization")
+			next.Header.Del("authx")
+		} else if req.Header.Get("authx") != "" {
+			var payload []byte
+			if next.GetBody != nil {
+				body, err := next.GetBody()
+				if err != nil {
+					return err
+				}
+				payload, err = io.ReadAll(body)
+				_ = body.Close()
+				if err != nil {
+					return err
+				}
+			}
+			next.Header.Set("authx", signature(next.URL, next.Method, payload))
+		}
+		return nil
+	}
+	return client.Do(req)
 }
 
 func (s *Server) request(method, version, route string, body any, dest any, token string) error {
@@ -818,12 +913,12 @@ func (s *Server) requestContext(ctx context.Context, method, version, route stri
 	if token != "" {
 		req.Header.Set("Authorization", token)
 	}
-	resp, err := s.client.Do(req)
+	resp, err := s.doRequest(req)
 	if err != nil {
 		return fmt.Errorf("连接服务器失败：%w", err)
 	}
 	defer resp.Body.Close()
-	if resp.Request != nil && resp.Request.URL != nil {
+	if resp.Request != nil && resp.Request.URL != nil && (token == "" || sameOrigin(req.URL, resp.Request.URL)) {
 		if apiIndex := strings.Index(resp.Request.URL.Path, "/api/"); apiIndex >= 0 {
 			resolvedBase := *resp.Request.URL
 			resolvedBase.Path = strings.TrimRight(resp.Request.URL.Path[:apiIndex], "/")

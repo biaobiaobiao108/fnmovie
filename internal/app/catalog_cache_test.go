@@ -31,7 +31,7 @@ func TestCatalogCachePersistsDetailAndCastByServer(t *testing.T) {
 	}
 }
 
-func TestCatalogCacheMigrationDropsOldHierarchyPagesButKeepsLibraries(t *testing.T) {
+func TestCatalogCacheMigrationDropsUnscopedAccountData(t *testing.T) {
 	disk := catalogDisk{
 		Libraries: map[string][]MediaLibrary{"server": {{ID: "library", Name: "剧集"}}},
 		Pages:     map[string]CatalogPage{"server:library": {Items: []MediaItem{{ID: "old", Kind: "tv"}}}},
@@ -41,8 +41,8 @@ func TestCatalogCacheMigrationDropsOldHierarchyPagesButKeepsLibraries(t *testing
 	if disk.Version != catalogCacheVersion || len(disk.Pages) != 0 || len(disk.Details) != 0 {
 		t.Fatalf("old hierarchy cache was not invalidated: %+v", disk)
 	}
-	if len(disk.Libraries["server"]) != 1 || disk.Libraries["server"][0].ID != "library" {
-		t.Fatalf("library cache should be retained: %+v", disk.Libraries)
+	if len(disk.Libraries) != 0 {
+		t.Fatalf("unscoped library cache must be discarded: %+v", disk.Libraries)
 	}
 }
 
@@ -70,5 +70,31 @@ func TestSystemCategoryCatalogScopesStaySeparateFromLibrariesAndEachOther(t *tes
 	}
 	if catalogStateKey("", "movie", "") == catalogStateKey("", "tv", "") {
 		t.Fatal("movie and TV categories must not share in-memory request state")
+	}
+}
+
+func TestCatalogCacheIsolatesAccountsOnSameServer(t *testing.T) {
+	cache := &CatalogCache{data: catalogDisk{}}
+	migrateCatalogDisk(&cache.data)
+	server := "http://nas.example/v"
+	item := MediaItem{ID: "shared", Title: "Alice's film", Favorite: true}
+	cache.SetLibraries(server, []MediaLibrary{{ID: "private", Name: "Alice's library"}}, "alice")
+	cache.SetPage(server, "@system:favorite", CatalogPage{Items: []MediaItem{item}}, "alice")
+	cache.SetDetail(server, item, "alice")
+	if len(cache.Libraries(server, "bob")) != 0 {
+		t.Fatal("libraries leaked across accounts")
+	}
+	if _, ok := cache.Page(server, "@system:favorite", "bob"); ok {
+		t.Fatal("favorites leaked across accounts")
+	}
+	if _, ok := cache.Detail(server, item.ID, "bob"); ok {
+		t.Fatal("detail leaked across accounts")
+	}
+	item.Title, item.Favorite = "Bob's film", false
+	cache.SetDetail(server, item, "bob")
+	alice, _ := cache.Detail(server, item.ID, "alice")
+	bob, _ := cache.Detail(server, item.ID, "bob")
+	if alice.Title == bob.Title || !alice.Favorite || bob.Favorite {
+		t.Fatalf("account-specific details overwritten: alice=%+v bob=%+v", alice, bob)
 	}
 }

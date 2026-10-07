@@ -78,6 +78,9 @@ func TestEpisodeAndPersonProjectionRemainsAvailableToFavorites(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("favorites projection should keep both episode and person, got %d: %#v", len(got), got)
 	}
+	if got[0].ID != "episode" || got[0].IsSeries || got[0].Kind != "episode" {
+		t.Fatalf("favorite episode must preserve its server identity: %+v", got[0])
+	}
 }
 
 func TestSeriesGroupsUseSeriesIDAcrossSeasonsAndKeepRemakesSeparate(t *testing.T) {
@@ -118,5 +121,24 @@ func TestNormalizeItemInfersSeasonAndEpisodeFromParentIDs(t *testing.T) {
 	episode := normalizeItem(map[string]any{"guid": "episode", "title": "第 1 集", "tv_guid": "show"})
 	if season.Kind != "season" || episode.Kind != "episode" {
 		t.Fatalf("inferred hierarchy kinds season=%q episode=%q", season.Kind, episode.Kind)
+	}
+}
+
+func TestFavoriteEpisodesWithSameSeriesKeepIndividualServerIDs(t *testing.T) {
+	items := []MediaItem{
+		{ID: "episode-1", Kind: "episode", SeriesID: "show", SeriesTitle: "Show", Favorite: true},
+		{ID: "episode-2", Kind: "episode", SeriesID: "show", SeriesTitle: "Show", Favorite: true},
+	}
+	got := deriveVisibleItems(items, mediaViewKey{Section: "favorites", GroupEpisodes: true})
+	if len(got) != 2 || got[0].ID != "episode-1" || got[1].ID != "episode-2" || got[0].IsSeries || got[1].IsSeries {
+		t.Fatalf("favorite episodes lost their server IDs: %+v", got)
+	}
+}
+
+func TestCatalogProjectionPreservesTVRootWithSeriesMetadata(t *testing.T) {
+	items := []MediaItem{{ID: "show", Kind: "tv", IsSeries: true, SeriesID: "show", SeriesTitle: "Show"}}
+	got := deriveVisibleItems(items, mediaViewKey{Section: "tv", GroupEpisodes: true})
+	if len(got) != 1 || got[0].ID != "show" {
+		t.Fatalf("TV root must preserve its server ID: %+v", got)
 	}
 }
