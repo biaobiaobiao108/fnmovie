@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	_ "embed"
+	"fmt"
 	"log"
 	"math"
 	"strings"
@@ -42,8 +43,14 @@ type appState struct {
 	searchChangedAt          time.Time
 	searchPending            bool
 	grid                     ui.GridState
+	catalogScroll            ui.ScrollState
+	catalogScrollKey         string
+	catalogScrollAnimation   smoothScroll
 	posters                  *PosterLoader
 	selected                 *MediaItem
+	seriesLoading            bool
+	seriesError              string
+	selectedSeasonID         string
 	playback                 PlaybackState
 	selectedTab              int
 	playingItem              *MediaItem
@@ -324,6 +331,13 @@ func (a *appState) libraryView(c *ui.Context) {
 		return
 	}
 	items := a.visibleItems()
+	key := a.currentCatalogKey() + "\x00" + a.section
+	if key != a.catalogScrollKey {
+		a.catalogScrollKey = key
+		a.catalogScroll = ui.ScrollState{}
+		a.catalogScrollAnimation = smoothScroll{}
+		a.grid = ui.GridState{}
+	}
 	state := a.catalogs[a.currentCatalogKey()]
 	if len(items) == 0 {
 		ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
@@ -395,6 +409,29 @@ func (a *appState) libraryView(c *ui.Context) {
 			a.openDetail(item)
 		}
 	})
+	grid.TrackScroll(&a.catalogScroll).HandleInput(func(ev ui.InputEvent) bool {
+		if ev.Kind != ui.InputScroll {
+			return false
+		}
+		now := c.Now()
+		current, active := a.catalogScrollAnimation.Position(now)
+		if !active {
+			current = a.catalogScroll.Y
+		}
+		base := current
+		if a.catalogScrollAnimation.Active {
+			base = a.catalogScrollAnimation.To
+		}
+		duration := catalogScrollDuration
+		if ev.Precise {
+			duration = 110 * time.Millisecond
+		}
+		target := max(float32(0), min(a.catalogScroll.MaxY, base+ev.DY))
+		a.catalogScrollAnimation.Retarget(current, target, now, duration)
+		a.advanceCatalogScroll(c)
+		return true
+	})
+	a.advanceCatalogScroll(c)
 	background := t.Background
 	grid.DrawOver(func(p *ui.Painter, rect ui.Rect) {
 		const fadeHeight = 28
@@ -459,10 +496,43 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 
 func (a *appState) openDetail(item MediaItem) {
 	a.selected = &item
+	a.seriesLoading, a.seriesError, a.selectedSeasonID = false, "", ""
 	if a.server == nil {
 		return
 	}
 	server := a.server
+	if item.IsSeries {
+		a.seriesLoading = true
+		if len(item.Episodes) == 0 {
+			a.seriesLoading = false
+			a.seriesError = "当前目录中没有可用于识别剧集的条目。"
+			return
+		}
+		episode := item.Episodes[0]
+		go func() {
+			seasons, err := server.SeriesSeasons(episode)
+			a.window.Update(func() {
+				if a.selected == nil || a.selected.ID != item.ID {
+					return
+				}
+				a.seriesLoading = false
+				if err != nil && len(seasons) == 0 {
+					a.seriesError = "剧集列表读取失败：" + err.Error()
+					return
+				}
+				updated := *a.selected
+				updated.Seasons = seasons
+				if len(seasons) > 0 {
+					a.selectedSeasonID = seasons[0].ID
+				}
+				a.selected = &updated
+				if err != nil {
+					a.seriesError = "部分剧集读取失败：" + err.Error()
+				}
+			})
+		}()
+		return
+	}
 	go func() {
 		detail, err := server.Detail(item)
 		a.window.Update(func() {
@@ -478,6 +548,10 @@ func (a *appState) openDetail(item MediaItem) {
 }
 
 func (a *appState) detailView(c *ui.Context, item MediaItem) {
+	if item.IsSeries {
+		a.seriesDetailView(c, item)
+		return
+	}
 	t := c.Theme()
 	ui.Row(c).Gap(28).Grow(1).Children(func() {
 		if poster := a.imageFor(item, 250, 365); poster != nil {
@@ -511,6 +585,76 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 					})
 				}
 			}
+			ui.Spacer(c)
+			if ui.Button(c, "← 返回影视库").Clicked() {
+				a.selected = nil
+			}
+		})
+	})
+}
+
+func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
+	t := c.Theme()
+	ui.Row(c).Gap(26).Grow(1).Children(func() {
+		if poster := a.imageFor(item, 230, 345); poster != nil {
+			ui.Image(c, poster).Size(230, 345).Fit(ui.Cover).Radius(12)
+		} else {
+			ui.Box(c).Size(230, 345).Radius(12).Background(ui.Hex("#e8e8e2"))
+		}
+		ui.Column(c).Grow(1).Padding(8, 0).Gap(12).Children(func() {
+			ui.Text(c, item.Title).FontSize(28).Bold()
+			ui.Text(c, item.Subtitle()).FontSize(13).TextColor(t.TextMuted)
+			if item.Overview != "" {
+				ui.Text(c, item.Overview).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
+			}
+			if a.seriesLoading {
+				ui.Text(c, "正在读取季度与剧集…").FontSize(12).TextColor(t.TextMuted)
+			} else if a.seriesError != "" {
+				ui.Row(c).Gap(8).Children(func() {
+					ui.Text(c, a.seriesError).FontSize(11).TextColor(ui.Hex("#ad5148"))
+					if ui.Button(c, "重试").Clicked() {
+						a.openDetail(item)
+					}
+				})
+			}
+			ui.Row(c).Gap(8).Children(func() {
+				for _, season := range item.Seasons {
+					button := ui.Button(c, season.Title).Padding(7, 11).BorderWidth(0).Radius(8)
+					if a.selectedSeasonID == season.ID {
+						button.Background(t.Accent).TextColor(t.AccentText)
+					} else {
+						button.Background(ui.Hex("#eeece6")).TextColor(t.TextMuted)
+					}
+					if button.Clicked() {
+						a.selectedSeasonID = season.ID
+					}
+				}
+			})
+			ui.Scroll(c).Grow(1).Children(func() {
+				for _, season := range item.Seasons {
+					if season.ID != a.selectedSeasonID {
+						continue
+					}
+					for _, episode := range season.Episodes {
+						ui.Row(c).Padding(8, 10).Gap(10).AlignItems(ui.Center).Children(func() {
+							number := episode.EpisodeNumber
+							if number == 0 {
+								number = 1
+							}
+							ui.Text(c, fmt.Sprintf("%02d", number)).Width(30).FontSize(12).TextColor(t.TextMuted)
+							ui.Column(c).Grow(1).Gap(2).Children(func() {
+								ui.Text(c, episode.Title).FontSize(13).Bold().SingleLine()
+								if overview := firstString(episode.Raw, "overview", "description", "summary"); overview != "" {
+									ui.Text(c, overview).FontSize(10).TextColor(t.TextMuted).MaxLines(1)
+								}
+							})
+							if ui.Button(c, "播放").Clicked() {
+								a.startPlayback(episode)
+							}
+						})
+					}
+				}
+			})
 			ui.Spacer(c)
 			if ui.Button(c, "← 返回影视库").Clicked() {
 				a.selected = nil
@@ -613,9 +757,20 @@ func (a *appState) visibleItems() []MediaItem {
 	}
 	key := mediaViewKey{
 		Revision: a.dataRevision, Section: a.section, LibraryID: a.libraryID,
-		Query: normalizeMediaQuery(a.query), Tab: a.selectedTab,
+		Query: normalizeMediaQuery(a.query), Tab: a.selectedTab, GroupEpisodes: true,
 	}
 	return a.mediaView.Get(key, source)
+}
+
+func (a *appState) advanceCatalogScroll(c *ui.Context) {
+	if !a.catalogScrollAnimation.Active {
+		return
+	}
+	position, active := a.catalogScrollAnimation.Position(c.Now())
+	a.catalogScroll.Y = position
+	if active {
+		c.AnimationFrame()
+	}
 }
 
 func (a *appState) imageFor(item MediaItem, width, height int) *ui.Bitmap {

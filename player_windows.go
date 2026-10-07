@@ -24,16 +24,46 @@ import (
 )
 
 var (
-	user32Player           = syscall.NewLazyDLL("user32.dll")
-	procEnumChildWindows   = user32Player.NewProc("EnumChildWindows")
-	procGetWindowThreadPID = user32Player.NewProc("GetWindowThreadProcessId")
-	procGetDPIForWindow    = user32Player.NewProc("GetDpiForWindow")
-	procGetClassNameW      = user32Player.NewProc("GetClassNameW")
-	procGetWindowRect      = user32Player.NewProc("GetWindowRect")
-	procGetCursorPos       = user32Player.NewProc("GetCursorPos")
-	procSetWindowPos       = user32Player.NewProc("SetWindowPos")
-	procIsWindow           = user32Player.NewProc("IsWindow")
+	user32Player                   = syscall.NewLazyDLL("user32.dll")
+	procEnumChildWindows           = user32Player.NewProc("EnumChildWindows")
+	procGetWindowThreadPID         = user32Player.NewProc("GetWindowThreadProcessId")
+	procGetDPIForWindow            = user32Player.NewProc("GetDpiForWindow")
+	procGetClassNameW              = user32Player.NewProc("GetClassNameW")
+	procGetWindowRect              = user32Player.NewProc("GetWindowRect")
+	procGetCursorPos               = user32Player.NewProc("GetCursorPos")
+	procSetWindowPos               = user32Player.NewProc("SetWindowPos")
+	procIsWindow                   = user32Player.NewProc("IsWindow")
+	procGetWindowLongPtrW          = user32Player.NewProc("GetWindowLongPtrW")
+	procSetWindowLongPtrW          = user32Player.NewProc("SetWindowLongPtrW")
+	procSetLayeredWindowAttributes = user32Player.NewProc("SetLayeredWindowAttributes")
 )
+
+func setPlayerOverlayColorKey(hwnd uintptr) error {
+	const (
+		gwlExStyle  = uintptr(^uintptr(19)) // -20
+		wsExLayered = uintptr(0x00080000)
+	)
+	style, _, _ := procGetWindowLongPtrW.Call(hwnd, gwlExStyle)
+	style |= wsExLayered
+	previous, _, err := procSetWindowLongPtrW.Call(hwnd, gwlExStyle, style)
+	if previous == 0 && err != syscall.Errno(0) {
+		return fmt.Errorf("设置播放控件分层窗口失败：%w", err)
+	}
+	const swpNoSizeMoveZOrder = uintptr(0x0001 | 0x0002 | 0x0004 | 0x0020)
+	procSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0, swpNoSizeMoveZOrder)
+	// LWA_COLORKEY removes the exact RGB magenta background used by the
+	// overlay surface, leaving the mpv child window visible underneath.
+	const lwaColorKey = uintptr(0x00000001)
+	const chromaKeyMagenta = uintptr(0x00FF00FF)
+	result, _, err := procSetLayeredWindowAttributes.Call(hwnd, chromaKeyMagenta, 255, lwaColorKey)
+	if result == 0 {
+		if err != syscall.Errno(0) && err != nil {
+			return fmt.Errorf("设置播放控件透明色失败：%w", err)
+		}
+		return fmt.Errorf("设置播放控件透明色失败")
+	}
+	return nil
+}
 
 type playerProcess struct {
 	cmd           *exec.Cmd

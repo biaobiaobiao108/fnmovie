@@ -37,3 +37,23 @@ func TestMediaViewCacheReusesAndInvalidatesProjection(t *testing.T) {
 		t.Fatalf("invalidated projection did not reflect data change: %#v", updated)
 	}
 }
+
+func TestEpisodicMediaCollapseIntoSeriesCardsInAnyLibrary(t *testing.T) {
+	items := []MediaItem{
+		{ID: "s1e2", Kind: "tv", SeriesTitle: "旅途", SeasonNumber: 1, EpisodeNumber: 2, Year: "2010", Raw: map[string]any{"parent_guid": "season-1"}},
+		{ID: "s2e1", Kind: "tv", SeriesTitle: "旅途", SeasonNumber: 2, EpisodeNumber: 1, Year: "2011", Raw: map[string]any{"parent_guid": "season-2"}},
+		{ID: "other", Kind: "tv", SeriesTitle: "别的", EpisodeNumber: 1},
+		{ID: "movie", Kind: "movie", Title: "电影"},
+	}
+	got := deriveVisibleItems(items, mediaViewKey{Section: "library", LibraryID: "anime", GroupEpisodes: true})
+	if len(got) != 3 {
+		t.Fatalf("grouped items = %d, want two shows and the movie", len(got))
+	}
+	series := got[0]
+	if !series.IsSeries || series.Title != "旅途" || len(series.Episodes) != 2 {
+		t.Fatalf("series projection = %#v", series)
+	}
+	if series.Episodes[0].ID != "s1e2" || series.Episodes[1].ID != "s2e1" {
+		t.Fatalf("episodes not retained in source order: %#v", series.Episodes)
+	}
+}

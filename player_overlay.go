@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 )
 
 const playerOverlayHideDelay = 2500 * time.Millisecond
+const playerOverlayHeight = 204
 
 var playerOverlayIcons = map[string]*ui.SVG{
 	"back":       ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/><path d="M9 12h11"/></svg>`)),
@@ -26,12 +28,18 @@ func (a *appState) createPlayerOverlay() {
 		return
 	}
 	bounds := a.window.ContentBounds()
+	height := min(playerOverlayHeight, bounds.Height)
 	a.playerOverlayWindow = mygo.NewWindow(mygo.WindowOptions{
-		Title: "播放控件", X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height,
+		Title: "播放控件", X: bounds.X, Y: bounds.Y + bounds.Height - height, Width: bounds.Width, Height: height,
 		Parent: a.window, Frameless: true, Transparent: true, SkipTaskbar: true,
-		DisableResize: true, DisableMinimize: true, DisableMaximize: true,
+		BackgroundColor: "#ff00ff", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: ui.View(a.playerOverlayView),
 	})
+	if err := setPlayerOverlayColorKey(a.playerOverlayWindow.NativeHandle()); err != nil {
+		// The compact HUD still leaves the full video viewport exposed if a
+		// Windows version cannot apply color-key transparency.
+		log.Printf("player overlay transparency unavailable: %v", err)
+	}
 	a.registerPlayerOverlayHooks()
 	a.syncPlayerOverlay()
 	a.overlayMu.Lock()
@@ -61,7 +69,11 @@ func (a *appState) syncPlayerOverlay() {
 	if a.window == nil || a.playerOverlayWindow == nil {
 		return
 	}
-	a.playerOverlayWindow.SetContentBounds(a.window.ContentBounds())
+	bounds := a.window.ContentBounds()
+	height := min(playerOverlayHeight, bounds.Height)
+	bounds.Y += bounds.Height - height
+	bounds.Height = height
+	a.playerOverlayWindow.SetContentBounds(bounds)
 	a.playerOverlayWindow.Invalidate()
 	if a.player != nil {
 		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
@@ -172,25 +184,9 @@ func (a *appState) setPlayerOverlaySeeking(seeking bool) {
 func (a *appState) playerOverlayView(c *ui.Context) {
 	c.SetTheme(ui.DarkTheme())
 	a.playerShortcuts(c)
-	root := ui.Box(c).Fill().Background(ui.RGBA(0, 0, 0, 0))
-	root.DrawOver(func(p *ui.Painter, rect ui.Rect) {
-		p.FillGradient(ui.Rect{X: 0, Y: 0, W: rect.W, H: 150}, ui.LinearGradient{
-			From: ui.RGBA(0, 0, 0, 0.54), To: ui.RGBA(0, 0, 0, 0), Angle: 180,
-		}, 0)
-		p.FillGradient(ui.Rect{X: 0, Y: rect.H - 230, W: rect.W, H: 230}, ui.LinearGradient{
-			From: ui.RGBA(0, 0, 0, 0), To: ui.RGBA(0, 0, 0, 0.72), Angle: 180,
-		}, 0)
-	})
-	if root.Clicked() {
-		if a.playerOverlayMenu != "" {
-			a.closePlayerOverlayMenu()
-		} else {
-			a.player.TogglePause()
-			a.playback.Paused = !a.playback.Paused
-			a.markPlayerOverlayActivity()
-		}
-	}
-	ui.Row(c).Absolute().Top(18).Left(22).Gap(14).AlignItems(ui.Center).Children(func() {
+	ui.Box(c).Fill().Background(ui.Hex("#ff00ff"))
+	ui.Row(c).Absolute().Top(10).Left(18).Gap(12).AlignItems(ui.Center).Padding(8, 12).Radius(11).
+		Background(ui.RGBA(18, 19, 21, 0.84)).Children(func() {
 		if playerIconButton(c, "back", "返回影片库").Clicked() {
 			a.stopPlayback()
 		}
@@ -212,7 +208,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 	if !a.seekDragging {
 		a.seekSliderPosition = minFloat(maxPosition, maxFloat(0, a.playback.Position))
 	}
-	ui.Column(c).Absolute().Bottom(18).Left(26).Right(26).Padding(12, 15).Gap(9).Radius(13).
+	ui.Column(c).Absolute().Bottom(10).Left(18).Right(18).Padding(8, 12).Gap(5).Radius(11).
 		Background(ui.RGBA(18, 19, 21, 0.84)).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, formatClock(a.seekDisplayPosition())).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.9))
@@ -316,7 +312,7 @@ func (a *appState) playerPopover(c *ui.Context) {
 	if a.playerOverlayMenu == "" {
 		return
 	}
-	ui.Column(c).Absolute().Bottom(102).Right(35).Width(280).Padding(8).Gap(2).Radius(12).
+	ui.Column(c).Absolute().Bottom(94).Right(25).Width(280).Padding(8).Gap(2).Radius(12).
 		Background(ui.RGBA(18, 19, 21, 0.96)).Children(func() {
 		switch a.playerOverlayMenu {
 		case "subtitle":

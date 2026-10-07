@@ -6,11 +6,12 @@ import (
 )
 
 type mediaViewKey struct {
-	Revision  uint64
-	Section   string
-	LibraryID string
-	Query     string
-	Tab       int
+	Revision      uint64
+	Section       string
+	LibraryID     string
+	Query         string
+	Tab           int
+	GroupEpisodes bool
 }
 
 // mediaViewCache keeps the filtered/sorted projection stable across ordinary
@@ -71,7 +72,54 @@ func deriveVisibleItems(source []MediaItem, key mediaViewKey) []MediaItem {
 			return out[i].AddedAt > out[j].AddedAt
 		})
 	}
+	if key.GroupEpisodes {
+		out = groupSeriesEpisodes(out)
+	}
 	return out
+}
+
+func groupSeriesEpisodes(items []MediaItem) []MediaItem {
+	grouped := make([]MediaItem, 0, len(items))
+	indices := make(map[string]int)
+	for _, episode := range items {
+		seriesTitle := strings.TrimSpace(episode.SeriesTitle)
+		if seriesTitle == "" {
+			seriesTitle = firstString(episode.Raw, "parent_title", "parentTitle")
+		}
+		if episode.EpisodeNumber == 0 {
+			episode.EpisodeNumber = parseMediaNumber(firstString(episode.Raw, "episode_number", "episodeNumber"))
+		}
+		if seriesTitle == "" || episode.EpisodeNumber == 0 {
+			grouped = append(grouped, episode)
+			continue
+		}
+		// Episode records can carry per-episode air dates in Year. Use the
+		// normalized series title so those dates do not split one show into
+		// dozens of cards across the catalog.
+		key := strings.ToLower(strings.Join(strings.Fields(seriesTitle), " "))
+		index, exists := indices[key]
+		if !exists {
+			series := episode
+			series.ID = "series:" + key
+			series.Title = seriesTitle
+			series.SeriesTitle = seriesTitle
+			series.IsSeries = true
+			series.Episodes = nil
+			series.Seasons = nil
+			series.SeasonNumber = 0
+			series.EpisodeNumber = 0
+			series.Favorite, series.Watched = false, false
+			series.Year = firstString(episode.Raw, "year", "release_date", "air_date")
+			grouped = append(grouped, series)
+			index = len(grouped) - 1
+			indices[key] = index
+		}
+		series := &grouped[index]
+		series.Episodes = append(series.Episodes, episode)
+		series.Favorite = series.Favorite || episode.Favorite
+		series.Watched = series.Watched || episode.Watched
+	}
+	return grouped
 }
 
 func normalizeMediaQuery(query string) string { return strings.TrimSpace(query) }
