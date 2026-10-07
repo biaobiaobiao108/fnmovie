@@ -38,23 +38,29 @@ func TestMediaViewCacheReusesAndInvalidatesProjection(t *testing.T) {
 	}
 }
 
-func TestEpisodicMediaCollapseIntoSeriesCardsInAnyLibrary(t *testing.T) {
+func TestLibraryProjectionKeepsShowsAndMoviesButHidesSeasonAndEpisodeNodes(t *testing.T) {
 	items := []MediaItem{
-		{ID: "s1e2", Kind: "tv", SeriesTitle: "旅途", SeasonNumber: 1, EpisodeNumber: 2, Year: "2010", Raw: map[string]any{"parent_guid": "season-1"}},
-		{ID: "s2e1", Kind: "tv", SeriesTitle: "旅途", SeasonNumber: 2, EpisodeNumber: 1, Year: "2011", Raw: map[string]any{"parent_guid": "season-2"}},
-		{ID: "other", Kind: "tv", SeriesTitle: "别的", EpisodeNumber: 1},
+		{ID: "series", Kind: "tv", IsSeries: true, Title: "旅途"},
+		{ID: "season-1", Kind: "season", Title: "第1季"},
+		{ID: "s1e2", Kind: "episode", Title: "第二集", EpisodeNumber: 2, Raw: map[string]any{"parent_guid": "season-1"}},
 		{ID: "movie", Kind: "movie", Title: "电影"},
 	}
 	got := deriveVisibleItems(items, mediaViewKey{Section: "library", LibraryID: "anime", GroupEpisodes: true})
-	if len(got) != 3 {
-		t.Fatalf("grouped items = %d, want two shows and the movie", len(got))
+	if len(got) != 2 {
+		t.Fatalf("top-level library items = %d, want one show and one movie", len(got))
 	}
-	series := got[0]
-	if !series.IsSeries || series.Title != "旅途" || len(series.Episodes) != 2 {
-		t.Fatalf("series projection = %#v", series)
+	if got[0].ID != "series" || !got[0].IsSeries || got[1].ID != "movie" {
+		t.Fatalf("unexpected top-level projection: %#v", got)
 	}
-	if series.Episodes[0].ID != "s1e2" || series.Episodes[1].ID != "s2e1" {
-		t.Fatalf("episodes not retained in source order: %#v", series.Episodes)
+}
+
+func TestEpisodeProjectionRemainsAvailableToHistoryAndFavorites(t *testing.T) {
+	items := []MediaItem{{ID: "episode", Kind: "episode", SeriesTitle: "Show", Favorite: true, Watched: true}}
+	for _, section := range []string{"history", "favorites"} {
+		got := deriveVisibleItems(items, mediaViewKey{Section: section, GroupEpisodes: true})
+		if len(got) != 1 || len(got[0].Episodes) != 1 {
+			t.Errorf("%s projection hid the watched/favorite episode: %#v", section, got)
+		}
 	}
 }
 

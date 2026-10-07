@@ -1,8 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"container/list"
 	"image"
+	"image/color"
+	"image/png"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -26,6 +34,37 @@ func TestFitPosterSizeDownscalesWithoutUpscaling(t *testing.T) {
 				t.Fatalf("fitPosterSize(%v, %v) = %v, want %v", tt.source, tt.limit, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPosterLoaderReusesDiskSourceAcrossTargetSizes(t *testing.T) {
+	source := image.NewRGBA(image.Rect(0, 0, 100, 200))
+	source.Set(10, 10, color.RGBA{R: 255, A: 255})
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, source); err != nil {
+		t.Fatal(err)
+	}
+	var requests atomic.Int32
+	serverHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(encoded.Bytes())
+	}))
+	defer serverHTTP.Close()
+	server := NewServer(serverHTTP.URL, "")
+	server.client = serverHTTP.Client()
+	loader := &PosterLoader{diskDir: filepath.Join(t.TempDir(), "posters")}
+	if err := os.MkdirAll(loader.diskDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, size := range []image.Point{image.Pt(50, 50), image.Pt(20, 20)} {
+		request := posterRequest{server: server, url: serverHTTP.URL + "/poster", key: posterKey{URL: serverHTTP.URL + "/poster", Width: size.X, Height: size.Y}}
+		if _, _, err := loader.loadPoster(request); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := requests.Load(); got != 1 {
+		t.Fatalf("poster network requests=%d, want 1 when reusing disk cache", got)
 	}
 }
 

@@ -3,11 +3,16 @@ package main
 import (
 	"bytes"
 	"container/list"
+	"crypto/sha256"
+	"encoding/hex"
 	"image"
 	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"log"
+	"os"
+	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 
@@ -53,6 +58,8 @@ type PosterLoader struct {
 	lru      *list.List
 	used     int64
 	maxBytes int64
+	diskDir  string
+	prunedAt time.Time
 }
 
 func NewPosterLoader() *PosterLoader {
@@ -60,6 +67,12 @@ func NewPosterLoader() *PosterLoader {
 		queue: make(chan posterRequest, posterQueueLimit), pending: map[posterKey]struct{}{},
 		failed: map[posterKey]time.Time{}, entries: map[posterKey]*list.Element{},
 		lru: list.New(), maxBytes: posterCacheBudget,
+	}
+	if dir, err := os.UserCacheDir(); err == nil {
+		p.diskDir = filepath.Join(dir, "FnMovie", "posters")
+		if os.MkdirAll(p.diskDir, 0700) != nil {
+			p.diskDir = ""
+		}
 	}
 	for i := 0; i < posterWorkers; i++ {
 		go p.worker()
@@ -97,7 +110,7 @@ func (p *PosterLoader) GetOrRequest(server *Server, remoteURL string, width, hei
 
 func (p *PosterLoader) worker() {
 	for request := range p.queue {
-		bitmap, size, err := loadPoster(request.server, request.url, request.key.Width, request.key.Height)
+		bitmap, size, err := p.loadPoster(request)
 		p.mu.Lock()
 		delete(p.pending, request.key)
 		if err != nil {
@@ -111,6 +124,115 @@ func (p *PosterLoader) worker() {
 			log.Printf("poster load failed: %v", err)
 		} else if request.onLoaded != nil {
 			request.onLoaded()
+		}
+	}
+}
+
+func (p *PosterLoader) loadPoster(request posterRequest) (*ui.Bitmap, int64, error) {
+	if p.diskDir == "" {
+		return loadPoster(request.server, request.url, request.key.Width, request.key.Height)
+	}
+	path := posterSourcePath(p.diskDir, request.url)
+	if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) < 30*24*time.Hour {
+		if data, err := os.ReadFile(path); err == nil {
+			if bitmap, size, decodeErr := decodePoster(data, request.key.Width, request.key.Height); decodeErr == nil {
+				_ = os.Chtimes(path, time.Now(), time.Now())
+				return bitmap, size, nil
+			}
+		}
+	}
+	data, err := request.server.FetchImage(request.url)
+	if err != nil {
+		return nil, 0, err
+	}
+	bitmap, size, err := decodePoster(data, request.key.Width, request.key.Height)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := writePosterSource(path, data); err == nil {
+		p.prunePosterDisk()
+	}
+	return bitmap, size, nil
+}
+
+func posterSourcePath(dir, remoteURL string) string {
+	sum := sha256.Sum256([]byte(remoteURL))
+	return filepath.Join(dir, hex.EncodeToString(sum[:])+".img")
+}
+
+func writePosterSource(path string, data []byte) error {
+	file, err := os.CreateTemp(filepath.Dir(path), "poster-*.tmp")
+	if err != nil {
+		return err
+	}
+	tempPath := file.Name()
+	defer os.Remove(tempPath)
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	// Windows Rename does not replace an existing destination. The file is a
+	// source cache and can always be downloaded again if a concurrent write
+	// wins this small replacement race.
+	_ = os.Remove(path)
+	if err := os.Rename(tempPath, path); err != nil {
+		if _, statErr := os.Stat(path); statErr == nil {
+			return nil // another worker completed the same image concurrently
+		}
+		return err
+	}
+	return nil
+}
+
+func (p *PosterLoader) prunePosterDisk() {
+	p.mu.Lock()
+	if time.Since(p.prunedAt) < time.Hour {
+		p.mu.Unlock()
+		return
+	}
+	p.prunedAt = time.Now()
+	dir := p.diskDir
+	p.mu.Unlock()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	type diskEntry struct {
+		path string
+		size int64
+		at   time.Time
+	}
+	files := make([]diskEntry, 0, len(entries))
+	var total int64
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) == ".tmp" {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		info, err := entry.Info()
+		if err != nil {
+			continue
+		}
+		if time.Since(info.ModTime()) > 30*24*time.Hour {
+			_ = os.Remove(path)
+			continue
+		}
+		files = append(files, diskEntry{path: path, size: info.Size(), at: info.ModTime()})
+		total += info.Size()
+	}
+	if total <= posterDiskCacheBudget {
+		return
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].at.Before(files[j].at) })
+	for _, file := range files {
+		if total <= posterDiskCacheBudget {
+			break
+		}
+		if os.Remove(file.path) == nil {
+			total -= file.size
 		}
 	}
 }
@@ -169,6 +291,10 @@ func loadPoster(server *Server, remoteURL string, maxWidth, maxHeight int) (*ui.
 	if err != nil {
 		return nil, 0, err
 	}
+	return decodePoster(data, maxWidth, maxHeight)
+}
+
+func decodePoster(data []byte, maxWidth, maxHeight int) (*ui.Bitmap, int64, error) {
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
 		return nil, 0, err
@@ -199,6 +325,8 @@ func loadPoster(server *Server, remoteURL string, maxWidth, maxHeight int) (*ui.
 	bytes := int64(imageSize.X) * int64(imageSize.Y) * 4 * 4 / 3
 	return bitmap, bytes, nil
 }
+
+const posterDiskCacheBudget = int64(512 << 20)
 
 var errInvalidPosterDimensions = posterError("poster has invalid or excessive dimensions")
 

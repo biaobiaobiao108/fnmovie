@@ -56,6 +56,17 @@ type MediaItem struct {
 	AddedAt        string
 	Raw            map[string]any
 	Sources        []StreamSource
+	Cast           []CastMember
+}
+
+type CastMember struct {
+	ID         string
+	Name       string
+	Role       string
+	Job        string
+	Department string
+	Profile    string
+	Order      int
 }
 
 type MediaSeason struct {
@@ -356,24 +367,75 @@ func (s *Server) Detail(item MediaItem) (MediaItem, error) {
 	return detail, nil
 }
 
-// SeriesSeasons follows fnOS's hierarchy: an episode points to its season,
-// and the season detail points to the TV series. Episode data is requested
-// separately when the user selects a season.
-func (s *Server) SeriesSeasons(episode MediaItem) ([]MediaSeason, error) {
-	seasonID := firstString(episode.Raw, "parent_guid", "parentGuid")
-	if seasonID == "" {
-		return nil, fmt.Errorf("影片缺少所属季标识")
+// People returns the people credited on a movie or series. fnOS exposes the
+// list separately from item detail; an empty response is a normal case.
+func (s *Server) People(itemID string) ([]CastMember, error) {
+	if strings.TrimSpace(itemID) == "" {
+		return nil, fmt.Errorf("媒体缺少标识，无法读取演职员")
 	}
-	seasonDetail, err := s.Detail(MediaItem{ID: seasonID})
-	if err != nil {
+	body := map[string]any{"guid": itemID, "page": 1, "page_size": 200}
+	var response any
+	if err := s.request("POST", "v1", "person/list/"+url.PathEscape(itemID), body, &response, s.tokenValue()); err != nil {
 		return nil, err
 	}
-	seriesID := firstString(seasonDetail.Raw, "parent_guid", "parentGuid")
-	if seriesID == "" {
-		seriesID = seasonDetail.ID
+	data := unwrapData(response)
+	var objects []map[string]any
+	if object, ok := data.(map[string]any); ok {
+		objects = mapsFromList(object["list"])
+	} else {
+		objects = mapsFromList(data)
+	}
+	people := make([]CastMember, 0, len(objects))
+	for _, object := range objects {
+		person := CastMember{
+			ID:         firstString(object, "person_guid", "guid", "item_guid"),
+			Name:       firstString(object, "name", "original_name"),
+			Role:       firstString(object, "role", "character"),
+			Job:        firstString(object, "job", "known_for_department"),
+			Department: firstString(object, "department"),
+			Profile:    firstString(object, "profile_path", "profile", "image", "image_url"),
+			Order:      parseMediaNumber(firstString(object, "order", "sort")),
+		}
+		job := strings.ToLower(person.Job + " " + person.Department)
+		isActor := person.Role != "" || strings.Contains(job, "actor") || strings.Contains(job, "acting") || strings.Contains(job, "演员") || strings.Contains(job, "表演")
+		if person.Name != "" && isActor {
+			people = append(people, person)
+		}
+	}
+	sort.SliceStable(people, func(i, j int) bool { return people[i].Order < people[j].Order })
+	return people, nil
+}
+
+func mapsFromList(value any) []map[string]any {
+	switch current := value.(type) {
+	case []any:
+		out := make([]map[string]any, 0, len(current))
+		for _, entry := range current {
+			if object, ok := entry.(map[string]any); ok {
+				out = append(out, object)
+			}
+		}
+		return out
+	case map[string]any:
+		for _, key := range []string{"list", "items", "results", "data"} {
+			if nested, ok := current[key]; ok {
+				if out := mapsFromList(nested); len(out) > 0 {
+					return out
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// SeriesSeasons requests the season nodes under a TV root. Episode data is
+// requested separately when the user selects a season.
+func (s *Server) SeriesSeasons(series MediaItem) ([]MediaSeason, error) {
+	if strings.TrimSpace(series.ID) == "" {
+		return nil, fmt.Errorf("剧集缺少服务器标识")
 	}
 	var response any
-	if err := s.request("GET", "v1", "season/list/"+url.PathEscape(seriesID), nil, &response, s.tokenValue()); err != nil {
+	if err := s.request("GET", "v1", "season/list/"+url.PathEscape(series.ID), nil, &response, s.tokenValue()); err != nil {
 		return nil, err
 	}
 	seasonItems := normalizeItems(unwrapData(response))
@@ -713,15 +775,26 @@ func normalizeItem(object map[string]any) MediaItem {
 	item.ID = firstString(object, "guid", "id", "media_id", "mediaId")
 	item.MediaID = firstString(object, "media_guid", "mediaGuid")
 	item.Title = firstString(object, "title", "name", "original_title", "display_name", "file_name")
-	item.Kind = strings.ToLower(firstString(object, "type", "media_type", "mediaType", "category"))
+	item.Kind = strings.ToLower(strings.TrimSpace(firstString(object, "type", "media_type", "mediaType", "category")))
 	item.SeriesTitle = firstString(object, "tv_title", "tvTitle", "series_title", "seriesTitle", "tv_name", "show_title", "showTitle")
 	item.SeriesID = firstString(object, "tv_guid", "tvGuid", "series_guid", "seriesGuid", "tv_id", "tvId", "series_id", "seriesId")
 	item.SeriesParentID = firstString(object, "parent_guid", "parentGuid")
 	item.SeasonNumber = parseMediaNumber(firstString(object, "season_number", "seasonNumber"))
 	item.EpisodeNumber = parseMediaNumber(firstString(object, "episode_number", "episodeNumber"))
-	if strings.Contains(item.Kind, "tv") || strings.Contains(item.Kind, "series") || firstString(object, "tv_title") != "" || valueAt(object, "season_number") != nil || valueAt(object, "episode_number") != nil {
-		item.Kind = "tv"
-	} else if item.Kind == "video" {
+	switch {
+	case strings.Contains(item.Kind, "episode"):
+		item.Kind = "episode"
+	case strings.Contains(item.Kind, "season"):
+		item.Kind = "season"
+	case strings.Contains(item.Kind, "tv") || strings.Contains(item.Kind, "series") || strings.Contains(item.Kind, "show"):
+		item.Kind, item.IsSeries = "tv", true
+	case strings.Contains(item.Kind, "movie") || item.Kind == "video" || item.Kind == "film":
+		item.Kind = "movie"
+	case firstString(object, "tv_title", "series_title", "show_title") != "" || valueAt(object, "episode_number") != nil:
+		item.Kind = "episode"
+	case valueAt(object, "season_number") != nil:
+		item.Kind = "season"
+	default:
 		item.Kind = "movie"
 	}
 	item.Year = firstString(object, "year", "release_date", "air_date")
@@ -730,11 +803,47 @@ func normalizeItem(object map[string]any) MediaItem {
 	}
 	item.Rating = formatRating(firstString(object, "rating", "score", "vote_average"))
 	item.Overview = firstString(object, "overview", "description", "summary", "plot")
-	item.Poster = firstString(object, "poster", "posters", "poster_url", "posterUrl", "image", "image_url", "cover")
+	item.Poster = firstImagePath(object, "poster", "posters", "poster_url", "posterUrl", "image", "image_url", "cover", "poster_path", "posterPath")
 	item.Favorite = anyBool(object["favorite"]) || anyBool(object["is_favorite"]) || anyBool(object["isFavorite"])
 	item.Watched = anyBool(object["is_watched"]) || anyBool(object["watched"])
 	item.AddedAt = firstString(object, "create_time", "created_at", "ts", "release_date")
 	return item
+}
+
+func firstImagePath(object map[string]any, keys ...string) string {
+	for _, key := range keys {
+		value, exists := object[key]
+		if !exists || value == nil {
+			continue
+		}
+		if imagePath := anyString(value); imagePath != "" {
+			return imagePath
+		}
+		switch current := value.(type) {
+		case []any:
+			for _, entry := range current {
+				if imagePath := imagePathFromValue(entry); imagePath != "" {
+					return imagePath
+				}
+			}
+		case map[string]any:
+			if imagePath := imagePathFromValue(current); imagePath != "" {
+				return imagePath
+			}
+		}
+	}
+	return ""
+}
+
+func imagePathFromValue(value any) string {
+	if text := anyString(value); text != "" {
+		return text
+	}
+	object, ok := value.(map[string]any)
+	if !ok {
+		return ""
+	}
+	return firstString(object, "url", "path", "src", "image", "poster_path", "profile_path", "file")
 }
 
 func parseMediaNumber(value string) int {

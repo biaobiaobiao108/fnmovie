@@ -153,7 +153,7 @@ func TestSeasonEpisodesRequestsOnlySelectedSeasonAndSortsEpisodes(t *testing.T) 
 			http.NotFound(w, r)
 			return
 		}
-		writeJSON(t, w, `{"code":0,"data":{"list":[{"guid":"e2","title":"Episode 2","type":"TV","episode_number":2},{"guid":"e1","title":"Episode 1","type":"TV","episode_number":1}]}}`)
+		writeJSON(t, w, `{"code":0,"data":[{"guid":"e2","title":"Episode 2","type":"Episode","episode_number":2},{"guid":"e1","title":"Episode 1","type":"Episode","episode_number":1}]}`)
 	}))
 	defer server.Close()
 	client := NewServer(server.URL, "token")
@@ -164,6 +164,70 @@ func TestSeasonEpisodesRequestsOnlySelectedSeasonAndSortsEpisodes(t *testing.T) 
 	}
 	if items[0].ID != "e1" || items[1].ID != "e2" {
 		t.Fatalf("episodes are not sorted within selected season: %#v", items)
+	}
+}
+
+func TestSeriesSeasonsUsesSeriesGuidAndPreservesSeasonNodes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/season/list/show-1" {
+			t.Errorf("unexpected seasons endpoint %q", r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		writeJSON(t, w, `{"code":0,"data":[{"guid":"season-2","parent_guid":"show-1","title":"第 2 季","type":"Season","season_number":2},{"guid":"season-1","parent_guid":"show-1","title":"第 1 季","type":"Season","season_number":1}]}`)
+	}))
+	defer server.Close()
+	client := NewServer(server.URL, "token")
+	client.client = server.Client()
+	seasons, err := client.SeriesSeasons(MediaItem{ID: "show-1", Kind: "tv", IsSeries: true})
+	if err != nil || len(seasons) != 2 {
+		t.Fatalf("seasons=%#v err=%v", seasons, err)
+	}
+	if seasons[0].ID != "season-1" || seasons[1].ID != "season-2" {
+		t.Fatalf("seasons not sorted: %#v", seasons)
+	}
+}
+
+func TestPeopleLoadsCastAndProfilePaths(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/person/list/movie-1" {
+			t.Errorf("unexpected cast request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode cast request: %v", err)
+		}
+		if body["guid"] != "movie-1" || body["page_size"] != float64(200) {
+			t.Errorf("cast request body = %#v", body)
+		}
+		writeJSON(t, w, `{"code":0,"data":{"total":1,"list":[{"person_guid":"person-1","name":"演员甲","role":"Alice","job":"Actor","profile_path":"/person/a.jpg","order":0}]}}`)
+	}))
+	defer server.Close()
+	client := NewServer(server.URL, "token")
+	client.client = server.Client()
+	people, err := client.People("movie-1")
+	if err != nil || len(people) != 1 {
+		t.Fatalf("people=%#v err=%v", people, err)
+	}
+	person := people[0]
+	if person.Name != "演员甲" || person.Role != "Alice" || person.Profile != "/person/a.jpg" {
+		t.Fatalf("unexpected person data: %#v", person)
+	}
+}
+
+func TestNormalizeFnOSTypesKeepsSeasonAndEpisodeDistinct(t *testing.T) {
+	for _, test := range []struct{ input, want string }{
+		{"TV", "tv"}, {"Season", "season"}, {"Episode", "episode"}, {"Movie", "movie"},
+	} {
+		item := normalizeItem(map[string]any{"guid": "id", "title": "title", "type": test.input})
+		if item.Kind != test.want {
+			t.Errorf("type %q normalized as %q, want %q", test.input, item.Kind, test.want)
+		}
+		if test.want == "tv" && !item.IsSeries {
+			t.Errorf("TV root should be marked as a series: %#v", item)
+		}
 	}
 }
 

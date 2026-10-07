@@ -11,10 +11,10 @@ import (
 
 const playerOverlayHideDelay = 2500 * time.Millisecond
 const (
-	playerOverlayHeaderHeight  = 66
-	playerOverlayControlHeight = 124
+	playerOverlayHeaderHeight  = 56
+	playerOverlayControlHeight = 82
 	playerOverlayFadeDuration  = 180 * time.Millisecond
-	playerOverlayTargetOpacity = 0.88
+	playerOverlayTargetOpacity = 1.0
 )
 
 var playerOverlayIcons = map[string]*ui.SVG{
@@ -32,18 +32,18 @@ func (a *appState) createPlayerOverlay() {
 		return
 	}
 	bounds := a.window.ContentBounds()
-	controlHeight := min(playerOverlayControlHeight, bounds.Height)
+	controlHeight := min(a.playerOverlayContentHeight(), bounds.Height)
 	headerHeight := min(playerOverlayHeaderHeight, bounds.Height-controlHeight)
 	a.playerOverlayWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: "播放控件", X: bounds.X, Y: bounds.Y + bounds.Height - controlHeight, Width: bounds.Width, Height: controlHeight,
-		Parent: a.window, Frameless: true, SkipTaskbar: true, Opacity: 0,
-		BackgroundColor: "#151617", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
+		Parent: a.window, Frameless: true, SkipTaskbar: true, Transparent: true, Opacity: 0,
+		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: ui.View(a.playerOverlayView),
 	})
 	a.playerHeaderWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: "播放信息", X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: headerHeight,
-		Parent: a.window, Frameless: true, SkipTaskbar: true, Opacity: 0,
-		BackgroundColor: "#151617", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
+		Parent: a.window, Frameless: true, SkipTaskbar: true, Transparent: true, Opacity: 0,
+		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: ui.View(a.playerHeaderView),
 	})
 	a.registerPlayerOverlayHooks()
@@ -80,8 +80,8 @@ func (a *appState) syncPlayerOverlay() {
 	}
 	bounds := a.window.ContentBounds()
 	controlBounds := bounds
-	controlBounds.Y += bounds.Height - min(playerOverlayControlHeight, bounds.Height)
-	controlBounds.Height = min(playerOverlayControlHeight, bounds.Height)
+	controlBounds.Height = min(a.playerOverlayContentHeight(), bounds.Height)
+	controlBounds.Y += bounds.Height - controlBounds.Height
 	headerBounds := bounds
 	headerBounds.Height = min(playerOverlayHeaderHeight, bounds.Height-controlBounds.Height)
 	a.playerOverlayWindow.SetContentBounds(controlBounds)
@@ -92,6 +92,22 @@ func (a *appState) syncPlayerOverlay() {
 		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
 		a.player.SetViewport(ui.Rect{W: float32(width), H: float32(height)})
 	}
+}
+
+func (a *appState) playerOverlayContentHeight() int {
+	if a.playerOverlayMenu == "" {
+		return playerOverlayControlHeight
+	}
+	rows := 6
+	switch a.playerOverlayMenu {
+	case "audio":
+		rows = len(a.playback.AudioTracks) + 1
+	case "subtitle":
+		rows = len(a.playback.SubtitleTracks) + 2
+	case "speed":
+		rows = 8
+	}
+	return min(640, max(250, 116+rows*29))
 }
 
 func (a *appState) startPlayerOverlayMonitor() {
@@ -256,16 +272,14 @@ func (a *appState) setPlayerOverlaySeeking(seeking bool) {
 func (a *appState) playerOverlayView(c *ui.Context) {
 	c.SetTheme(ui.DarkTheme())
 	a.playerShortcuts(c)
-	ui.Box(c).Fill().Background(ui.Hex("#151617"))
 	a.playerTransport(c)
 	a.playerPopover(c)
 }
 
 func (a *appState) playerHeaderView(c *ui.Context) {
 	c.SetTheme(ui.DarkTheme())
-	ui.Box(c).Fill().Background(ui.Hex("#151617"))
 	ui.Row(c).Absolute().Top(6).Left(18).Gap(12).AlignItems(ui.Center).Padding(8, 12).Radius(11).
-		Background(ui.RGBA(18, 19, 21, 0.84)).Children(func() {
+		Background(ui.RGBA(18, 19, 21, 0.72)).Children(func() {
 		if playerIconButton(c, "back", "返回影片库").Clicked() {
 			a.stopPlayback()
 		}
@@ -285,8 +299,8 @@ func (a *appState) playerTransport(c *ui.Context) {
 	if !a.seekDragging {
 		a.seekSliderPosition = minFloat(maxPosition, maxFloat(0, a.playback.Position))
 	}
-	ui.Column(c).Absolute().Bottom(10).Left(18).Right(18).Padding(8, 12).Gap(5).Radius(11).
-		Background(ui.RGBA(18, 19, 21, 0.84)).Children(func() {
+	ui.Column(c).Absolute().Bottom(5).Left(18).Right(18).Padding(5, 12).Gap(2).Radius(11).
+		Background(ui.RGBA(18, 19, 21, 0.72)).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, formatClock(a.seekDisplayPosition())).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.9))
 			slider := ui.Slider(c, &a.seekSliderPosition, 0, maxPosition).Grow(1)
@@ -381,6 +395,7 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 			a.playerOverlayMenu = option
 			a.setPlayerOverlayPinned(true)
 		}
+		a.syncPlayerOverlay()
 		a.markPlayerOverlayActivity()
 	}
 }
@@ -452,6 +467,7 @@ func playerTrackLabel(track PlayerTrack) string {
 
 func (a *appState) closePlayerOverlayMenu() {
 	a.playerOverlayMenu = ""
+	a.syncPlayerOverlay()
 	a.setPlayerOverlayPinned(false)
 	a.markPlayerOverlayActivity()
 }

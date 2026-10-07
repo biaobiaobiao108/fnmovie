@@ -50,6 +50,8 @@ type appState struct {
 	selected                 *MediaItem
 	seriesLoading            bool
 	seriesError              string
+	castLoading              bool
+	castError                string
 	selectedSeasonID         string
 	seriesEpisodes           []MediaItem
 	seriesEpisodeCache       map[string][]MediaItem
@@ -133,7 +135,7 @@ func (a *appState) view(c *ui.Context) {
 	}
 	ui.Row(c).Fill().Background(ui.Hex("#f7f6f2")).Children(func() {
 		a.sidebar(c)
-		ui.Column(c).Grow(1).FillHeight().Padding(28, 34).Gap(20).Children(func() {
+		ui.Column(c).Grow(1).FillHeight().Padding(16, 34, 12, 34).Gap(18).Children(func() {
 			a.topbar(c)
 			switch {
 			case a.selected != nil:
@@ -415,7 +417,7 @@ func (a *appState) libraryView(c *ui.Context) {
 		if card.Clicked() {
 			a.openDetail(item)
 		}
-	})
+	}).Grow(1)
 	grid.TrackScroll(&a.catalogScroll).HandleInput(func(ev ui.InputEvent) bool {
 		if ev.Kind != ui.InputScroll {
 			return false
@@ -442,9 +444,11 @@ func (a *appState) libraryView(c *ui.Context) {
 	background := t.Background
 	grid.DrawOver(func(p *ui.Painter, rect ui.Rect) {
 		const fadeHeight = 28
-		p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: fadeHeight}, ui.LinearGradient{
-			From: background, To: background.Alpha(0), Angle: 180,
-		}, 0)
+		if a.catalogScroll.Y > 1 {
+			p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: fadeHeight}, ui.LinearGradient{
+				From: background, To: background.Alpha(0), Angle: 180,
+			}, 0)
+		}
 		p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y + rect.H - fadeHeight, W: rect.W, H: fadeHeight}, ui.LinearGradient{
 			From: background.Alpha(0), To: background, Angle: 180,
 		}, 0)
@@ -502,42 +506,68 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 }
 
 func (a *appState) openDetail(item MediaItem) {
+	serverURL := a.settings.ServerURL
+	cachedDetail := false
+	if a.server != nil && a.catalogCache != nil {
+		if cached, ok := a.catalogCache.Detail(serverURL, item.ID); ok {
+			item = cached
+			cachedDetail = true
+		}
+	}
 	a.selected = &item
 	a.seriesLoading, a.seriesError, a.selectedSeasonID = false, "", ""
+	a.castLoading, a.castError = true, ""
 	a.seriesEpisodes, a.seriesEpisodeCache = nil, nil
 	a.seriesEpisodeLoading, a.seriesEpisodeError = false, ""
 	a.seriesEpisodeRequest++
+	if item.IsSeries && cachedDetail && len(item.Seasons) > 0 {
+		a.selectedSeasonID = item.Seasons[0].ID
+		a.loadSeriesSeason(a.selectedSeasonID, false)
+	}
 	if a.server == nil {
+		a.castLoading = false
 		return
 	}
 	server := a.server
+	cache := a.catalogCache
 	if item.IsSeries {
 		a.seriesLoading = true
-		if len(item.Episodes) == 0 {
-			a.seriesLoading = false
-			a.seriesError = "当前目录中没有可用于识别剧集的条目。"
-			return
-		}
-		episode := item.Episodes[0]
 		go func() {
-			seasons, err := server.SeriesSeasons(episode)
+			detail, detailErr := server.Detail(item)
+			seasons, seasonErr := server.SeriesSeasons(item)
+			people, peopleErr := server.People(item.ID)
+			if detailErr != nil {
+				detail = item
+			}
+			if peopleErr == nil {
+				detail.Cast = people
+			} else {
+				detail.Cast = item.Cast
+			}
+			if detailErr == nil {
+				detail.Seasons = seasons
+				cache.SetDetail(serverURL, detail)
+			}
 			a.window.Update(func() {
 				if a.selected == nil || a.selected.ID != item.ID {
 					return
 				}
 				a.seriesLoading = false
-				if err != nil && len(seasons) == 0 {
-					a.seriesError = "剧集列表读取失败：" + err.Error()
-					return
-				}
-				updated := *a.selected
+				a.castLoading = false
+				updated := detail
 				updated.Seasons = seasons
 				a.selected = &updated
-				if len(seasons) > 0 {
-					a.selectSeriesSeason(seasons[0].ID)
+				if seasonErr != nil {
+					a.seriesError = "季度列表读取失败：" + seasonErr.Error()
 				}
-				if err != nil {
-					a.seriesError = "部分剧集读取失败：" + err.Error()
+				if peopleErr != nil {
+					a.castError = "演职员读取失败：" + peopleErr.Error()
+				}
+				if detailErr != nil {
+					a.status = "详情读取失败：" + detailErr.Error()
+				}
+				if len(seasons) > 0 && a.selectedSeasonID == "" {
+					a.selectSeriesSeason(seasons[0].ID)
 				}
 			})
 		}()
@@ -545,13 +575,31 @@ func (a *appState) openDetail(item MediaItem) {
 	}
 	go func() {
 		detail, err := server.Detail(item)
+		people, peopleErr := server.People(item.ID)
+		if err == nil {
+			if peopleErr == nil {
+				detail.Cast = people
+			} else {
+				detail.Cast = item.Cast
+			}
+			cache.SetDetail(serverURL, detail)
+		}
 		a.window.Update(func() {
-			if err != nil {
-				a.status = "详情读取失败：" + err.Error()
+			if a.selected == nil || a.selected.ID != item.ID {
 				return
 			}
-			if a.selected != nil && a.selected.ID == item.ID {
+			a.castLoading = false
+			if err != nil {
+				a.status = "详情读取失败：" + err.Error()
+				if peopleErr == nil && len(people) > 0 {
+					item.Cast = people
+					a.selected = &item
+				}
+			} else {
 				a.selected = &detail
+			}
+			if peopleErr != nil {
+				a.castError = "演职员读取失败：" + peopleErr.Error()
 			}
 		})
 	}()
@@ -583,6 +631,7 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 					a.toggleFavorite(item)
 				}
 			})
+			a.castSection(c, item)
 			if len(item.Sources) > 0 {
 				ui.Text(c, "可播放版本").FontSize(12).Bold().TextColor(t.TextMuted)
 				for _, source := range item.Sources {
@@ -617,6 +666,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 			if item.Overview != "" {
 				ui.Text(c, item.Overview).FontSize(12).TextColor(t.TextMuted).MaxLines(3)
 			}
+			a.castSection(c, item)
 			if a.seriesLoading {
 				ui.Text(c, "正在读取季度与剧集…").FontSize(12).TextColor(t.TextMuted)
 			} else if a.seriesError != "" {
@@ -895,6 +945,66 @@ func (a *appState) requestPoster(item MediaItem, width, height int) *ui.Bitmap {
 	})
 }
 
+func (a *appState) castSection(c *ui.Context, item MediaItem) {
+	if len(item.Cast) == 0 && !a.castLoading && a.castError == "" {
+		return
+	}
+	t := c.Theme()
+	ui.Column(c).Gap(8).Children(func() {
+		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "演职人员").FontSize(13).Bold()
+			if a.castLoading {
+				ui.Text(c, "正在读取…").FontSize(10).TextColor(t.TextMuted)
+			}
+			if a.castError != "" {
+				ui.Text(c, a.castError).FontSize(10).TextColor(t.TextMuted).SingleLine()
+			}
+		})
+		if len(item.Cast) == 0 {
+			return
+		}
+		ui.ScrollHorizontal(c).Height(112).Gap(14).Children(func() {
+			for _, person := range item.Cast {
+				ui.Column(c).Width(74).Gap(4).AlignItems(ui.Center).Children(func() {
+					if image := a.imageForURL(person.Profile, 58, 58); image != nil {
+						ui.Image(c, image).Size(58, 58).Fit(ui.Cover).Radius(29)
+					} else {
+						ui.Box(c).Size(58, 58).Radius(29).Background(ui.Hex("#e8e8e2")).Center().Children(func() {
+							ui.Text(c, "•").FontSize(20).TextColor(t.TextMuted)
+						})
+					}
+					ui.Text(c, person.Name).FontSize(10).Bold().TextAlign(ui.Center).SingleLine()
+					role := person.Role
+					if role == "" {
+						role = person.Job
+					}
+					ui.Text(c, role).FontSize(9).TextColor(t.TextMuted).TextAlign(ui.Center).SingleLine()
+				})
+			}
+		})
+	})
+}
+
+func (a *appState) imageForURL(remoteURL string, width, height int) *ui.Bitmap {
+	if a.server == nil || a.posters == nil || strings.TrimSpace(remoteURL) == "" {
+		return nil
+	}
+	scale := a.displayScale
+	if scale <= 0 {
+		scale = 1
+		if a.window != nil {
+			scale = windowScale(a.window.NativeHandle())
+		}
+	}
+	w, h := max(1, int(math.Ceil(float64(width)*scale))), max(1, int(math.Ceil(float64(height)*scale)))
+	window := a.window
+	return a.posters.GetOrRequest(a.server, a.server.imageURL(remoteURL), w, h, func() {
+		if window != nil {
+			window.Update(func() { window.Invalidate() })
+		}
+	})
+}
+
 func (a *appState) updateDisplayScale() {
 	if a.window == nil {
 		return
@@ -983,6 +1093,9 @@ func (a *appState) loadLibraries() {
 				libraries, err = server.Libraries()
 			}
 		}
+		if err == nil {
+			a.catalogCache.SetLibraries(serverURL, libraries)
+		}
 		a.window.Update(func() {
 			a.libraryLoading = false
 			if err != nil {
@@ -996,7 +1109,6 @@ func (a *appState) loadLibraries() {
 			}
 			a.libraryErr = ""
 			a.libraries = libraries
-			a.catalogCache.SetLibraries(serverURL, libraries)
 			if a.libraryID != "" {
 				found := false
 				for _, library := range libraries {
@@ -1158,7 +1270,8 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 			state.Refreshed = true
 			state.Err = ""
 			if first && query == "" {
-				a.catalogCache.SetPage(serverURL, libraryID, CatalogPage{Items: state.Items, Total: total})
+				pageItems := append([]MediaItem(nil), state.Items...)
+				go a.catalogCache.SetPage(serverURL, libraryID, CatalogPage{Items: pageItems, Total: total})
 			}
 			if key == a.currentCatalogKey() {
 				a.items = state.Items

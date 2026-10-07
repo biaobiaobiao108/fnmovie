@@ -36,6 +36,7 @@ type CatalogState struct {
 type catalogDisk struct {
 	Libraries map[string][]MediaLibrary `json:"libraries"`
 	Pages     map[string]CatalogPage    `json:"pages"`
+	Details   map[string]MediaItem      `json:"details"`
 }
 
 type CatalogCache struct {
@@ -57,11 +58,11 @@ func catalogPageExhausted(pageCount, loadedCount, total, pageSize int) bool {
 func NewCatalogCache() *CatalogCache {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		return &CatalogCache{data: catalogDisk{Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}}}
+		return &CatalogCache{data: catalogDisk{Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}, Details: map[string]MediaItem{}}}
 	}
 	dir = filepath.Join(dir, "FnMovie")
 	_ = os.MkdirAll(dir, 0700)
-	c := &CatalogCache{path: filepath.Join(dir, "catalog.json"), data: catalogDisk{Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}}}
+	c := &CatalogCache{path: filepath.Join(dir, "catalog.json"), data: catalogDisk{Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}, Details: map[string]MediaItem{}}}
 	if raw, err := os.ReadFile(c.path); err == nil {
 		_ = json.Unmarshal(raw, &c.data)
 	}
@@ -70,6 +71,9 @@ func NewCatalogCache() *CatalogCache {
 	}
 	if c.data.Libraries == nil {
 		c.data.Libraries = map[string][]MediaLibrary{}
+	}
+	if c.data.Details == nil {
+		c.data.Details = map[string]MediaItem{}
 	}
 	return c
 }
@@ -111,6 +115,23 @@ func (c *CatalogCache) SetPage(serverURL, libraryID string, page CatalogPage) {
 	page.UpdatedAt = time.Now()
 	c.data.Pages[catalogPageKey(serverURL, libraryID)] = page
 	c.saveLocked()
+}
+
+func (c *CatalogCache) Detail(serverURL, itemID string) (MediaItem, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	item, ok := c.data.Details[catalogServerKey(serverURL)+":"+itemID]
+	return item, ok
+}
+
+func (c *CatalogCache) SetDetail(serverURL string, item MediaItem) {
+	if item.ID == "" {
+		return
+	}
+	c.mu.Lock()
+	c.data.Details[catalogServerKey(serverURL)+":"+item.ID] = item
+	c.saveLocked()
+	c.mu.Unlock()
 }
 
 func (c *CatalogCache) saveLocked() {
