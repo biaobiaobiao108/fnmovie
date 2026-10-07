@@ -205,6 +205,7 @@ func TestSeriesDetailViewScroll(t *testing.T) {
 	}
 
 	// Scroll down within the scroll container
+	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
 	tester.Scroll(600, 300, 0, 800)
 
 	// After scrolling, later episodes should become visible

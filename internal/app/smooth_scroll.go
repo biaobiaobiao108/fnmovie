@@ -14,6 +14,9 @@ type smoothScroll struct {
 	Velocity float64
 	Last     time.Time
 	Active   bool
+	// Binding measurements detect native thumb/key movement and viewport changes.
+	bound                   bool
+	boundWidth, boundHeight float32
 }
 
 // Stop halts ongoing animation immediately and locks to position.
