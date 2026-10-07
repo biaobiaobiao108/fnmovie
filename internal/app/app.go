@@ -642,16 +642,16 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 	}
 	t := c.Theme()
 	posterWidth, posterHeight := detailPosterSize(c)
-	ui.Column(c).Grow(1).Gap(8).Children(func() {
+	ui.Column(c).Grow(1).FillHeight().Gap(8).Children(func() {
 		a.detailBackButton(c)
-		ui.Row(c).Grow(1).Gap(30).Children(func() {
+		ui.Row(c).Grow(1).FillHeight().AlignItems(ui.Start).Gap(30).Children(func() {
 			if poster := a.imageFor(item, posterWidth, posterHeight); poster != nil {
 				ui.Image(c, poster).Size(float32(posterWidth), float32(posterHeight)).Fit(ui.Cover).Radius(13)
 			} else {
 				ui.Box(c).Size(float32(posterWidth), float32(posterHeight)).Radius(13).Background(ui.Hex("#e8e8e2"))
 			}
-			ui.Scroll(c).Grow(1).Children(func() {
-				ui.Column(c).Grow(1).Padding(8, 0).Gap(17).Children(func() {
+			ui.Scroll(c).Grow(1).AlignSelf(ui.Stretch).FillHeight().Children(func() {
+				ui.Column(c).Padding(8, 0).Gap(17).Children(func() {
 					ui.Text(c, item.Title).FontSize(34).Bold()
 					ui.Text(c, item.Subtitle()).FontSize(15).TextColor(t.TextMuted)
 					if item.Overview != "" {
@@ -685,16 +685,16 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 	t := c.Theme()
 	posterWidth, posterHeight := detailPosterSize(c)
-	ui.Column(c).Grow(1).Gap(8).Children(func() {
+	ui.Column(c).Grow(1).FillHeight().Gap(8).Children(func() {
 		a.detailBackButton(c)
-		ui.Row(c).Grow(1).Gap(30).Children(func() {
+		ui.Row(c).Grow(1).FillHeight().AlignItems(ui.Start).Gap(30).Children(func() {
 			if poster := a.imageFor(item, posterWidth, posterHeight); poster != nil {
 				ui.Image(c, poster).Size(float32(posterWidth), float32(posterHeight)).Fit(ui.Cover).Radius(13)
 			} else {
 				ui.Box(c).Size(float32(posterWidth), float32(posterHeight)).Radius(13).Background(ui.Hex("#e8e8e2"))
 			}
-			ui.Scroll(c).Grow(1).Children(func() {
-				ui.Column(c).Grow(1).Padding(8, 0).Gap(14).Children(func() {
+			ui.Scroll(c).Grow(1).AlignSelf(ui.Stretch).FillHeight().Children(func() {
+				ui.Column(c).Padding(8, 0).Gap(14).Children(func() {
 					ui.Text(c, item.Title).FontSize(28).Bold()
 					ui.Text(c, item.Subtitle()).FontSize(15).TextColor(t.TextMuted)
 					if item.Overview != "" {
