@@ -108,6 +108,16 @@ func catalogPageKey(serverURL, libraryID string) string {
 	return catalogServerKey(serverURL) + ":" + libraryID
 }
 
+func catalogCacheScope(libraryID, mediaType string) string {
+	if mediaType == "" {
+		return libraryID
+	}
+	if libraryID == "" {
+		return "@system:" + mediaType
+	}
+	return libraryID + "@type:" + mediaType
+}
+
 func (c *CatalogCache) Libraries(serverURL string) []MediaLibrary {
 	c.mu.Lock()
 	defer c.mu.Unlock()

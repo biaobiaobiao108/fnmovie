@@ -60,3 +60,15 @@ func TestCatalogOnlyAutoLoadsMoreWhenProjectionIsEmptyAndCanContinue(t *testing.
 		t.Fatal("exhausted catalog should show the empty state")
 	}
 }
+
+func TestSystemCategoryCatalogScopesStaySeparateFromLibrariesAndEachOther(t *testing.T) {
+	if catalogCacheScope("", "movie") == catalogCacheScope("", "tv") {
+		t.Fatal("movie and TV system categories must have independent disk caches")
+	}
+	if catalogCacheScope("library", "tv") == catalogCacheScope("library", "") {
+		t.Fatal("filtered personal library pages must not reuse the unfiltered cache")
+	}
+	if catalogStateKey("", "movie", "") == catalogStateKey("", "tv", "") {
+		t.Fatal("movie and TV categories must not share in-memory request state")
+	}
+}

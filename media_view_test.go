@@ -18,6 +18,21 @@ func TestDerivedVisibleItemsFiltersByLibraryAndTab(t *testing.T) {
 	}
 }
 
+func TestSystemCategoryProjectionSeparatesMoviesAndTVPrograms(t *testing.T) {
+	items := []MediaItem{
+		{ID: "movie", Kind: "movie"},
+		{ID: "show", Kind: "tv", IsSeries: true},
+		{ID: "season", Kind: "season"},
+		{ID: "episode", Kind: "episode"},
+	}
+	for section, want := range map[string]string{"movies": "movie", "tv": "show"} {
+		got := deriveVisibleItems(items, mediaViewKey{Section: section})
+		if len(got) != 1 || got[0].ID != want {
+			t.Errorf("%s category = %#v, want only %q", section, got, want)
+		}
+	}
+}
+
 func TestMediaViewCacheReusesAndInvalidatesProjection(t *testing.T) {
 	cache := mediaViewCache{}
 	key := mediaViewKey{Revision: 1, Section: "home"}

@@ -50,7 +50,7 @@ func deriveVisibleItems(source []MediaItem, key mediaViewKey) []MediaItem {
 				continue
 			}
 		}
-		if key.Section == "movies" && item.Kind == "tv" || key.Section == "tv" && item.Kind != "tv" {
+		if key.Section == "movies" && item.Kind != "movie" || key.Section == "tv" && item.Kind != "tv" {
 			continue
 		}
 		if key.Section == "favorites" && !item.Favorite || key.Section == "history" && !item.Watched {

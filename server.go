@@ -267,6 +267,14 @@ func (s *Server) LibraryItems(libraryID, query string) ([]MediaItem, error) {
 // current fnOS versions are not consistently paginated, so search is sliced
 // client-side after the authenticated server-side query.
 func (s *Server) LibraryPageContext(ctx context.Context, libraryID, query string, page, pageSize int) ([]MediaItem, int, error) {
+	return s.MediaPageContext(ctx, libraryID, "", query, page, pageSize)
+}
+
+// MediaPageContext reads a page from either a personal media library or one
+// of fnOS's system-wide categories. The web client scopes category pages with
+// item/list's type field (movie / tv), while personal libraries use
+// ancestor_guid. Both filters may be combined for a category inside a library.
+func (s *Server) MediaPageContext(ctx context.Context, libraryID, mediaType, query string, page, pageSize int) ([]MediaItem, int, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -279,7 +287,7 @@ func (s *Server) LibraryPageContext(ctx context.Context, libraryID, query string
 		if err := s.requestContext(ctx, "GET", "v1", route, nil, &response, s.tokenValue()); err != nil {
 			return nil, 0, err
 		}
-		items := filterLibraryItems(normalizeItems(unwrapData(response)), libraryID)
+		items := filterMediaItems(filterLibraryItems(normalizeItems(unwrapData(response)), libraryID), mediaType)
 		total := len(items)
 		start := (page - 1) * pageSize
 		if start >= total {
@@ -295,6 +303,9 @@ func (s *Server) LibraryPageContext(ctx context.Context, libraryID, query string
 	if libraryID != "" {
 		requestBody["ancestor_guid"] = libraryID
 	}
+	if mediaType != "" {
+		requestBody["type"] = mediaType
+	}
 	var response any
 	if err := s.requestContext(ctx, "POST", "v1", "item/list", requestBody, &response, s.tokenValue()); err != nil {
 		return nil, 0, err
@@ -302,6 +313,7 @@ func (s *Server) LibraryPageContext(ctx context.Context, libraryID, query string
 	data := unwrapData(response)
 	items := normalizeItems(findItemsList(data))
 	items = filterLibraryItems(items, libraryID)
+	items = filterMediaItems(items, mediaType)
 	total, _ := asInt(valueAt(data, "total"))
 	if total <= 0 {
 		total = int64((page-1)*pageSize + len(items))
@@ -310,6 +322,21 @@ func (s *Server) LibraryPageContext(ctx context.Context, libraryID, query string
 		}
 	}
 	return items, int(total), nil
+}
+
+func filterMediaItems(items []MediaItem, mediaType string) []MediaItem {
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+	if mediaType == "" {
+		return items
+	}
+	want := normalizeMediaKind(map[string]any{"type": mediaType})
+	out := make([]MediaItem, 0, len(items))
+	for _, item := range items {
+		if item.Kind == want {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func filterLibraryItems(items []MediaItem, libraryID string) []MediaItem {

@@ -91,7 +91,7 @@ func main() {
 	if iconErr != nil {
 		log.Printf("app icon: %v", iconErr)
 	}
-	app := &appState{settings: settings, section: "home", status: "连接飞牛影视服务器后开始浏览", loginOpen: true, player: NewPlayer(), posters: NewPosterLoader(), catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache(), favoritePending: map[string]bool{}, icon: icon}
+	app := &appState{settings: settings, section: "movies", status: "连接飞牛影视服务器后开始浏览", loginOpen: true, player: NewPlayer(), posters: NewPosterLoader(), catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache(), favoritePending: map[string]bool{}, icon: icon}
 	if settings.ServerURL != "" {
 		app.server = NewServer(settings.ServerURL, "")
 		if settings.Username != "" {
@@ -164,6 +164,8 @@ func movieTheme() *ui.Theme {
 	t.AccentPressed = ui.Hex("#2f594b")
 	t.AccentText = ui.Hex("#ffffff")
 	t.Radius = 11
+	// Keep native scrollbars hidden. The catalog draws its own very subtle
+	// thumb; the library sidebar intentionally has no visible scrollbar.
 	t.Scrollbar = ui.Transparent
 	return t
 }
@@ -181,7 +183,8 @@ func (a *appState) sidebar(c *ui.Context) {
 			})
 		})
 		ui.Box(c).Height(15)
-		a.navButton(c, "⌂", "全部影片", "home")
+		a.navButton(c, "▣", "电影", "movies")
+		a.navButton(c, "▤", "电视节目", "tv")
 		a.navButton(c, "♡", "我的收藏", "favorites")
 		a.navButton(c, "◷", "观看记录", "history")
 		ui.Text(c, "影视库").Padding(0, 10).FontSize(10).Bold().TextColor(t.TextMuted)
@@ -236,8 +239,10 @@ func (a *appState) navButton(c *ui.Context, icon, label, key string) {
 		a.selected = nil
 		a.query = ""
 		a.grid = ui.GridState{}
-		if a.loggedIn && (key == "home" || key == "favorites" || key == "history") {
+		if key != "library" {
 			a.libraryID = ""
+		}
+		if a.loggedIn {
 			a.loadLibrary()
 		}
 	}
@@ -247,26 +252,12 @@ func (a *appState) topbar(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(14).Children(func() {
 		ui.Column(c).Grow(1).Gap(3).Children(func() {
-			label := map[string]string{"home": "全部影片", "favorites": "我的收藏", "history": "观看记录", "settings": "服务器设置", "library": a.selectedLibraryName()}[a.section]
+			label := map[string]string{"movies": "电影", "tv": "电视节目", "favorites": "我的收藏", "history": "观看记录", "settings": "服务器设置", "library": a.selectedLibraryName()}[a.section]
 			if label == "" {
 				label = "影视库"
 			}
 			ui.Text(c, label).FontSize(27).Bold()
 		})
-		if a.loggedIn && a.section != "settings" {
-			if ui.SearchField(c, &a.query).Width(270).Placeholder("搜索影片、演员或导演").Changed() {
-				a.searchChangedAt = c.Now()
-				a.searchPending = true
-				c.After(320 * time.Millisecond)
-			}
-		}
-		if a.searchPending && c.Now().Sub(a.searchChangedAt) >= 300*time.Millisecond {
-			a.searchPending = false
-			a.loadLibrary()
-		}
-		if a.busy || a.libraryLoading || a.currentCatalogLoading() {
-			ui.Text(c, "加载中").FontSize(11).TextColor(t.TextMuted)
-		}
 		if state := a.catalogs[a.currentCatalogKey()]; state != nil && state.Err != "" && len(state.Items) > 0 {
 			if ui.Button(c, "重试").Padding(5, 9).Clicked() {
 				a.loadLibrary()
@@ -275,6 +266,24 @@ func (a *appState) topbar(c *ui.Context) {
 		if a.libraryErr != "" && !a.libraryLoading {
 			if ui.Button(c, "重试影视库").Padding(5, 9).Clicked() {
 				a.loadLibraries()
+			}
+		}
+		if a.loggedIn && a.section != "settings" {
+			if a.searchPending && c.Now().Sub(a.searchChangedAt) >= 300*time.Millisecond {
+				a.searchPending = false
+				a.loadLibrary()
+			}
+			if a.busy || a.libraryLoading || a.currentCatalogLoading() {
+				ui.Box(c).Size(20, 20).Center().Children(func() {
+					ui.Text(c, "↻").FontSize(15).TextColor(t.TextMuted)
+				})
+			} else {
+				ui.Box(c).Size(20, 20)
+			}
+			if ui.SearchField(c, &a.query).Width(270).Placeholder("搜索影片、演员或导演").Changed() {
+				a.searchChangedAt = c.Now()
+				a.searchPending = true
+				c.After(320 * time.Millisecond)
 			}
 		}
 	})
@@ -358,7 +367,7 @@ func (a *appState) libraryView(c *ui.Context) {
 		ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
 			ui.Text(c, "⌕").FontSize(34).TextColor(t.TextMuted)
 			if state != nil && state.Loading && len(state.Items) > 0 {
-				ui.Text(c, "正在查找可显示的剧集…").FontSize(13).TextColor(t.TextMuted)
+				ui.Text(c, "正在加载媒体…").FontSize(13).TextColor(t.TextMuted)
 			} else if a.status != "" {
 				ui.Text(c, a.status).FontSize(13).TextColor(t.TextMuted)
 			} else if state != nil && state.Loading {
@@ -461,6 +470,12 @@ func (a *appState) libraryView(c *ui.Context) {
 		p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y + rect.H - fadeHeight, W: rect.W, H: fadeHeight}, ui.LinearGradient{
 			From: background.Alpha(0), To: background, Angle: 180,
 		}, 0)
+		if a.catalogScroll.MaxY > 0 && rect.H > 40 {
+			track := ui.Rect{X: rect.X + rect.W - 4, Y: rect.Y + 12, W: 3, H: rect.H - 24}
+			thumbHeight := max(float32(26), track.H*track.H/(track.H+a.catalogScroll.MaxY))
+			thumbY := track.Y + (track.H-thumbHeight)*float32(a.catalogScroll.Y/max(float32(1), a.catalogScroll.MaxY))
+			p.Fill(ui.Rect{X: track.X, Y: thumbY, W: track.W, H: min(thumbHeight, track.H)}, ui.RGBA(92, 104, 96, 0.24), 1.5)
+		}
 	})
 }
 
@@ -892,7 +907,7 @@ func (a *appState) logout() {
 	a.mediaView.Invalidate()
 	a.dataRevision++
 	a.server = nil
-	a.section = "home"
+	a.section = "movies"
 	a.status = "已退出登录"
 	_ = DeleteCredential(serverURL)
 	_ = SaveSettings(a.settings)
@@ -1117,7 +1132,7 @@ func (a *appState) login() {
 			a.catalogs = map[string]*CatalogState{}
 			a.items = nil
 			a.selected = nil
-			a.section = "home"
+			a.section = "movies"
 			a.libraryID = ""
 			a.status = "连接成功，正在读取影视库…"
 			a.loadLibraries()
@@ -1172,16 +1187,15 @@ func (a *appState) loadLibraries() {
 				}
 				if !found {
 					if a.section == "library" {
-						a.section = "home"
-						a.status = "所选影视库已不可访问，已返回全部影片"
+						a.section = "movies"
+						a.status = "所选影视库已不可访问，已返回电影"
 					}
 					a.libraryID = ""
 				}
 			}
 			if len(libraries) == 0 {
-				if len(a.items) == 0 {
-					a.status = "此账户没有可访问的影视库"
-				}
+				a.status = "没有个人影视库，正在加载系统分类"
+				a.loadLibrary()
 				return
 			}
 			if a.libraryID == "" {
@@ -1203,8 +1217,9 @@ func (a *appState) loadLibrary() {
 		return
 	}
 	server, libraryID, query := a.server, a.libraryID, strings.TrimSpace(a.query)
+	mediaType := catalogMediaType(a.section)
 	serverURL := a.settings.ServerURL
-	key := libraryID + "\x00" + query
+	key := catalogStateKey(libraryID, mediaType, query)
 	for otherKey, other := range a.catalogs {
 		if otherKey != key && other.Cancel != nil {
 			other.Cancel()
@@ -1217,7 +1232,7 @@ func (a *appState) loadLibrary() {
 		state = &CatalogState{NextPage: 1}
 		a.catalogs[key] = state
 		if query == "" {
-			if cached, ok := a.catalogCache.Page(serverURL, libraryID); ok {
+			if cached, ok := a.catalogCache.Page(serverURL, catalogCacheScope(libraryID, mediaType)); ok {
 				state.Items = cached.Items
 				state.Total = cached.Total
 				state.NextPage = 2
@@ -1250,11 +1265,29 @@ func (a *appState) loadLibrary() {
 	state.Cancel, state.Loading, state.Err = cancel, true, ""
 	state.NextPage = 1
 	a.window.Invalidate()
-	a.fetchCatalogPage(ctx, key, server, serverURL, libraryID, query, 1, true)
+	a.fetchCatalogPage(ctx, key, server, serverURL, libraryID, mediaType, query, 1, true)
 }
 
 func (a *appState) currentCatalogKey() string {
-	return a.libraryID + "\x00" + strings.TrimSpace(a.query)
+	return catalogStateKey(a.libraryID, catalogMediaType(a.section), strings.TrimSpace(a.query))
+}
+
+func catalogMediaType(section string) string {
+	switch section {
+	case "movies":
+		return "movie"
+	case "tv":
+		return "tv"
+	default:
+		return ""
+	}
+}
+
+func catalogStateKey(libraryID, mediaType, query string) string {
+	if mediaType == "" {
+		return libraryID + "\x00" + query
+	}
+	return libraryID + "\x01" + mediaType + "\x00" + query
 }
 
 func (a *appState) cancelCatalogRequests() {
@@ -1272,14 +1305,14 @@ func (a *appState) currentCatalogLoading() bool {
 	return state != nil && state.Loading
 }
 
-func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Server, serverURL, libraryID, query string, page int, first bool) {
+func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Server, serverURL, libraryID, mediaType, query string, page int, first bool) {
 	go func() {
-		items, total, err := server.LibraryPageContext(ctx, libraryID, query, page, catalogPageSize)
+		items, total, err := server.MediaPageContext(ctx, libraryID, mediaType, query, page, catalogPageSize)
 		if err != nil && isAuthError(err) {
 			if credentials, readErr := ReadCredential(serverURL); readErr == nil && credentials.Password != "" {
 				if result, loginErr := server.Login(credentials.Username, credentials.Password); loginErr == nil {
 					_ = WriteCredential(serverURL, Credential{Username: credentials.Username, Password: credentials.Password, Token: result.Token})
-					items, total, err = server.LibraryPageContext(ctx, libraryID, query, page, catalogPageSize)
+					items, total, err = server.MediaPageContext(ctx, libraryID, mediaType, query, page, catalogPageSize)
 				}
 			}
 		}
@@ -1324,7 +1357,7 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 			state.Err = ""
 			if first && query == "" {
 				pageItems := append([]MediaItem(nil), state.Items...)
-				go a.catalogCache.SetPage(serverURL, libraryID, CatalogPage{Items: pageItems, Total: total})
+				go a.catalogCache.SetPage(serverURL, catalogCacheScope(libraryID, mediaType), CatalogPage{Items: pageItems, Total: total})
 			}
 			if key == a.currentCatalogKey() {
 				a.items = state.Items
@@ -1364,7 +1397,7 @@ func (a *appState) loadNextCatalogPage(retry bool) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	state.Cancel, state.Loading, state.Err, state.PageAutoRequested = cancel, true, "", true
-	a.fetchCatalogPage(ctx, key, a.server, a.settings.ServerURL, a.libraryID, strings.TrimSpace(a.query), state.NextPage, false)
+	a.fetchCatalogPage(ctx, key, a.server, a.settings.ServerURL, a.libraryID, catalogMediaType(a.section), strings.TrimSpace(a.query), state.NextPage, false)
 }
 
 func isAuthError(err error) bool {

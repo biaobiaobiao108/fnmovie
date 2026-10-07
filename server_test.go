@@ -146,6 +146,40 @@ func TestLibraryPageContextRequestsOnlyOnePage(t *testing.T) {
 	}
 }
 
+func TestMediaPageContextUsesSystemCategoryAndFiltersSearchResults(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/item/list":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode category request: %v", err)
+			}
+			if body["type"] != "tv" {
+				t.Errorf("system TV category should use type=tv, body=%#v", body)
+			}
+			if _, hasAncestor := body["ancestor_guid"]; hasAncestor {
+				t.Errorf("system category must not be scoped to a personal library: %#v", body)
+			}
+			writeJSON(t, w, `{"code":0,"data":{"total":2,"list":[{"guid":"show","title":"Show","type":"TV"},{"guid":"movie","title":"Movie","type":"Movie"}]}}`)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/search/list":
+			writeJSON(t, w, `{"code":0,"data":{"total":2,"list":[{"guid":"show","title":"Show","type":"TV"},{"guid":"movie","title":"Movie","type":"Movie"}]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	client := NewServer(server.URL, "token")
+	client.client = server.Client()
+	items, total, err := client.MediaPageContext(t.Context(), "", "tv", "", 1, catalogPageSize)
+	if err != nil || total != 2 || len(items) != 1 || items[0].ID != "show" {
+		t.Fatalf("system TV page = %#v total=%d err=%v", items, total, err)
+	}
+	items, total, err = client.MediaPageContext(t.Context(), "", "movie", "keyword", 1, catalogPageSize)
+	if err != nil || total != 1 || len(items) != 1 || items[0].ID != "movie" {
+		t.Fatalf("movie search page = %#v total=%d err=%v", items, total, err)
+	}
+}
+
 func TestSeasonEpisodesRequestsOnlySelectedSeasonAndSortsEpisodes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/episode/list/season-2" {
