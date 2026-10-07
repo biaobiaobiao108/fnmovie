@@ -10,9 +10,8 @@ GNU General Public License, version 2 or later. The full license text is in
 [eb0ee10315](https://github.com/mpv-player/mpv/tree/eb0ee10315); the Windows
 build project and build instructions are available at the release link above.
 
-The bundled `windows-amd64/player/scripts/osc.lua` is mpv's upstream OSC script
-from the same source revision and is loaded explicitly because the app disables
-user mpv configuration files.
+The upstream OSC script is present in the bundled mpv distribution, but FnMovie
+does not load it. Playback controls are drawn by the MyGo native UI.
 
 The bundled Windows build includes FFmpeg and other third-party components.
 Their respective copyright and license terms apply. See the source and build

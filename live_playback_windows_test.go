@@ -165,7 +165,7 @@ func TestLiveNASPlayback(t *testing.T) {
 		t.Fatalf("could not restore the original watch position: %v", err)
 	}
 	state := player.Snapshot()
-	t.Log(fmt.Sprintf("live stream decoded for %d seconds; seek worked; tracks: audio=%d subtitles=%d", liveSeconds, len(state.AudioTracks), len(state.SubtitleTracks)))
+	t.Log(fmt.Sprintf("live stream decoded for %d seconds; seek worked; tracks: audio=%d subtitles=%d; output=%s params=%s", liveSeconds, len(state.AudioTracks), len(state.SubtitleTracks), state.AudioOutput, state.AudioParams))
 }
 
 func TestLiveNASCatalog(t *testing.T) {

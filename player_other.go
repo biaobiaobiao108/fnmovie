@@ -19,3 +19,6 @@ func (p *playerProcess) command(...any)                     {}
 func (p *playerProcess) position() (float64, float64, bool) { return 0, 0, false }
 func (p *playerProcess) snapshot() PlayerSnapshot           { return PlayerSnapshot{} }
 func (p *playerProcess) setViewport(ui.Rect)                {}
+func (p *playerProcess) pointerActivity() <-chan struct{}   { return nil }
+
+func windowScale(uintptr) float64 { return 1 }

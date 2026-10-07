@@ -36,26 +36,27 @@ var (
 )
 
 type playerProcess struct {
-	cmd          *exec.Cmd
-	pipeName     string
-	parent       uintptr
-	child        uintptr
-	pid          uint32
-	viewport     ui.Rect
-	done         chan struct{}
-	ipcMu        sync.Mutex
-	writeMu      sync.Mutex
-	ipc          *os.File
-	positionBits atomic.Uint64
-	durationBits atomic.Uint64
-	positionSeen atomic.Bool
-	loaded       chan struct{}
-	loadOnce     sync.Once
-	pointerDone  chan struct{}
-	stateMu      sync.RWMutex
-	state        PlayerSnapshot
-	exitStatus   string
-	logPath      string
+	cmd           *exec.Cmd
+	pipeName      string
+	parent        uintptr
+	child         uintptr
+	pid           uint32
+	viewport      ui.Rect
+	done          chan struct{}
+	ipcMu         sync.Mutex
+	writeMu       sync.Mutex
+	ipc           *os.File
+	positionBits  atomic.Uint64
+	durationBits  atomic.Uint64
+	positionSeen  atomic.Bool
+	loaded        chan struct{}
+	loadOnce      sync.Once
+	pointerDone   chan struct{}
+	pointerEvents chan struct{}
+	stateMu       sync.RWMutex
+	state         PlayerSnapshot
+	exitStatus    string
+	logPath       string
 }
 
 func (p *playerProcess) start(binary, streamURL string, parent uintptr, resumeAt float64) error {
@@ -81,23 +82,24 @@ func (p *playerProcess) start(binary, streamURL string, parent uintptr, resumeAt
 	if err := os.MkdirAll(mpvConfigDir, 0700); err != nil {
 		return fmt.Errorf("创建播放器配置目录失败：%w", err)
 	}
-	oscScript := filepath.Join(filepath.Dir(binary), "scripts", "osc.lua")
-	if _, err := os.Stat(oscScript); err != nil {
-		return fmt.Errorf("找不到 mpv 原生控制栏脚本：%w", err)
+	inputConf := filepath.Join(mpvConfigDir, "input.conf")
+	if err := os.WriteFile(inputConf, []byte("MBTN_LEFT cycle pause\n"), 0600); err != nil {
+		return fmt.Errorf("写入播放器鼠标快捷键失败：%w", err)
 	}
 	args := []string{
-		"--force-window=yes", "--no-border", "--osc=no", "--osd-level=1", "--cursor-autohide=2600", "--keepaspect=yes", "--input-default-bindings=yes", "--input-cursor=yes",
-		// Prefer Windows D3D11 hardware decoding when the GPU and codec support
-		// it. mpv keeps its software decoder as a fallback when initialization
-		// fails, which is safer than forcing a specific decoder.
-		"--hwdec=auto-safe", "--gpu-context=d3d11",
-		"--script=" + oscScript,
-		"--script-opts=osc-layout=floating,osc-icon_style=fluent,osc-floatingalpha=92,osc-background_color=#1C1C1E,osc-timecode_color=#F5F5F7,osc-buttons_color=#F5F5F7,osc-small_buttonsL_color=#D1D1D6,osc-small_buttonsR_color=#D1D1D6,osc-title_color=#F5F5F7,osc-visibility=auto,osc-deadzonesize=0,osc-hidetimeout=2500,osc-fadeduration=220,osc-fadein=yes,osc-custom_button_1_content=返回,osc-custom_button_1_mbtn_left_command=quit",
+		"--force-window=yes", "--no-border", "--osc=no", "--osd-level=0", "--keepaspect=yes",
+		"--input-default-bindings=no", "--input-vo-keyboard=no", "--input-cursor=yes", "--input-conf=" + inputConf,
+		// Use the maintained Windows GPU backend, preferring safe hardware
+		// decoding and falling back to software decoding when unsupported.
+		"--vo=gpu-next", "--gpu-context=d3d11", "--hwdec=auto-safe",
+		// Decode compressed audio in mpv and send PCM to the Windows default
+		// output. This avoids requiring an AVR or sound card to support passthrough.
+		"--ao=wasapi", "--audio-channels=auto-safe",
 		"--no-config", "--config-dir=" + mpvConfigDir,
 		"--wid=" + strconv.FormatUint(uint64(parent), 10),
 		"--input-ipc-server=" + pipeName,
 		"--title=飞牛影视播放器",
-		"--log-file=" + logPath, "--msg-level=all=warn",
+		"--log-file=" + logPath, "--msg-level=all=warn,ao=info,ad=info,vd=info,ffmpeg=info",
 	}
 	if resumeAt > 0 {
 		args = append(args, "--start="+strconv.FormatFloat(resumeAt, 'f', 2, 64))
@@ -118,6 +120,7 @@ func (p *playerProcess) start(binary, streamURL string, parent uintptr, resumeAt
 	p.positionBits.Store(math.Float64bits(resumeAt))
 	p.durationBits.Store(0)
 	p.positionSeen.Store(false)
+	p.pointerEvents = make(chan struct{}, 1)
 	go func() {
 		waitErr := cmd.Wait()
 		p.stateMu.Lock()
@@ -146,18 +149,6 @@ func (p *playerProcess) start(binary, streamURL string, parent uintptr, resumeAt
 	}()
 	select {
 	case <-p.loaded:
-		// The native OSC is auto-hidden during playback. Reveal it once after
-		// the first frame so the user immediately sees the transport controls.
-		// The OSC then returns to its configured 2.5-second auto-hide behavior.
-		for attempt := 0; attempt < 10; attempt++ {
-			if err := p.sendCommand(map[string]any{"command": []any{"script-message-to", "osc", "osc-show"}}); err == nil {
-				break
-			}
-			if !p.running() {
-				return fmt.Errorf("mpv exited while showing playback controls: %s", p.logSummary())
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
 		p.pointerDone = make(chan struct{})
 		go p.watchPointer(p.done, p.parent, p.pid, p.pointerDone)
 		return nil
@@ -227,10 +218,8 @@ func (p *playerProcess) stop() {
 	p.child = 0
 }
 
-// watchPointer explicitly wakes the mpv OSC when the system pointer moves over
-// the embedded video child. Some Windows hosts do not forward MOUSE_MOVE to a
-// child window consistently after the OSC hides; this keeps the normal mpv
-// auto-hide behavior while making the controls reliably recoverable.
+// watchPointer reports pointer movement over the embedded video rectangle.
+// This remains reliable when the transparent MyGo control window is hidden.
 func (p *playerProcess) watchPointer(done <-chan struct{}, parent uintptr, pid uint32, finished chan<- struct{}) {
 	defer close(finished)
 	ticker := time.NewTicker(40 * time.Millisecond)
@@ -238,7 +227,7 @@ func (p *playerProcess) watchPointer(done <-chan struct{}, parent uintptr, pid u
 	type point struct{ X, Y int32 }
 	var last point
 	hasLast := false
-	lastShow := time.Time{}
+	lastActivity := time.Time{}
 	for {
 		select {
 		case <-done:
@@ -272,11 +261,14 @@ func (p *playerProcess) watchPointer(done <-chan struct{}, parent uintptr, pid u
 		if cursor.X < rect[0] || cursor.X >= rect[2] || cursor.Y < rect[1] || cursor.Y >= rect[3] {
 			continue
 		}
-		if time.Since(lastShow) < 90*time.Millisecond {
+		if time.Since(lastActivity) < 30*time.Millisecond {
 			continue
 		}
-		p.command("script-message-to", "osc", "osc-show")
-		lastShow = time.Now()
+		select {
+		case p.pointerEvents <- struct{}{}:
+		default:
+		}
+		lastActivity = time.Now()
 	}
 }
 
@@ -357,6 +349,10 @@ func (p *playerProcess) connectIPC() {
 		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 3, "pause"}})
 		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 4, "volume"}})
 		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 5, "track-list"}})
+		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 6, "mute"}})
+		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 7, "speed"}})
+		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 8, "current-ao"}})
+		_ = p.sendCommand(map[string]any{"command": []any{"observe_property", 9, "audio-params"}})
 		p.readIPC(file)
 		p.ipcMu.Lock()
 		if p.ipc == file {
@@ -417,6 +413,21 @@ func (p *playerProcess) readIPC(file *os.File) {
 			p.updateTracks(event.Data)
 			continue
 		}
+		if event.Name == "current-ao" {
+			var output string
+			if json.Unmarshal(event.Data, &output) == nil {
+				p.stateMu.Lock()
+				p.state.AudioOutput = output
+				p.stateMu.Unlock()
+			}
+			continue
+		}
+		if event.Name == "audio-params" {
+			p.stateMu.Lock()
+			p.state.AudioParams = strings.TrimSpace(string(event.Data))
+			p.stateMu.Unlock()
+			continue
+		}
 		var value float64
 		switch event.Name {
 		case "time-pos":
@@ -443,6 +454,19 @@ func (p *playerProcess) readIPC(file *os.File) {
 			if json.Unmarshal(event.Data, &value) == nil {
 				p.stateMu.Lock()
 				p.state.Volume = value
+				p.stateMu.Unlock()
+			}
+		case "mute":
+			var muted bool
+			if json.Unmarshal(event.Data, &muted) == nil {
+				p.stateMu.Lock()
+				p.state.Muted = muted
+				p.stateMu.Unlock()
+			}
+		case "speed":
+			if json.Unmarshal(event.Data, &value) == nil {
+				p.stateMu.Lock()
+				p.state.Speed = value
 				p.stateMu.Unlock()
 			}
 		}
@@ -559,6 +583,18 @@ func (p *playerProcess) setViewport(rect ui.Rect) {
 		procGetWindowRect.Call(p.child, uintptr(unsafe.Pointer(&childRect[0])))
 		log.Printf("mpv embed geometry: host=%v child=%v viewport=%v dpi=%d", hostRect, childRect, rect, dpi)
 	}
+}
+
+func (p *playerProcess) pointerActivity() <-chan struct{} { return p.pointerEvents }
+
+func windowScale(handle uintptr) float64 {
+	if handle == 0 {
+		return 1
+	}
+	if dpi, _, _ := procGetDPIForWindow.Call(handle); dpi > 0 {
+		return float64(dpi) / 96
+	}
+	return 1
 }
 
 func findPlayerChild(parent uintptr, pid uint32) uintptr {

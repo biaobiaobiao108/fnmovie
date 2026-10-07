@@ -4,8 +4,9 @@ import (
 	"context"
 	_ "embed"
 	"log"
-	"sort"
+	"math"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -16,36 +17,50 @@ import (
 var appIconPNG []byte
 
 type appState struct {
-	window          *mygo.Window
-	settings        Settings
-	server          *Server
-	player          *Player
-	playerProxy     *PlaybackProxy
-	section         string
-	query           string
-	username        string
-	password        string
-	status          string
-	busy            bool
-	libraryLoading  bool
-	libraryErr      string
-	loggedIn        bool
-	loginOpen       bool
-	libraries       []MediaLibrary
-	libraryID       string
-	items           []MediaItem
-	catalogs        map[string]*CatalogState
-	catalogCache    *CatalogCache
-	searchChangedAt time.Time
-	searchPending   bool
-	grid            ui.GridState
-	images          map[string]*ui.Bitmap
-	imageLoading    map[string]bool
-	selected        *MediaItem
-	playback        PlaybackState
-	selectedTab     int
-	playingItem     *MediaItem
-	icon            *ui.Bitmap
+	window                   *mygo.Window
+	settings                 Settings
+	server                   *Server
+	player                   *Player
+	playerProxy              *PlaybackProxy
+	section                  string
+	query                    string
+	username                 string
+	password                 string
+	status                   string
+	busy                     bool
+	libraryLoading           bool
+	libraryErr               string
+	loggedIn                 bool
+	loginOpen                bool
+	libraries                []MediaLibrary
+	libraryID                string
+	items                    []MediaItem
+	catalogs                 map[string]*CatalogState
+	catalogCache             *CatalogCache
+	mediaView                mediaViewCache
+	dataRevision             uint64
+	searchChangedAt          time.Time
+	searchPending            bool
+	grid                     ui.GridState
+	posters                  *PosterLoader
+	selected                 *MediaItem
+	playback                 PlaybackState
+	selectedTab              int
+	playingItem              *MediaItem
+	icon                     *ui.Bitmap
+	displayScale             float64
+	playerOverlayWindow      *mygo.Window
+	playerOverlayHooks       bool
+	playerOverlayMonitorDone chan struct{}
+	overlayMu                sync.Mutex
+	playerOverlayVisible     bool
+	playerOverlayPinned      bool
+	playerOverlaySeeking     bool
+	playerOverlayLastInput   time.Time
+	playerOverlayMenu        string
+	seekSliderPosition       float64
+	seekDragging             bool
+	volumeDragging           bool
 }
 
 func main() {
@@ -57,7 +72,7 @@ func main() {
 	if iconErr != nil {
 		log.Printf("app icon: %v", iconErr)
 	}
-	app := &appState{settings: settings, section: "home", status: "连接飞牛影视服务器后开始浏览", loginOpen: true, player: NewPlayer(), images: map[string]*ui.Bitmap{}, imageLoading: map[string]bool{}, catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache(), icon: icon}
+	app := &appState{settings: settings, section: "home", status: "连接飞牛影视服务器后开始浏览", loginOpen: true, player: NewPlayer(), posters: NewPosterLoader(), catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache(), icon: icon}
 	if settings.ServerURL != "" {
 		app.server = NewServer(settings.ServerURL, "")
 		if settings.Username != "" {
@@ -78,6 +93,9 @@ func main() {
 			BackgroundColor: "#f7f6f2", StateKey: "main", Content: ui.View(app.view),
 		})
 		setWindowTheme(app.window)
+		app.displayScale = windowScale(app.window.NativeHandle())
+		app.window.OnResize(app.updateDisplayScale)
+		app.window.OnMove(app.updateDisplayScale)
 		if err := app.window.SetIcon(appIconPNG); err != nil {
 			log.Printf("set app icon: %v", err)
 		}
@@ -325,6 +343,8 @@ func (a *appState) libraryView(c *ui.Context) {
 	if state != nil && !state.Exhausted {
 		gridCount++
 	}
+	windowWidth, _ := c.Size()
+	gridColumns := max(1, int((windowWidth-273)/170))
 	grid := ui.GridView(c, &a.grid, gridCount, 168, 326, func(i int) {
 		if i >= len(items) {
 			if state != nil && !state.Loading && !state.Exhausted && !state.PageAutoRequested && state.Err == "" {
@@ -345,13 +365,16 @@ func (a *appState) libraryView(c *ui.Context) {
 			return
 		}
 		item := items[i]
+		if next := i + gridColumns; next < len(items) {
+			a.requestPoster(items[next], 168, 252)
+		}
 		card := ui.Button(c, "").Key(item.ID).Padding(0).BorderWidth(0).Background(ui.Color{}).TextColor(t.Text).
-			Transition(ui.ElementTransition{Duration: 190 * time.Millisecond, Enter: &ui.Motion{Y: 7, Opacity: 0}})
+			Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 		card.Children(func() {
 			ui.Column(c).Gap(8).Center().Children(func() {
 				cover := ui.Box(c).Size(168, 252).Radius(10).Clip().BorderWidth(0)
 				cover.Children(func() {
-					poster := a.imageFor(item)
+					poster := a.imageFor(item, 168, 252)
 					if poster != nil {
 						ui.Image(c, poster).Size(168, 252).Fit(ui.Cover)
 					} else {
@@ -400,7 +423,7 @@ func cardCaption(item MediaItem) string {
 func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 	t := c.Theme()
 	ui.Row(c).Height(224).Padding(20, 22).Gap(24).Radius(14).Background(ui.Hex("#eeeee8")).Children(func() {
-		if poster := a.imageFor(item); poster != nil {
+		if poster := a.imageFor(item, 136, 184); poster != nil {
 			ui.Image(c, poster).Size(136, 184).Fit(ui.Cover).Radius(9)
 		} else {
 			ui.Box(c).Size(136, 184).Radius(9).Background(ui.Hex("#e5e5df")).Center().Children(func() {
@@ -457,7 +480,7 @@ func (a *appState) openDetail(item MediaItem) {
 func (a *appState) detailView(c *ui.Context, item MediaItem) {
 	t := c.Theme()
 	ui.Row(c).Gap(28).Grow(1).Children(func() {
-		if poster := a.imageFor(item); poster != nil {
+		if poster := a.imageFor(item, 250, 365); poster != nil {
 			ui.Image(c, poster).Size(250, 365).Fit(ui.Cover).Radius(12)
 		} else {
 			ui.Box(c).Size(250, 365).Radius(12).Background(ui.Hex("#e8e8e2"))
@@ -512,7 +535,8 @@ func (a *appState) settingsView(c *ui.Context) {
 				a.cancelCatalogRequests()
 				a.catalogs = map[string]*CatalogState{}
 				a.selected = nil
-				a.images = map[string]*ui.Bitmap{}
+				a.mediaView.Invalidate()
+				a.dataRevision++
 				a.server = nil
 				_ = DeleteCredential(a.settings.ServerURL)
 				_ = SaveSettings(a.settings)
@@ -540,8 +564,8 @@ func (a *appState) logout() {
 	a.libraryID = ""
 	a.query = ""
 	a.password = ""
-	a.images = map[string]*ui.Bitmap{}
-	a.imageLoading = map[string]bool{}
+	a.mediaView.Invalidate()
+	a.dataRevision++
 	a.server = nil
 	a.section = "home"
 	a.status = "已退出登录"
@@ -553,6 +577,7 @@ func (a *appState) logout() {
 }
 
 func (a *appState) playerView(c *ui.Context) {
+	a.playerShortcuts(c)
 	area := ui.Box(c).Fill().Background(ui.Hex("#000000"))
 	area.DrawOver(func(_ *ui.Painter, rect ui.Rect) {
 		a.player.SetViewport(rect)
@@ -586,48 +611,18 @@ func (a *appState) visibleItems() []MediaItem {
 			source = nil
 		}
 	}
-	out := make([]MediaItem, 0, len(source))
-	for _, item := range source {
-		if a.section == "library" {
-			if itemLibraryID, hasLibraryID := itemLibrary(item.Raw); hasLibraryID && itemLibraryID != a.libraryID {
-				continue
-			}
-		}
-		if a.section == "movies" && item.Kind == "tv" || a.section == "tv" && item.Kind != "tv" {
-			continue
-		}
-		if a.section == "favorites" && !item.Favorite {
-			continue
-		}
-		if a.section == "history" && !item.Watched {
-			continue
-		}
-		switch a.selectedTab {
-		case 1:
-			if item.Kind == "tv" {
-				continue
-			}
-		case 2:
-			if item.Kind != "tv" {
-				continue
-			}
-		}
-		out = append(out, item)
+	key := mediaViewKey{
+		Revision: a.dataRevision, Section: a.section, LibraryID: a.libraryID,
+		Query: normalizeMediaQuery(a.query), Tab: a.selectedTab,
 	}
-	if a.selectedTab == 3 {
-		sort.SliceStable(out, func(i, j int) bool { return out[i].AddedAt > out[j].AddedAt })
-	} else if a.section == "home" {
-		sort.SliceStable(out, func(i, j int) bool {
-			if out[i].Watched != out[j].Watched {
-				return out[i].Watched
-			}
-			return out[i].AddedAt > out[j].AddedAt
-		})
-	}
-	return out
+	return a.mediaView.Get(key, source)
 }
 
-func (a *appState) imageFor(item MediaItem) *ui.Bitmap {
+func (a *appState) imageFor(item MediaItem, width, height int) *ui.Bitmap {
+	server := a.server
+	if server == nil || a.posters == nil {
+		return nil
+	}
 	urlValue := item.Poster
 	if urlValue == "" {
 		urlValue = firstString(item.Raw, "poster_path", "posterPath", "image_url", "imageUrl", "cover_url", "coverUrl")
@@ -635,28 +630,48 @@ func (a *appState) imageFor(item MediaItem) *ui.Bitmap {
 	if urlValue == "" {
 		return nil
 	}
-	if cached := a.images[urlValue]; cached != nil {
-		return cached
-	}
-	if a.imageLoading[urlValue] || a.server == nil {
+	return a.requestPoster(item, width, height)
+}
+
+func (a *appState) requestPoster(item MediaItem, width, height int) *ui.Bitmap {
+	server := a.server
+	if server == nil || a.posters == nil {
 		return nil
 	}
-	a.imageLoading[urlValue] = true
-	server := a.server
-	go func() {
-		data, err := server.FetchImage(server.imageURL(urlValue))
-		var bitmap *ui.Bitmap
-		if err == nil {
-			bitmap, err = ui.DecodeBitmap(data)
+	urlValue := item.Poster
+	if urlValue == "" {
+		urlValue = firstString(item.Raw, "poster_path", "posterPath", "image_url", "imageUrl", "cover_url", "coverUrl")
+	}
+	if urlValue == "" {
+		return nil
+	}
+	scale := a.displayScale
+	if scale <= 0 {
+		scale = 1
+		if a.window != nil {
+			scale = windowScale(a.window.NativeHandle())
 		}
-		a.window.Update(func() {
-			delete(a.imageLoading, urlValue)
-			if err == nil {
-				a.images[urlValue] = bitmap
-			}
-		})
-	}()
-	return nil
+	}
+	pixelWidth := max(1, int(math.Ceil(float64(width)*scale)))
+	pixelHeight := max(1, int(math.Ceil(float64(height)*scale)))
+	window := a.window
+	return a.posters.GetOrRequest(server, server.imageURL(urlValue), pixelWidth, pixelHeight, func() {
+		if window != nil {
+			window.Update(func() { window.Invalidate() })
+		}
+	})
+}
+
+func (a *appState) updateDisplayScale() {
+	if a.window == nil {
+		return
+	}
+	scale := windowScale(a.window.NativeHandle())
+	if scale == a.displayScale {
+		return
+	}
+	a.displayScale = scale
+	a.window.Invalidate()
 }
 
 func (a *appState) login() {
@@ -700,8 +715,8 @@ func (a *appState) login() {
 			a.settings = settings
 			a.loggedIn = true
 			a.loginOpen = false
-			a.images = map[string]*ui.Bitmap{}
-			a.imageLoading = map[string]bool{}
+			a.mediaView.Invalidate()
+			a.dataRevision++
 			a.cancelCatalogRequests()
 			a.catalogs = map[string]*CatalogState{}
 			a.items = nil
@@ -810,6 +825,7 @@ func (a *appState) loadLibrary() {
 				state.NextPage = 2
 				state.UpdatedAt = cached.UpdatedAt
 				state.Exhausted = catalogPageExhausted(len(cached.Items), len(cached.Items), cached.Total, catalogPageSize)
+				a.dataRevision++
 			}
 		}
 	}
@@ -899,6 +915,8 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 			} else {
 				state.Items = appendUniqueItems(state.Items, items)
 			}
+			a.dataRevision++
+			a.mediaView.Invalidate()
 			state.Total = total
 			state.NextPage = page + 1
 			state.Exhausted = catalogPageExhausted(len(items), len(state.Items), total, catalogPageSize)
@@ -972,7 +990,7 @@ func (a *appState) startPlayback(item MediaItem) {
 			}
 			item.MediaID = stream.MediaID
 			a.playingItem = &item
-			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Quality: stream.Quality}
+			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
 			localURL, proxy, err := server.ProxyPlayback(stream.URL)
 			if err != nil {
 				a.playback.Active = false
@@ -990,6 +1008,9 @@ func (a *appState) startPlayback(item MediaItem) {
 				return
 			}
 			a.window.Invalidate()
+			a.seekSliderPosition = stream.ResumeAt
+			a.createPlayerOverlay()
+			a.startPlayerOverlayMonitor()
 			go a.trackPlayback(item, a.server)
 		})
 	}()
@@ -1012,11 +1033,22 @@ func (a *appState) trackPlayback(item MediaItem, server *Server) {
 			}
 			a.playback.Position = position
 			a.playback.Paused = snapshot.Paused
-			a.playback.Volume = snapshot.Volume
+			if !a.volumeDragging {
+				a.playback.Volume = snapshot.Volume
+			}
+			a.playback.Muted = snapshot.Muted
+			if snapshot.Speed > 0 {
+				a.playback.Speed = snapshot.Speed
+			}
+			a.playback.AudioOutput = snapshot.AudioOutput
+			a.playback.AudioParams = snapshot.AudioParams
 			a.playback.AudioTracks = snapshot.AudioTracks
 			a.playback.SubtitleTracks = snapshot.SubtitleTracks
 			if duration > 0 {
 				a.playback.Duration = duration
+			}
+			if a.playerOverlayWindow != nil {
+				a.playerOverlayWindow.Invalidate()
 			}
 		})
 		if time.Since(lastProgress) >= 30*time.Second {
@@ -1034,9 +1066,8 @@ func (a *appState) trackPlayback(item MediaItem, server *Server) {
 			if snapshot.Error != "" {
 				a.playback.Error = snapshot.Error
 			} else {
-				// The native OSC's return/close action quits mpv. Treat a clean
-				// exit as a request to return to the library instead of leaving
-				// a frozen player screen behind.
+				// A clean mpv exit (including natural completion) returns to the
+				// library instead of leaving a frozen video surface behind.
 				a.stopPlayback()
 			}
 		}
@@ -1077,6 +1108,7 @@ func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64) {
 		item = &copy
 		position, duration = a.player.Position()
 	}
+	a.closePlayerOverlay()
 	a.player.Stop()
 	a.playerProxy.Close()
 	a.playerProxy = nil
@@ -1095,6 +1127,32 @@ func (a *appState) toggleFavorite(item MediaItem) {
 			a.window.Update(func() { a.status = "收藏状态更新失败：" + err.Error() })
 			return
 		}
-		a.window.Update(func() { a.status = "收藏状态已更新"; a.loadLibrary() })
+		a.window.Update(func() {
+			favorite := !item.Favorite
+			a.updateFavoriteProjection(item.ID, favorite)
+			a.status = "收藏状态已更新"
+			if state := a.catalogs[a.currentCatalogKey()]; state != nil {
+				state.Refreshed = false
+			}
+			a.loadLibrary()
+		})
 	}()
+}
+
+func (a *appState) updateFavoriteProjection(itemID string, favorite bool) {
+	for _, state := range a.catalogs {
+		for i := range state.Items {
+			if state.Items[i].ID == itemID {
+				state.Items[i].Favorite = favorite
+				state.Refreshed = false
+			}
+		}
+	}
+	for i := range a.items {
+		if a.items[i].ID == itemID {
+			a.items[i].Favorite = favorite
+		}
+	}
+	a.dataRevision++
+	a.mediaView.Invalidate()
 }

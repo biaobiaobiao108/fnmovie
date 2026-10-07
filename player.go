@@ -20,6 +20,10 @@ type PlaybackState struct {
 	Duration       float64
 	Paused         bool
 	Volume         float64
+	Muted          bool
+	Speed          float64
+	AudioOutput    string
+	AudioParams    string
 	AudioTracks    []PlayerTrack
 	SubtitleTracks []PlayerTrack
 	Quality        string
@@ -40,6 +44,10 @@ type PlayerSnapshot struct {
 	Duration       float64
 	Paused         bool
 	Volume         float64
+	Muted          bool
+	Speed          float64
+	AudioOutput    string
+	AudioParams    string
 	AudioTracks    []PlayerTrack
 	SubtitleTracks []PlayerTrack
 	Error          string
@@ -125,10 +133,19 @@ func (p *Player) TogglePause() {
 	defer p.mu.Unlock()
 	p.process.command("cycle", "pause")
 }
-func (p *Player) CycleSubtitle() { p.command("cycle", "sub") }
-func (p *Player) CycleAudio()    { p.command("cycle", "audio") }
+func (p *Player) ToggleMute() { p.command("cycle", "mute") }
 func (p *Player) AdjustVolume(delta int) {
 	p.command("add", "volume", strconv.Itoa(delta))
+}
+
+func (p *Player) SetSpeed(value float64) {
+	if value < 0.25 {
+		value = 0.25
+	}
+	if value > 4 {
+		value = 4
+	}
+	p.command("set_property", "speed", value)
 }
 
 func (p *Player) Seek(seconds float64) {
@@ -174,15 +191,19 @@ func (p *Player) SetVolume(value float64) {
 }
 
 func (p *Player) SelectTrack(kind string, id int) {
-	property := "sid"
+	property, value := playerTrackSelection(kind, id)
+	p.command("set_property", property, value)
+}
+
+func playerTrackSelection(kind string, id int) (property string, value any) {
+	property = "sid"
 	if kind == "audio" {
 		property = "aid"
 	}
 	if id <= 0 {
-		p.command("set_property", property, "no")
-		return
+		return property, "no"
 	}
-	p.command("set_property", property, id)
+	return property, id
 }
 
 func (p *Player) Snapshot() PlayerSnapshot {
@@ -226,6 +247,8 @@ func (p *Player) SetViewport(rect ui.Rect) {
 	p.process.setViewport(rect)
 	p.mu.Unlock()
 }
+
+func (p *Player) PointerActivity() <-chan struct{} { return p.process.pointerActivity() }
 
 func (p *Player) command(args ...any) {
 	p.mu.Lock()
