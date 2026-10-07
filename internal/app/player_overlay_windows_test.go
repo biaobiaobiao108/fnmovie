@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -46,6 +47,10 @@ func runNativePlaybackOverlayComposition() error {
 		a.window = mygo.NewWindow(mygo.WindowOptions{Title: "FnMovie overlay test", Width: 1000, Height: 650, AlwaysOnTop: true, Content: ui.View(func(c *ui.Context) {
 			a.advancePlayerFullscreen(c)
 			a.advancePlayerOverlayAnimation(c)
+			if a.player.Running() {
+				a.playerView(c)
+				return
+			}
 			ui.Box(c).Fill().Background(ui.RGB(24, 164, 98))
 		})})
 		a.createPlayerOverlay()
@@ -138,7 +143,7 @@ func checkNativePlayerMenus(a *appState) error {
 			a.playback.AudioTracks, a.playback.SubtitleTracks = tracks, tracks
 			a.openPlayerOverlayMenu(option)
 			if a.playerOverlayWindow.ContentBounds() != transportBounds {
-				err = fmt.Errorf("%s menu moved or resized the transport surface", option)
+				err = fmt.Errorf("%s menu moved or resized the transport surface: before=%+v after=%+v main=%+v", option, transportBounds, a.playerOverlayWindow.ContentBounds(), a.window.ContentBounds())
 			}
 			if a.playerMenuWindow.ContentBounds().Width != playerMenuWidth || a.playerMenuWindow.ContentBounds().Height != playerMenuHeight {
 				err = fmt.Errorf("%s native menu has inconsistent dimensions: %+v", option, a.playerMenuWindow.ContentBounds())
@@ -317,7 +322,31 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		finish(err)
 		return
 	}
-	time.Sleep(12 * time.Second)
+	if err := checkNativeStableVideoBounds(a, onUI); err != nil {
+		finish(err)
+		return
+	}
+	var focusErr error
+	onUI(func() {
+		restoreWindowFocus(a.window)
+		foregroundBefore, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetForegroundWindow").Call()
+		a.hidePlayerOverlay(false)
+		a.showPlayerOverlay()
+		foreground, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetForegroundWindow").Call()
+		// Windows may reject activation when another application owns the
+		// foreground lock. Automatic controls must preserve either owner.
+		if foreground != foregroundBefore {
+			focusErr = fmt.Errorf("automatic control display changed foreground focus: before=%x after=%x main=%x controls=%x header=%x", foregroundBefore, foreground, a.window.NativeHandle(), a.playerOverlayWindow.NativeHandle(), a.playerHeaderWindow.NativeHandle())
+		}
+	})
+	if focusErr != nil {
+		finish(focusErr)
+		return
+	}
+	if err := checkNativeVideoFrames(a, onUI, 12*time.Second); err != nil {
+		finish(err)
+		return
+	}
 	var finalErr error
 	onUI(func() {
 		if !a.playback.Active || !a.player.Running() || a.playback.Position < 10 {
@@ -348,6 +377,70 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		}
 	})
 	finish(finalErr)
+}
+
+func checkNativeVideoFrames(a *appState, onUI func(func()), duration time.Duration) error {
+	user := syscall.NewLazyDLL("user32.dll")
+	getDC, releaseDC := user.NewProc("GetDC"), user.NewProc("ReleaseDC")
+	getPixel := syscall.NewLazyDLL("gdi32.dll").NewProc("GetPixel")
+	deadline := time.Now().Add(duration)
+	for frame := 0; time.Now().Before(deadline); frame++ {
+		var frameErr error
+		onUI(func() {
+			bounds := a.window.ContentBounds()
+			scale := windowScale(a.window.NativeHandle())
+			dc, _, _ := getDC.Call(0)
+			defer releaseDC.Call(0, dc)
+			for _, offset := range []int{-40, 0, 40} {
+				color, _, _ := getPixel.Call(dc, uintptr(float64(bounds.X+bounds.Width/2)*scale), uintptr(float64(bounds.Y+bounds.Height/2+offset)*scale))
+				r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
+				if absInt(r-24) > 12 || absInt(g-80) > 12 || absInt(b-164) > 12 {
+					frameErr = fmt.Errorf("video frame %d flashed at offset %d: RGB(%d,%d,%d)", frame, offset, r, g, b)
+					return
+				}
+			}
+		})
+		if frameErr != nil {
+			return frameErr
+		}
+		time.Sleep(16 * time.Millisecond)
+	}
+	return nil
+}
+
+// A progress repaint must not send geometry changes to a stationary video HWND.
+// Such notifications unnecessarily disturb the active D3D11 swap chain.
+func checkNativeStableVideoBounds(a *appState, onUI func(func())) error {
+	user := syscall.NewLazyDLL("user32.dll")
+	setProc := user.NewProc("SetWindowLongPtrW")
+	callProc := user.NewProc("CallWindowProcW")
+	var changes atomic.Int32
+	var host, original uintptr
+	callback := syscall.NewCallback(func(hwnd uintptr, message uint32, wparam, lparam uintptr) uintptr {
+		if message == 0x0047 {
+			changes.Add(1)
+		} // WM_WINDOWPOSCHANGED
+		result, _, _ := callProc.Call(original, hwnd, uintptr(message), wparam, lparam)
+		return result
+	})
+	onUI(func() {
+		host = a.player.surface
+		original, _, _ = setProc.Call(host, ^uintptr(3), callback) // GWLP_WNDPROC (-4)
+	})
+	if host == 0 || original == 0 {
+		return fmt.Errorf("video geometry observer could not attach")
+	}
+	defer onUI(func() { setProc.Call(host, ^uintptr(3), original) })
+	onUI(func() {
+		for range 20 {
+			fitPlayerSurface(host)
+			a.syncPlayerOverlay()
+		}
+	})
+	if count := changes.Load(); count != 0 {
+		return fmt.Errorf("stationary video received %d redundant geometry changes", count)
+	}
+	return nil
 }
 
 func absInt(v int) int {

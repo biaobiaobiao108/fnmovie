@@ -648,6 +648,13 @@ func fitPlayerSurface(host uintptr) {
 	parent, _, _ := procGetPlayerParent.Call(host)
 	var rect [4]int32
 	if ok, _, _ := procGetPlayerClientRect.Call(parent, uintptr(unsafe.Pointer(&rect[0]))); ok != 0 {
+		var current, parentBounds, childBounds [4]int32
+		procGetPlayerClientRect.Call(host, uintptr(unsafe.Pointer(&current[0])))
+		procGetWindowRect.Call(parent, uintptr(unsafe.Pointer(&parentBounds[0])))
+		procGetWindowRect.Call(host, uintptr(unsafe.Pointer(&childBounds[0])))
+		if current[2] == rect[2] && current[3] == rect[3] && parentBounds[0] == childBounds[0] && parentBounds[1] == childBounds[1] {
+			return
+		}
 		procSetWindowPos.Call(host, 0, 0, 0, uintptr(rect[2]), uintptr(rect[3]), 0x0010|0x0004)
 	}
 }

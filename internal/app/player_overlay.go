@@ -63,8 +63,8 @@ func (a *appState) createPlayerOverlay() {
 	a.playerOverlayLastInput = time.Now()
 	a.playerOverlayOpacity = 0
 	a.overlayMu.Unlock()
-	a.playerOverlayWindow.Show()
-	a.playerHeaderWindow.Show()
+	a.playerOverlayWindow.ShowInactive()
+	a.playerHeaderWindow.ShowInactive()
 	a.animatePlayerOverlay(playerOverlayTargetOpacity)
 }
 
@@ -97,12 +97,20 @@ func (a *appState) syncPlayerOverlay() {
 	controlBounds.Y += bounds.Height - controlBounds.Height
 	headerBounds := bounds
 	headerBounds.Height = min(playerOverlayHeaderHeight, bounds.Height-controlBounds.Height)
-	a.playerOverlayWindow.SetContentBounds(controlBounds)
-	a.playerHeaderWindow.SetContentBounds(headerBounds)
+	// Playback progress and pointer activity do not change window geometry.
+	// Leave native surfaces alone unless their actual bounds need to change.
+	if a.playerOverlayWindow.ContentBounds() != controlBounds {
+		a.playerOverlayWindow.SetContentBounds(controlBounds)
+	}
+	if a.playerHeaderWindow.ContentBounds() != headerBounds {
+		a.playerHeaderWindow.SetContentBounds(headerBounds)
+	}
 	a.playerOverlayWindow.Invalidate()
 	a.playerHeaderWindow.Invalidate()
 	if a.playerMenuWindow != nil {
-		a.playerMenuWindow.SetContentBounds(playerMenuBounds(bounds))
+		if menuBounds := playerMenuBounds(bounds); a.playerMenuWindow.ContentBounds() != menuBounds {
+			a.playerMenuWindow.SetContentBounds(menuBounds)
+		}
 		a.playerMenuWindow.Invalidate()
 	}
 	if a.player != nil {
@@ -185,10 +193,10 @@ func (a *appState) showPlayerOverlay() {
 	a.playerOverlayLastInput = time.Now()
 	a.overlayMu.Unlock()
 	if !wasVisible {
-		a.playerOverlayWindow.Show()
-		a.playerHeaderWindow.Show()
+		a.playerOverlayWindow.ShowInactive()
+		a.playerHeaderWindow.ShowInactive()
 		if a.playerMenuWindow != nil {
-			a.playerMenuWindow.Show()
+			a.playerMenuWindow.ShowInactive()
 		}
 		a.animatePlayerOverlay(playerOverlayTargetOpacity)
 	} else {
@@ -281,12 +289,21 @@ func (a *appState) advancePlayerOverlayAnimation(c *ui.Context) {
 			if transition != a.playerOverlayTransition || a.playerOverlayVisible || a.playerOverlayWindow == nil {
 				return
 			}
+			// Idle fading must not reactivate the application while the user is
+			// in another window. Restore shortcuts only after an owned control
+			// window actually had keyboard focus.
+			ownedFocus := a.playerOverlayWindow.IsFocused() || a.playerHeaderWindow.IsFocused()
+			if a.playerMenuWindow != nil {
+				ownedFocus = ownedFocus || a.playerMenuWindow.IsFocused()
+			}
 			a.playerOverlayWindow.Hide()
 			a.playerHeaderWindow.Hide()
 			if a.playerMenuWindow != nil {
 				a.playerMenuWindow.Hide()
 			}
-			restoreWindowFocus(a.window)
+			if ownedFocus {
+				restoreWindowFocus(a.window)
+			}
 		})
 	}
 }
