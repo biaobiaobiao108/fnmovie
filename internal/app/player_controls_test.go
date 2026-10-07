@@ -1,10 +1,44 @@
 package app
 
 import (
+	"fmt"
+	"math"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
 )
+
+func TestPlayerTransportRemainsCentered(t *testing.T) {
+	for _, width := range []int{960, 1280, 1920} {
+		for _, speed := range []float64{0.25, 1, 4} {
+			t.Run(fmt.Sprintf("width_%d_speed_%g", width, speed), func(t *testing.T) {
+				a := &appState{player: NewPlayer(), playback: PlaybackState{Duration: 7200, Volume: 80, Speed: speed}}
+				tester := ui.NewTester(a.playerTransport, width, playerOverlayControlHeight)
+				panel, ok := tester.Find("播放控制栏")
+				if !ok || panel.Y < 6 || panel.Y+panel.H > playerOverlayControlHeight-6 {
+					t.Fatalf("transport border clipped by its window: %+v", panel)
+				}
+				play, ok := tester.Find("播放或暂停")
+				if !ok {
+					t.Fatal("play button missing")
+				}
+				if math.Abs(float64(play.X+play.W/2)-float64(width)/2) > 0.5 {
+					t.Fatalf("play center %.2f != window center %.2f", play.X+play.W/2, float64(width)/2)
+				}
+				back, backOK := tester.Find("快退 10 秒")
+				forward, forwardOK := tester.Find("快进 10 秒")
+				if !backOK || !forwardOK || math.Abs(float64(back.X+back.W/2+forward.X+forward.W/2)-float64(width)) > 0.5 {
+					t.Fatalf("seek controls not symmetric: back=%+v forward=%+v", back, forward)
+				}
+				mute, muteOK := tester.Find("静音")
+				fullscreen, fullscreenOK := tester.Find("切换全屏")
+				if !muteOK || !fullscreenOK || mute.X+mute.W >= back.X || fullscreen.X <= forward.X+forward.W || fullscreen.X+fullscreen.W > float32(width-32) {
+					t.Fatalf("side controls overlap or overflow: mute=%+v fullscreen=%+v", mute, fullscreen)
+				}
+			})
+		}
+	}
+}
 
 func TestPlayerShortcutMapping(t *testing.T) {
 	tests := []struct {

@@ -20,6 +20,7 @@ var (
 	setWindowLong = user32.NewProc("SetWindowLongPtrW")
 	updateLayered = user32.NewProc("UpdateLayeredWindow")
 	getDC         = user32.NewProc("GetDC")
+	getClientRect = user32.NewProc("GetClientRect")
 	releaseDC     = user32.NewProc("ReleaseDC")
 	createDC      = gdi32.NewProc("CreateCompatibleDC")
 	deleteDC      = gdi32.NewProc("DeleteDC")
@@ -99,6 +100,13 @@ func (p *presenter) allocate(width, height int) bool {
 
 func (p *presenter) present() {
 	if p.bitmap == 0 {
+		return
+	}
+	// A menu can resize the window before its new scene is rasterized. Never
+	// replay the previous menu bitmap: UpdateLayeredWindow would also reset
+	// the window to that stale size, causing a briefly flashing popup.
+	var rect [4]int32
+	if ok, _, _ := getClientRect.Call(p.hwnd, uintptr(unsafe.Pointer(&rect[0]))); ok == 0 || int(rect[2]) != p.width || int(rect[3]) != p.height {
 		return
 	}
 	sz, origin := size{int32(p.width), int32(p.height)}, point{}

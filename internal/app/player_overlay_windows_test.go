@@ -156,6 +156,10 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 	defer server.Close()
 	onUI := func(fn func()) { done := make(chan struct{}); a.window.Update(func() { fn(); close(done) }); <-done }
 	finish := func(err error) { onUI(func() { a.closePlayer(); _ = os.Chdir(cwd); result <- err; mygo.App.Quit() }) }
+	if err := checkNativeSeriesCast(a, onUI); err != nil {
+		finish(err)
+		return
+	}
 	onUI(func() {
 		a.playback = PlaybackState{}
 		a.server = NewServer(server.URL, "synthetic-token")
@@ -213,4 +217,66 @@ func absInt(v int) int {
 		return -v
 	}
 	return v
+}
+
+// Exercise the asynchronous credits path on the real UI dispatcher, including
+// changing seasons while an older response is still in flight.
+func checkNativeSeriesCast(a *appState, onUI func(func())) error {
+	entered, release := make(chan struct{}), make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/person/list/old-season":
+			close(entered)
+			<-release
+			fmt.Fprint(w, `{"code":0,"data":{"list":[{"guid":"old-person","name":"旧季度演员"}]}}`)
+		case "/api/v1/person/list/current-season":
+			fmt.Fprint(w, `{"code":0,"data":{"list":[]}}`)
+		case "/api/v1/person/list/first-episode":
+			fmt.Fprint(w, `{"code":0,"data":{"list":[{"guid":"current-person","name":"当前演员"}]}}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	onUI(func() {
+		a.server = NewServer(server.URL, "synthetic-token")
+		a.selected = &MediaItem{ID: "tv-root", IsSeries: true}
+		a.selectedSeasonID = "old-season"
+		a.loadSeriesCast("old-season", nil)
+	})
+	select {
+	case <-entered:
+	case <-time.After(3 * time.Second):
+		close(release)
+		return fmt.Errorf("season credits request never started")
+	}
+	onUI(func() {
+		a.selectedSeasonID = "current-season"
+		a.loadSeriesCast("current-season", []MediaItem{{ID: "first-episode"}})
+	})
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		ready := false
+		onUI(func() {
+			ready = !a.castLoading && len(a.selected.Cast) == 1 && a.selected.Cast[0].ID == "current-person"
+		})
+		if ready {
+			break
+		}
+		if time.Now().After(deadline) {
+			close(release)
+			return fmt.Errorf("episode credits fallback failed")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	close(release)
+	time.Sleep(150 * time.Millisecond)
+	var err error
+	onUI(func() {
+		if len(a.selected.Cast) != 1 || a.selected.Cast[0].ID != "current-person" {
+			err = fmt.Errorf("old season credits replaced the current season")
+		}
+		a.selected = nil
+	})
+	return err
 }

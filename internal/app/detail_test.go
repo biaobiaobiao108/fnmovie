@@ -2,6 +2,9 @@ package app
 
 import (
 	"fmt"
+	"image/png"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -112,7 +115,7 @@ func TestSeriesDetailViewLayout(t *testing.T) {
 		selected:         &series,
 		selectedSeasonID: "season-1",
 		seriesEpisodes: []MediaItem{
-			{ID: "ep-1", Title: "这是一个美好的日子", EpisodeNumber: 1},
+			{ID: "ep-1", Title: "这是一个美好的日子", EpisodeNumber: 1, Overview: "夜之城的故事由此展开。"},
 			{ID: "ep-2", Title: "像个男人一样去战斗", EpisodeNumber: 2},
 		},
 		catalogs: map[string]*CatalogState{},
@@ -146,6 +149,18 @@ func TestSeriesDetailViewLayout(t *testing.T) {
 	if !okCast || rectCast.W <= 0 || rectCast.H <= 0 {
 		t.Fatalf("Cast not visible: ok=%v, rect=%+v", okCast, rectCast)
 	}
+	if _, ok := tester.Find("夜之城的故事由此展开。"); !ok {
+		t.Fatal("episode overview should be visible")
+	}
+	if _, ok := tester.Find("播放 这是一个美好的日子"); !ok {
+		t.Fatal("episode row must have an accessible play action")
+	}
+	for _, text := range tester.Texts() {
+		if text == "播放" || text == "FN MOVIES" {
+			t.Fatal("plain episode play cards and English brand subtitle should be removed")
+		}
+	}
+	saveDetailPreview(t, tester, "series")
 }
 
 func TestSeriesDetailViewScroll(t *testing.T) {
@@ -185,6 +200,9 @@ func TestSeriesDetailViewScroll(t *testing.T) {
 	if !ok1 || r1.W <= 0 || r1.H <= 0 {
 		t.Fatalf("Episode 1 should be visible initially, got ok=%v, rect=%+v", ok1, r1)
 	}
+	if !tester.HasText("服务器暂未提供演职人员信息") {
+		t.Fatal("missing credits should have a visible empty state")
+	}
 
 	// Scroll down within the scroll container
 	tester.Scroll(600, 300, 0, 800)
@@ -216,7 +234,7 @@ func TestDetailBackButton(t *testing.T) {
 		t.Fatalf("expected movie to be selected initially")
 	}
 
-	// Click back button (Tooltip: "返回影视库")
+	// Click the icon back button, with an accessibility label and no tooltip.
 	// detailBackButton is placed at X=239, Y=70 with Size 36x34
 	tester.ClickAt(250, 85)
 
@@ -247,6 +265,14 @@ func TestPlaybackLoadingFeedback(t *testing.T) {
 	// In detail view, the action button displays loading state
 	if _, ok := tester.Find("正在准备播放…"); !ok {
 		t.Fatalf("expected '正在准备播放…' in detail view button")
+	}
+	// Preparing playback must not place a modal over the detail page.
+	tester.Click("返回影视库")
+	if app.selected != nil {
+		t.Fatal("playback loading blocked detail navigation")
+	}
+	if app.playbackLoading {
+		t.Fatal("returning from detail should cancel pending playback")
 	}
 
 	// Cancel loading
@@ -324,11 +350,33 @@ func TestPersonViewLayoutAndNavigation(t *testing.T) {
 	if _, ok := tester.Find("让子弹飞"); !ok {
 		t.Fatalf("expected '让子弹飞' movie card")
 	}
+	saveDetailPreview(t, tester, "person")
 
 	// Close person view
 	app.closePerson()
 	if app.selectedPerson != nil {
 		t.Fatalf("expected selectedPerson to be nil after closePerson")
+	}
+}
+
+func saveDetailPreview(t *testing.T, tester *ui.Tester, name string) {
+	t.Helper()
+	if os.Getenv("FNMOVIE_UI_PREVIEW") != "1" {
+		return
+	}
+	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tester.Frame()
+	dir := filepath.Join("..", "..", "out", "detail-check")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	f, err := os.Create(filepath.Join(dir, name+".png"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, tester.Image()); err != nil {
+		t.Fatal(err)
 	}
 }
 

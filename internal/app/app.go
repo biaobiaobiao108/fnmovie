@@ -62,6 +62,8 @@ type appState struct {
 	seriesEpisodeLoading         bool
 	seriesEpisodeError           string
 	seriesEpisodeRequest         uint64
+	seriesRootCast               []CastMember
+	seriesCastRequest            uint64
 	favoritePending              map[string]bool
 	playback                     PlaybackState
 	selectedTab                  int
@@ -161,17 +163,18 @@ func (a *appState) view(c *ui.Context) {
 		a.sidebar(c)
 		ui.Column(c).Grow(1).FillHeight().Padding(16, 34, 12, 34).Gap(18).Children(func() {
 			a.topbar(c)
-			switch {
-			case a.selectedPerson != nil:
-				a.personView(c, *a.selectedPerson)
-			case a.selected != nil:
-				a.detailView(c, *a.selected)
-			default:
-				a.libraryView(c)
-			}
+			ui.Column(c).Key(a.navigationKey()).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
+				switch {
+				case a.selectedPerson != nil:
+					a.personView(c, *a.selectedPerson)
+				case a.selected != nil:
+					a.detailView(c, *a.selected)
+				default:
+					a.libraryView(c)
+				}
+			})
 		})
 	})
-	a.playbackLoadingOverlay(c)
 	a.loginModal(c)
 }
 
@@ -204,7 +207,6 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 			ui.Column(c).Gap(1).Children(func() {
 				ui.Text(c, "飞牛影视").FontSize(16).Bold()
-				ui.Text(c, "FN MOVIES").FontSize(9).TextColor(t.TextMuted).LetterSpacing(1.2)
 			})
 		})
 		ui.Box(c).Height(15)
@@ -215,7 +217,7 @@ func (a *appState) sidebar(c *ui.Context) {
 		ui.Scroll(c).Grow(1).Children(func() {
 			for _, library := range a.libraries {
 				selected := a.section == "library" && a.libraryID == library.ID
-				button := ui.Button(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).Background(ui.Color{}).TextColor(t.TextMuted).
+				button := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).Background(ui.Color{}).TextColor(t.TextMuted).
 					Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
 				if selected {
 					button.Background(ui.Hex("#e6eee8")).TextColor(t.Accent)
@@ -240,7 +242,7 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 		})
 		if a.loggedIn {
-			exitBtn := ui.Button(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
+			exitBtn := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
 				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
 			if exitBtn.Hovered() {
 				exitBtn.Background(ui.Hex("#eeece6"))
@@ -253,7 +255,7 @@ func (a *appState) sidebar(c *ui.Context) {
 				a.logout()
 			}
 		} else if !a.loggedIn {
-			loginBtn := ui.Button(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
+			loginBtn := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
 				Background(ui.Color{}).TextColor(t.TextMuted)
 			if loginBtn.Hovered() {
 				loginBtn.Background(ui.Hex("#eeece6"))
@@ -271,7 +273,7 @@ func (a *appState) sidebar(c *ui.Context) {
 
 func (a *appState) navButton(c *ui.Context, icon, label, key string) {
 	selected := a.section == key
-	e := ui.Button(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0)
+	e := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0)
 	e.Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
 	if selected {
 		e.Background(ui.Hex("#e6eee8")).TextColor(c.Theme().Accent)
@@ -311,12 +313,12 @@ func (a *appState) topbar(c *ui.Context) {
 			ui.Text(c, label).FontSize(27).Bold()
 		})
 		if state := a.catalogs[a.currentCatalogKey()]; state != nil && state.Err != "" && len(state.Items) > 0 {
-			if ui.Button(c, "重试").Padding(5, 9).Clicked() {
+			if actionButton(c, "重试").Padding(5, 9).Clicked() {
 				a.loadNextCatalogPage(true)
 			}
 		}
 		if a.libraryErr != "" && !a.libraryLoading {
-			if ui.Button(c, "重试影视库").Padding(5, 9).Clicked() {
+			if actionButton(c, "重试影视库").Padding(5, 9).Clicked() {
 				a.loadLibraries()
 			}
 		}
@@ -353,7 +355,7 @@ func (a *appState) connectionView(c *ui.Context) {
 			if a.status != "" {
 				ui.Text(c, a.status).FontSize(11).TextColor(t.TextMuted)
 			}
-			if ui.PrimaryButton(c, "连接并登录").Disabled(a.busy).Clicked() {
+			if primaryActionButton(c, "连接并登录").Disabled(a.busy).Clicked() {
 				a.login()
 			}
 		})
@@ -377,10 +379,10 @@ func (a *appState) loginModal(c *ui.Context) {
 				ui.Text(c, a.status).FontSize(11).TextColor(color).MaxLines(3)
 			}
 			ui.Row(c).Gap(10).Children(func() {
-				if ui.PrimaryButton(c, "连接并登录").Disabled(a.busy).Clicked() {
+				if primaryActionButton(c, "连接并登录").Disabled(a.busy).Clicked() {
 					a.login()
 				}
-				if a.loggedIn && ui.Button(c, "取消").Clicked() {
+				if a.loggedIn && actionButton(c, "取消").Clicked() {
 					a.loginOpen = false
 				}
 			})
@@ -430,7 +432,7 @@ func (a *appState) libraryView(c *ui.Context) {
 			} else {
 				ui.Text(c, "这里还没有内容").FontSize(14).TextColor(t.TextMuted)
 			}
-			if ui.Button(c, "重新加载").Clicked() {
+			if actionButton(c, "重新加载").Clicked() {
 				if state != nil && state.Err != "" {
 					a.loadNextCatalogPage(true)
 				} else if state != nil {
@@ -457,7 +459,7 @@ func (a *appState) libraryView(c *ui.Context) {
 			ui.Box(c).Size(168, 252).Center().Children(func() {
 				label := "继续加载…"
 				if state != nil && state.Err != "" {
-					if ui.Button(c, "加载失败，点击重试").Padding(8, 10).Clicked() {
+					if actionButton(c, "加载失败，点击重试").Padding(8, 10).Clicked() {
 						a.loadNextCatalogPage(true)
 					}
 					return
@@ -472,7 +474,7 @@ func (a *appState) libraryView(c *ui.Context) {
 		if next := i + gridColumns; next < len(items) {
 			a.requestPoster(items[next], 168, 252)
 		}
-		card := ui.Button(c, "").Key(item.ID).Padding(0).BorderWidth(0).Background(ui.Color{}).TextColor(t.Text)
+		card := actionButton(c, "").Key(item.ID).Padding(0).BorderWidth(0).Background(ui.Color{}).TextColor(t.Text)
 		card.Children(func() {
 			ui.Column(c).Gap(8).Center().Children(func() {
 				cover := ui.Box(c).Size(168, 252).Radius(10).Clip().BorderWidth(0)
@@ -580,13 +582,13 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 			}
 			ui.Row(c).Gap(9).Children(func() {
 				if item.Watched {
-					if ui.PrimaryButton(c, "▶  继续播放").Clicked() {
+					if primaryActionButton(c, "▶  继续播放").Clicked() {
 						a.startPlayback(item)
 					}
-				} else if ui.PrimaryButton(c, "▶  立即播放").Clicked() {
+				} else if primaryActionButton(c, "▶  立即播放").Clicked() {
 					a.startPlayback(item)
 				}
-				if ui.Button(c, "查看详情").Clicked() {
+				if actionButton(c, "查看详情").Clicked() {
 					a.openDetail(item)
 				}
 			})
@@ -611,6 +613,8 @@ func (a *appState) openDetail(item MediaItem) {
 	a.seriesEpisodes, a.seriesEpisodeCache = nil, nil
 	a.seriesEpisodeLoading, a.seriesEpisodeError = false, ""
 	a.seriesEpisodeRequest++
+	a.seriesRootCast = nil
+	a.seriesCastRequest++
 	if item.IsSeries && cachedDetail && len(item.Seasons) > 0 {
 		a.selectedSeasonID = item.Seasons[0].ID
 		a.loadSeriesSeason(a.selectedSeasonID, false)
@@ -644,7 +648,8 @@ func (a *appState) openDetail(item MediaItem) {
 					return
 				}
 				a.seriesLoading = false
-				a.castLoading = false
+				a.seriesRootCast = append([]CastMember(nil), people...)
+				a.castLoading = len(people) == 0
 				updated := detail
 				updated.Seasons = seasons
 				a.selected = &updated
@@ -659,6 +664,10 @@ func (a *appState) openDetail(item MediaItem) {
 				}
 				if len(seasons) > 0 && a.selectedSeasonID == "" {
 					a.selectSeriesSeason(seasons[0].ID)
+				} else if a.selectedSeasonID != "" {
+					a.loadSeriesCast(a.selectedSeasonID, a.seriesEpisodes)
+				} else {
+					a.castLoading = false
 				}
 			})
 		}()
@@ -720,7 +729,7 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 					}
 					ui.Row(c).Gap(13).AlignItems(ui.Center).Children(func() {
 						if a.playbackLoading && a.playbackLoadingID == item.ID {
-							btn := ui.Button(c, "").Padding(9, 16).Radius(8).BorderWidth(0).
+							btn := actionButton(c, "").Padding(9, 16).Radius(8).BorderWidth(0).
 								Background(t.Accent).TextColor(t.AccentText).Disabled(true)
 							btn.Children(func() {
 								ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -729,10 +738,11 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 								})
 							})
 						} else {
-							if ui.PrimaryButton(c, "▶  立即播放").Clicked() {
+							if primaryActionButton(c, "▶  立即播放").Clicked() {
 								a.startPlayback(item)
 							}
 						}
+						a.playbackCancelButton(c)
 						a.favoriteButton(c, item)
 					})
 					a.castSection(c, item)
@@ -744,7 +754,7 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 								ui.Text(c, source.Quality).TextColor(t.TextMuted)
 								if a.playbackLoading && a.playbackLoadingID == item.ID {
 									ui.Spinner(c).FontSize(12)
-								} else if ui.Button(c, "播放").Clicked() {
+								} else if actionButton(c, "播放").Clicked() {
 									a.startPlayback(item)
 								}
 							})
@@ -778,7 +788,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 						if len(a.seriesEpisodes) > 0 {
 							firstEp := a.seriesEpisodes[0]
 							if a.playbackLoading && a.playbackLoadingID == firstEp.ID {
-								btn := ui.Button(c, "").Padding(9, 16).Radius(8).BorderWidth(0).
+								btn := actionButton(c, "").Padding(9, 16).Radius(8).BorderWidth(0).
 									Background(t.Accent).TextColor(t.AccentText).Disabled(true)
 								btn.Children(func() {
 									ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -786,10 +796,11 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 										ui.Text(c, "正在准备首集…").FontSize(13).Bold()
 									})
 								})
-							} else if ui.PrimaryButton(c, "▶  播放本季首集").Clicked() {
+							} else if primaryActionButton(c, "▶  播放本季首集").Clicked() {
 								a.startPlayback(firstEp)
 							}
 						}
+						a.playbackCancelButton(c)
 						a.favoriteButton(c, item)
 					})
 					a.castSection(c, item)
@@ -798,18 +809,24 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 					} else if a.seriesError != "" {
 						ui.Row(c).Gap(8).Children(func() {
 							ui.Text(c, a.seriesError).FontSize(11).TextColor(ui.Hex("#ad5148"))
-							if ui.Button(c, "重试").Clicked() {
+							if actionButton(c, "重试").Clicked() {
 								a.openDetail(item)
 							}
 						})
 					}
-					ui.Row(c).Gap(8).Children(func() {
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Text(c, "剧集").FontSize(14).Bold()
+						if !a.seriesEpisodeLoading && len(a.seriesEpisodes) > 0 {
+							ui.Text(c, fmt.Sprintf("%d 集", len(a.seriesEpisodes))).FontSize(11).TextColor(t.TextMuted)
+						}
+					})
+					ui.ScrollHorizontal(c).Height(42).Gap(8).Children(func() {
 						for _, season := range item.Seasons {
 							label := season.Title
 							if strings.TrimSpace(label) == "" {
 								label = fmt.Sprintf("第%d季", season.Number)
 							}
-							button := ui.Button(c, label).Padding(7, 11).BorderWidth(0).Radius(8)
+							button := actionButton(c, label).Padding(7, 11).BorderWidth(0).Radius(8)
 							if a.selectedSeasonID == season.ID {
 								button.Background(t.Accent).TextColor(t.AccentText)
 							} else {
@@ -820,7 +837,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 							}
 						}
 					})
-					ui.Column(c).Gap(0).Children(func() {
+					ui.Column(c).Key("season:" + a.selectedSeasonID).Transition(pageTransition()).Gap(2).Children(func() {
 						if a.seriesEpisodeLoading {
 							ui.Text(c, "正在读取本季集数…").Padding(12, 10).FontSize(12).TextColor(t.TextMuted)
 							return
@@ -828,7 +845,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 						if a.seriesEpisodeError != "" {
 							ui.Row(c).Padding(12, 10).Gap(8).Children(func() {
 								ui.Text(c, a.seriesEpisodeError).Grow(1).FontSize(11).TextColor(ui.Hex("#ad5148"))
-								if ui.Button(c, "重试").Clicked() {
+								if actionButton(c, "重试").Clicked() {
 									a.loadSeriesSeason(a.selectedSeasonID, true)
 								}
 							})
@@ -839,24 +856,32 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 							return
 						}
 						for _, episode := range a.seriesEpisodes {
-							ui.Row(c).Padding(8, 10).Gap(10).AlignItems(ui.Center).Children(func() {
+							row := actionButton(c, "").Key(episode.ID).FillWidth().Padding(10, 8).Gap(12).AlignItems(ui.Center).
+								BorderWidth(0).Radius(8).Background(ui.Transparent).TextColor(t.Text).Label("播放 " + episode.Title).Disabled(a.playbackLoading)
+							if row.Hovered() {
+								row.Background(ui.Hex("#eeece6"))
+							}
+							row.Children(func() {
 								number := ""
 								if episode.EpisodeNumber > 0 {
 									number = fmt.Sprintf("%02d", episode.EpisodeNumber)
 								}
-								ui.Text(c, number).Width(30).FontSize(12).TextColor(t.TextMuted)
+								ui.Text(c, number).Width(30).FontSize(12).TextColor(t.TextMuted).TextAlign(ui.Center)
 								ui.Column(c).Grow(1).Gap(2).Children(func() {
 									ui.Text(c, episode.Title).FontSize(13).Bold().SingleLine()
-									if overview := firstString(episode.Raw, "overview", "description", "summary"); overview != "" {
-										ui.Text(c, overview).FontSize(10).TextColor(t.TextMuted).MaxLines(1)
+									if overview := episodeOverview(episode); overview != "" {
+										ui.Text(c, overview).FontSize(11).TextColor(t.TextMuted).MaxLines(1)
 									}
 								})
 								if a.playbackLoading && a.playbackLoadingID == episode.ID {
 									ui.Spinner(c).FontSize(12)
-								} else if ui.Button(c, "播放").Clicked() {
-									a.startPlayback(episode)
+								} else {
+									ui.Icon(c, playerOverlayIcons["play"]).Size(18, 18).TextColor(t.Accent)
 								}
 							})
+							if row.Clicked() {
+								a.startPlayback(episode)
+							}
 						}
 					})
 				})
@@ -872,14 +897,24 @@ func detailPosterSize(c *ui.Context) (int, int) {
 	return posterWidth, posterHeight
 }
 
+func episodeOverview(episode MediaItem) string {
+	if episode.Overview != "" {
+		return episode.Overview
+	}
+	return firstString(episode.Raw, "overview", "description", "summary")
+}
+
 func (a *appState) detailBackButton(c *ui.Context) {
-	button := ui.Button(c, "").Size(36, 34).Padding(0).Radius(9).BorderWidth(0).
-		Background(ui.Color{}).TextColor(c.Theme().TextMuted).Tooltip("返回影视库")
+	button := actionButton(c, "").Size(36, 34).Padding(0).Radius(9).BorderWidth(0).
+		Background(ui.Color{}).TextColor(c.Theme().TextMuted).Label("返回影视库")
 	if button.Hovered() {
 		button.Background(ui.Hex("#e9ece6"))
 	}
 	button.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(18, 18) })
 	if button.Clicked() {
+		if a.playbackLoading {
+			a.cancelPlaybackLoading()
+		}
 		a.selected = nil
 		a.castLoading = false
 		a.seriesLoading = false
@@ -893,8 +928,8 @@ func (a *appState) favoriteButton(c *ui.Context, item MediaItem) {
 	if item.Favorite {
 		icon, color = "♥", ui.Hex("#df5b79")
 	}
-	button := ui.Button(c, "").Size(42, 42).Padding(0).Radius(21).BorderWidth(0).
-		Background(ui.Color{}).TextColor(color).Tooltip(map[bool]string{true: "取消收藏", false: "收藏"}[item.Favorite]).Disabled(pending)
+	button := actionButton(c, "").Size(42, 42).Padding(0).Radius(21).BorderWidth(0).
+		Background(ui.Color{}).TextColor(color).Label(map[bool]string{true: "取消收藏", false: "收藏"}[item.Favorite]).Disabled(pending)
 	button.Children(func() { ui.Text(c, icon).FontSize(25).TextColor(color) })
 	if button.Clicked() {
 		a.toggleFavorite(item)
@@ -905,9 +940,16 @@ func (a *appState) selectSeriesSeason(seasonID string) {
 	a.selectedSeasonID = seasonID
 	a.seriesEpisodes = nil
 	a.seriesEpisodeError = ""
+	a.seriesCastRequest++
+	if a.selected != nil {
+		a.selected.Cast = append([]CastMember(nil), a.seriesRootCast...)
+		a.castLoading = len(a.seriesRootCast) == 0
+		a.castError = ""
+	}
 	if items, ok := a.seriesEpisodeCache[seasonID]; ok {
 		a.seriesEpisodes = items
 		a.seriesEpisodeLoading = false
+		a.loadSeriesCast(seasonID, items)
 		return
 	}
 	a.loadSeriesSeason(seasonID, false)
@@ -942,6 +984,7 @@ func (a *appState) loadSeriesSeason(seasonID string, force bool) {
 			a.seriesEpisodeLoading = false
 			if err != nil {
 				a.seriesEpisodeError = "集数读取失败：" + err.Error()
+				a.loadSeriesCast(seasonID, nil)
 				return
 			}
 			if a.seriesEpisodeCache == nil {
@@ -949,6 +992,52 @@ func (a *appState) loadSeriesSeason(seasonID string, force bool) {
 			}
 			a.seriesEpisodeCache[seasonID] = items
 			a.seriesEpisodes = items
+			a.loadSeriesCast(seasonID, items)
+		})
+	}()
+}
+
+// Some libraries attach credits to a season or episode rather than the TV
+// root. Follow server IDs already returned by the hierarchy, at most two
+// extra requests for the selected season, and reject stale season callbacks.
+func (a *appState) loadSeriesCast(seasonID string, episodes []MediaItem) {
+	if a.selected == nil || !a.selected.IsSeries {
+		return
+	}
+	a.seriesCastRequest++
+	if len(a.seriesRootCast) > 0 {
+		a.selected.Cast = append([]CastMember(nil), a.seriesRootCast...)
+		a.castLoading, a.castError = false, ""
+		return
+	}
+	if a.server == nil {
+		a.castLoading = false
+		return
+	}
+	requestID, selectedID, server := a.seriesCastRequest, a.selected.ID, a.server
+	episodeID := ""
+	if len(episodes) > 0 {
+		episodeID = episodes[0].ID
+	}
+	a.castLoading = true
+	go func() {
+		people, err := server.People(seasonID)
+		if len(people) == 0 && episodeID != "" {
+			people, err = server.People(episodeID)
+		}
+		a.window.Update(func() {
+			if a.server != server || a.selected == nil || a.selected.ID != selectedID || a.selectedSeasonID != seasonID || a.seriesCastRequest != requestID {
+				return
+			}
+			a.castLoading = false
+			if len(people) > 0 {
+				a.selected.Cast = people
+				a.castError = ""
+			} else if err != nil {
+				a.castError = "演职人员读取失败：" + err.Error()
+			} else {
+				a.castError = ""
+			}
 		})
 	}()
 }
@@ -959,10 +1048,10 @@ func (a *appState) settingsView(c *ui.Context) {
 		ui.Text(c, "服务器连接").FontSize(18).Bold()
 		ui.Text(c, a.settings.ServerURL).FontSize(12).TextColor(t.TextMuted)
 		ui.Row(c).Gap(10).Children(func() {
-			if ui.PrimaryButton(c, "切换账户或服务器").Clicked() {
+			if primaryActionButton(c, "切换账户或服务器").Clicked() {
 				a.loginOpen = true
 			}
-			if ui.Button(c, "退出登录").Clicked() {
+			if actionButton(c, "退出登录").Clicked() {
 				a.logout()
 			}
 		})
@@ -1022,7 +1111,7 @@ func (a *appState) playerView(c *ui.Context) {
 			if a.playback.Error != "" {
 				ui.Text(c, "播放已停止").FontSize(18).Bold().TextColor(ui.Hex("#f0e8e6"))
 				ui.Text(c, a.playback.Error).FontSize(11).TextColor(ui.Hex("#d6c8c5")).MaxLines(5)
-				if ui.Button(c, "返回影片库").Clicked() {
+				if actionButton(c, "返回影片库").Clicked() {
 					a.stopPlayback()
 				}
 			} else {
@@ -1109,9 +1198,6 @@ func (a *appState) requestPoster(item MediaItem, width, height int) *ui.Bitmap {
 }
 
 func (a *appState) castSection(c *ui.Context, item MediaItem) {
-	if len(item.Cast) == 0 && !a.castLoading {
-		return
-	}
 	t := c.Theme()
 	ui.Column(c).Gap(8).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
@@ -1121,23 +1207,33 @@ func (a *appState) castSection(c *ui.Context, item MediaItem) {
 			}
 		})
 		if len(item.Cast) == 0 {
+			if a.castError != "" {
+				ui.Row(c).Gap(10).Children(func() {
+					ui.Text(c, a.castError).FontSize(11).TextColor(t.TextMuted).MaxLines(2)
+					if actionButton(c, "重试").Clicked() {
+						a.openDetail(item)
+					}
+				})
+			} else if !a.castLoading {
+				ui.Text(c, "服务器暂未提供演职人员信息").FontSize(11).TextColor(t.TextMuted)
+			}
 			return
 		}
-		ui.ScrollHorizontal(c).Height(156).Gap(14).Children(func() {
+		ui.ScrollHorizontal(c).Height(128).Gap(12).Children(func() {
 			for _, person := range item.Cast {
 				p := person
-				btn := ui.Button(c, "").Width(96).Padding(6, 4).Radius(10).BorderWidth(0).
+				btn := actionButton(c, "").Width(86).Padding(6, 4).Radius(10).BorderWidth(0).
 					Background(ui.Color{}).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond}).
-					Tooltip("查看 " + p.Name + " 的作品")
+					Label("查看 " + p.Name + " 的作品")
 				if btn.Hovered() {
 					btn.Background(ui.Hex("#eeece6"))
 				}
 				btn.Children(func() {
 					ui.Column(c).AlignItems(ui.Center).Gap(5).Children(func() {
-						if image := a.imageForURL(p.Profile, 78, 78); image != nil {
-							ui.Image(c, image).Size(78, 78).Fit(ui.Cover).Radius(39)
+						if image := a.imageForURL(p.Profile, 60, 60); image != nil {
+							ui.Image(c, image).Size(60, 60).Fit(ui.Cover).Radius(30)
 						} else {
-							ui.Box(c).Size(78, 78).Radius(39).Background(ui.Hex("#e5e3dc")).Center().Children(func() {
+							ui.Box(c).Size(60, 60).Radius(30).Background(ui.Hex("#e5e3dc")).Center().Children(func() {
 								nameRune := "•"
 								if runes := []rune(p.Name); len(runes) > 0 {
 									nameRune = string(runes[:1])
@@ -1215,8 +1311,8 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 	ui.Column(c).Grow(1).FillHeight().Gap(16).Children(func() {
 		// 顶部导航栏
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			backBtn := ui.Button(c, "").Size(36, 34).Padding(0).Radius(9).BorderWidth(0).
-				Background(ui.Color{}).TextColor(t.TextMuted).Tooltip("返回")
+			backBtn := actionButton(c, "").Size(36, 34).Padding(0).Radius(9).BorderWidth(0).
+				Background(ui.Color{}).TextColor(t.TextMuted).Label("返回")
 			if backBtn.Hovered() {
 				backBtn.Background(ui.Hex("#e9ece6"))
 			}
@@ -1229,8 +1325,8 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 			ui.Text(c, person.Name).FontSize(13).Bold()
 		})
 
-		// 演员头部简介区（优雅的白色卡片）
-		ui.Row(c).Gap(20).AlignItems(ui.Center).Padding(16, 20).Radius(14).Background(t.Surface).Border(1, t.Border).Children(func() {
+		// Compact identity on the page background; no stretched card backplate.
+		ui.Row(c).Gap(20).AlignItems(ui.Center).Padding(8, 0, 16, 0).Children(func() {
 			if image := a.imageForURL(person.Profile, 84, 84); image != nil {
 				ui.Image(c, image).Size(84, 84).Fit(ui.Cover).Radius(42)
 			} else {
@@ -1276,7 +1372,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 			} else if a.personError != "" {
 				ui.Row(c).Gap(10).Padding(16, 0).Children(func() {
 					ui.Text(c, a.personError).FontSize(12).TextColor(ui.Hex("#ad5148"))
-					if ui.Button(c, "重试").Clicked() {
+					if actionButton(c, "重试").Clicked() {
 						a.openPerson(person)
 					}
 				})
@@ -1289,7 +1385,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 						return
 					}
 					item := items[i]
-					card := ui.Button(c, "").Key("person-" + item.ID).Padding(0).BorderWidth(0).
+					card := actionButton(c, "").Key("person-" + item.ID).Padding(0).BorderWidth(0).
 						Background(ui.Color{}).TextColor(t.Text)
 					card.Children(func() {
 						ui.Column(c).Gap(8).Center().Children(func() {
@@ -1893,22 +1989,11 @@ func (a *appState) cancelPlaybackLoading() {
 	}
 }
 
-func (a *appState) playbackLoadingOverlay(c *ui.Context) {
+func (a *appState) playbackCancelButton(c *ui.Context) {
 	if !a.playbackLoading {
 		return
 	}
-	c.AnimationFrame()
-	t := c.Theme()
-	open := a.playbackLoading
-	ui.DialogBase(c, &open, func(back, panel *ui.Element) {
-		back.Background(ui.RGBA(0, 0, 0, 0.35))
-		panel.Size(96, 96).Radius(18).
-			Background(t.Surface).Border(1, t.Border).
-			Center().Children(func() {
-			ui.Spinner(c).FontSize(36).TextColor(t.Accent)
-		})
-	})
-	if !open {
+	if actionButton(c, "取消").BorderWidth(0).Background(ui.Transparent).TextColor(c.Theme().TextMuted).Clicked() {
 		a.cancelPlaybackLoading()
 	}
 }

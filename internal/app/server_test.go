@@ -247,6 +247,30 @@ func TestPeopleLoadsCastAndProfilePaths(t *testing.T) {
 	}
 }
 
+func TestPeopleParsesSupportedListEnvelopesForHierarchyNodes(t *testing.T) {
+	for _, node := range []string{"tv-root", "season-node", "episode-node"} {
+		for _, envelope := range []string{"list", "items", "results", "data", "array"} {
+			t.Run(node+"/"+envelope, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.Method != http.MethodPost || r.URL.Path != "/api/v1/person/list/"+node {
+						t.Errorf("people must use the selected hierarchy node: %s %s", r.Method, r.URL.Path)
+					}
+					people := `[ {"person_guid":"person","name":"Actor","character":"Character","profile_path":"actor.jpg"} ]`
+					if envelope != "array" {
+						people = fmt.Sprintf(`{"%s":%s}`, envelope, people)
+					}
+					writeJSON(t, w, `{"code":0,"data":`+people+`}`)
+				}))
+				defer server.Close()
+				people, err := NewServer(server.URL, "session-token").People(node)
+				if err != nil || len(people) != 1 || people[0].ID != "person" || people[0].Role != "Character" || people[0].Profile != "actor.jpg" {
+					t.Fatalf("people envelope was not parsed: people=%+v err=%v", people, err)
+				}
+			})
+		}
+	}
+}
+
 func TestSystemCollectionsUseFnOSFiltersAndFavoriteEndpoint(t *testing.T) {
 	var favoriteCalled, watchedCalled bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

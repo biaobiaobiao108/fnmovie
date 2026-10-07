@@ -12,8 +12,9 @@ import (
 
 const playerOverlayHideDelay = 2500 * time.Millisecond
 const (
-	playerOverlayHeaderHeight  = 64
-	playerOverlayControlHeight = 98
+	playerOverlayHeaderHeight = 64
+	// Leave room above the transport panel for its complete rounded border.
+	playerOverlayControlHeight = 118
 	playerOverlayFadeDuration  = 180 * time.Millisecond
 	playerOverlayTargetOpacity = 1.0
 )
@@ -138,14 +139,35 @@ func (a *appState) startPlayerOverlayMonitor() {
 				return
 			case <-activity:
 				if a.window != nil {
-					a.window.Update(func() { a.showPlayerOverlay() })
+					a.window.Update(func() {
+						select {
+						case <-done:
+							return
+						default:
+						}
+						a.showPlayerOverlay()
+					})
 				}
 			case now := <-ticker.C:
 				a.overlayMu.Lock()
 				hide := a.playerOverlayVisible && !a.playerOverlayPinned && !a.playerOverlaySeeking && now.Sub(a.playerOverlayLastInput) >= playerOverlayHideDelay
 				a.overlayMu.Unlock()
 				if hide && a.window != nil {
-					a.window.Update(func() { a.hidePlayerOverlay(true) })
+					a.window.Update(func() {
+						select {
+						case <-done:
+							return
+						default:
+						}
+						// Pointer input may have arrived since this callback was
+						// queued. Do not hide controls based on stale idle state.
+						a.overlayMu.Lock()
+						hide := a.playerOverlayVisible && !a.playerOverlayPinned && !a.playerOverlaySeeking && time.Since(a.playerOverlayLastInput) >= playerOverlayHideDelay
+						a.overlayMu.Unlock()
+						if hide {
+							a.hidePlayerOverlay(true)
+						}
+					})
 				}
 			}
 		}
@@ -329,7 +351,7 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	ui.Row(c).Absolute().Top(10).Left(20).Gap(12).AlignItems(ui.Center).Padding(5, 14, 5, 6).Radius(22).
 		Background(ui.RGBA(18, 20, 24, 0.52)).Border(1, ui.RGBA(255, 255, 255, 0.18)).Children(func() {
 		backBtn := ui.Button(c, "").Size(32, 32).Padding(0).Radius(16).BorderWidth(0).
-			Background(ui.RGBA(255, 255, 255, 0.12)).TextColor(ui.RGB(255, 255, 255)).Tooltip("返回影片库").
+			Background(ui.RGBA(255, 255, 255, 0.12)).TextColor(ui.RGB(255, 255, 255)).Label("返回影片库").
 			Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 		if backBtn.Hovered() {
 			backBtn.Background(ui.RGBA(255, 255, 255, 0.22))
@@ -356,7 +378,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 	if !a.seekDragging {
 		a.seekSliderPosition = minFloat(maxPosition, maxFloat(0, a.playback.Position))
 	}
-	ui.Column(c).Absolute().Bottom(16).Left(32).Right(32).Padding(8, 18, 10, 18).Gap(4).Radius(22).
+	ui.Column(c).Label("播放控制栏").Absolute().Bottom(16).Left(32).Right(32).Padding(8, 18, 10, 18).Gap(4).Radius(22).
 		Background(ui.RGBA(18, 20, 24, 0.52)).Border(1, ui.RGBA(255, 255, 255, 0.18)).Children(func() {
 		// 上层：Apple 细致时间轨与时间标签
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
@@ -379,7 +401,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 		// 下层：Apple 经典居中核心对称控制区
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
 			// 左侧：音量区域
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Grow(1).Basis(0).Gap(6).AlignItems(ui.Center).Children(func() {
 				volumeIcon := "volume"
 				if a.playback.Muted || a.playback.Volume <= 0 {
 					volumeIcon = "muted"
@@ -404,10 +426,8 @@ func (a *appState) playerTransport(c *ui.Context) {
 				}
 			})
 
-			ui.Spacer(c)
-
 			// 中央核心：-10s、大号圆形高光播放/暂停键、+10s
-			ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Grow(1).Basis(0).Gap(14).Center().Children(func() {
 				if playerAppleIconButton(c, "seek-back-10", "快退 10 秒", 34, 20).Clicked() {
 					a.player.Seek(-10)
 					a.markPlayerOverlayActivity()
@@ -418,7 +438,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 					playIcon = "pause"
 				}
 				playBtn := ui.Button(c, "").Size(42, 42).Padding(0).Radius(21).BorderWidth(0).
-					Background(ui.RGBA(255, 255, 255, 0.95)).TextColor(ui.RGB(18, 20, 24)).Tooltip("播放或暂停").
+					Background(ui.RGBA(255, 255, 255, 0.95)).TextColor(ui.RGB(18, 20, 24)).Label("播放或暂停").
 					Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 				if playBtn.Hovered() {
 					playBtn.Background(ui.RGB(255, 255, 255))
@@ -442,10 +462,8 @@ func (a *appState) playerTransport(c *ui.Context) {
 				}
 			})
 
-			ui.Spacer(c)
-
 			// 右侧功能胶囊：倍速、字幕、音轨、全屏
-			ui.Row(c).Gap(7).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Grow(1).Basis(0).Gap(7).Justify(ui.End).AlignItems(ui.Center).Children(func() {
 				a.playerOptionButton(c, "speed")
 				a.playerOptionButton(c, "subtitle")
 				a.playerOptionButton(c, "audio")
@@ -468,26 +486,26 @@ func (a *appState) playerTransport(c *ui.Context) {
 func (a *appState) playerOptionButton(c *ui.Context, option string) {
 	label, disabled, active := "", false, a.playerOverlayMenu == option
 	iconName := ""
-	tooltip := ""
+	accessibleLabel := ""
 	switch option {
 	case "speed":
 		label = fmt.Sprintf("%.2g×", maxFloat(0.25, a.playback.Speed))
-		tooltip = "播放速度"
+		accessibleLabel = "播放速度"
 	case "subtitle":
 		disabled = len(a.playback.SubtitleTracks) == 0
 		iconName = "subtitles"
-		tooltip = "字幕"
+		accessibleLabel = "字幕"
 	case "audio":
 		disabled = len(a.playback.AudioTracks) == 0
 		iconName = "audio"
-		tooltip = "音轨"
+		accessibleLabel = "音轨"
 	}
 
 	var btn *ui.Element
 	if iconName != "" {
 		btn = ui.Button(c, "").Size(32, 32).Padding(0).Radius(16).BorderWidth(0).
 			Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.9)).
-			Tooltip(tooltip).Disabled(disabled).
+			Label(accessibleLabel).Disabled(disabled).
 			Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 		if active {
 			btn.Background(ui.RGBA(255, 255, 255, 0.24)).Border(1, ui.RGBA(255, 255, 255, 0.38))
@@ -500,7 +518,7 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 	} else {
 		btn = ui.Button(c, "").Height(32).Padding(0, 10).Radius(16).Border(1, ui.RGBA(255, 255, 255, 0.12)).
 			Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.9)).
-			Tooltip(tooltip).Disabled(disabled).
+			Label(accessibleLabel).Disabled(disabled).
 			Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 		if active {
 			btn.Background(ui.RGBA(255, 255, 255, 0.24)).Border(1, ui.RGBA(255, 255, 255, 0.38))
@@ -617,7 +635,7 @@ func playerAppleMenuItem(c *ui.Context, label string, selected bool) bool {
 
 func playerAppleIconButton(c *ui.Context, name, label string, size, iconSize float32) *ui.Element {
 	b := ui.Button(c, "").Size(size, size).Padding(0).Radius(size / 2).BorderWidth(0).
-		Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.9)).Tooltip(label).
+		Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.9)).Label(label).
 		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 	if b.Hovered() {
 		b.Background(ui.RGBA(255, 255, 255, 0.18))
@@ -753,7 +771,7 @@ func (a *appState) performPlayerAction(action playerAction) {
 
 func playerIconButton(c *ui.Context, name, label string) *ui.Element {
 	b := ui.Button(c, "").Size(38, 36).Padding(0).Radius(9).BorderWidth(0).
-		Background(ui.RGBA(0, 0, 0, 0)).TextColor(ui.RGB(255, 255, 255)).Tooltip(label).
+		Background(ui.RGBA(0, 0, 0, 0)).TextColor(ui.RGB(255, 255, 255)).Label(label).
 		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 	if b.Hovered() {
 		b.Background(ui.RGBA(255, 255, 255, 0.14))

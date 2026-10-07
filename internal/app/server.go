@@ -548,12 +548,7 @@ func (s *Server) People(itemID string) ([]CastMember, error) {
 		return nil, err
 	}
 	data := unwrapData(response)
-	var objects []map[string]any
-	if object, ok := data.(map[string]any); ok {
-		objects = mapsFromList(object["list"])
-	} else {
-		objects = mapsFromList(data)
-	}
+	objects := mapsFromList(data)
 	people := make([]CastMember, 0, len(objects))
 	for _, object := range objects {
 		person := CastMember{
