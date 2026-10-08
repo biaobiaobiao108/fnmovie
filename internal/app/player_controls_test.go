@@ -80,9 +80,8 @@ func TestPlayerSeekFeedbackIsCenteredAndVisible(t *testing.T) {
 	tester := ui.NewTester(a.playerSeekFeedbackView, playerSeekFeedbackWidth, playerSeekFeedbackHeight)
 	tester.Frame()
 	spinner, hasSpinner := tester.Find("正在跳转")
-	status, hasStatus := tester.Find("跳转中")
-	if !hasSpinner || !hasStatus || spinner.W <= 0 || spinner.H <= 0 {
-		t.Fatalf("center seek feedback is missing its animated status: spinner=%+v status=%+v", spinner, status)
+	if !hasSpinner || spinner.W <= 0 || spinner.H <= 0 || tester.HasText("跳转中") || tester.HasText("跳转失败") {
+		t.Fatalf("seek feedback should contain only its centered spinner: spinner=%+v texts=%v", spinner, tester.Texts())
 	}
 }
 

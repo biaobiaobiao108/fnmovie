@@ -150,7 +150,7 @@ func (a *appState) syncPlayerSeekFeedbackVisibility() {
 	if a.playerSeekFeedbackWindow == nil || a.window == nil {
 		return
 	}
-	visible := (a.seekFeedback.Pending || a.seekFeedback.Error != "") && !a.window.IsMinimized()
+	visible := a.seekFeedback.Pending && !a.window.IsMinimized()
 	if visible == a.playerSeekFeedbackVisible {
 		if visible {
 			a.playerSeekFeedbackWindow.Invalidate()
@@ -440,15 +440,11 @@ func (a *appState) playerSeekFeedbackView(c *ui.Context) {
 	theme.Background, theme.Surface = ui.Transparent, ui.Transparent
 	theme.TextMuted = ui.RGBA(255, 255, 255, 0.78)
 	c.SetTheme(theme)
-	ui.Row(c).Absolute().Fill().Center().Gap(9).Padding(12, 18).Radius(28).
-		Background(ui.RGBA(18, 20, 24, 0.58)).Border(1, ui.RGBA(255, 255, 255, 0.20)).Children(func() {
-		if a.seekFeedback.Pending {
-			ui.Spinner(c).Size(18, 18).Label("正在跳转")
-			ui.Text(c, "跳转中").FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.78))
-		} else if a.seekFeedback.Error != "" {
-			ui.Text(c, "跳转失败").FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.78)).Label(a.seekFeedback.Error)
-		}
-	})
+	if a.seekFeedback.Pending {
+		ui.Row(c).Absolute().Fill().Center().Children(func() {
+			ui.Spinner(c).Size(22, 22).Label("正在跳转")
+		})
+	}
 }
 
 func (a *appState) playerMenuView(c *ui.Context) {
