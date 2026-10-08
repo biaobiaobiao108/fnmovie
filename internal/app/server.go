@@ -286,6 +286,16 @@ func (s *Server) LibraryPageContext(ctx context.Context, libraryID, query string
 	return s.MediaPageContext(ctx, libraryID, "", query, page, pageSize)
 }
 
+// GlobalSearchPageContext searches every accessible library and resource type,
+// independently of the currently selected category, library, or favorite scope.
+func (s *Server) GlobalSearchPageContext(ctx context.Context, query string, page, pageSize int) ([]MediaItem, int, error) {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return nil, 0, errors.New("搜索关键词不能为空")
+	}
+	return s.MediaPageContext(ctx, "", "", query, page, pageSize)
+}
+
 // MediaPageContext reads a page from either a personal media library or one
 // of fnOS's system-wide categories. The web client scopes category pages with
 // item/list's type field (movie / tv), while personal libraries use

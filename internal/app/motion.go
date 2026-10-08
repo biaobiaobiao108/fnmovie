@@ -1,6 +1,7 @@
 package app
 
 import (
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -20,6 +21,9 @@ func (a *appState) navigationKey() string {
 	}
 	if a.selected != nil {
 		return "detail:" + a.selected.ID
+	}
+	if strings.TrimSpace(a.query) != "" {
+		return "search"
 	}
 	if a.section == "home" && a.home.AllContinue {
 		return "home:continue"

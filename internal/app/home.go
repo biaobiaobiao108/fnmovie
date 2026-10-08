@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/egoist/mygo/ui"
@@ -104,7 +105,7 @@ func (a *appState) loadContinueWatching(force bool) {
 }
 
 func (a *appState) syncHomeLifecycle() {
-	visible := a.window != nil && a.section == "home" && a.selected == nil && a.selectedPerson == nil && !a.playback.Active && !a.home.Closed && a.loggedIn
+	visible := a.window != nil && a.section == "home" && strings.TrimSpace(a.query) == "" && a.selected == nil && a.selectedPerson == nil && !a.playback.Active && !a.home.Closed && a.loggedIn
 	if !visible && a.home.DetailCancel != nil {
 		a.home.DetailCancel()
 		a.home.DetailCancel = nil
@@ -126,7 +127,7 @@ func (a *appState) pauseHomeCarousel() {
 }
 
 func (a *appState) homeCarouselEligible() bool {
-	return a.section == "home" && a.selected == nil && a.selectedPerson == nil && !a.playback.Active && !a.playbackLoading && !a.home.AllContinue && !a.home.HeroHover && len(a.home.Heroes) > 1 && a.loggedIn && !a.home.Closed && a.window != nil && !a.window.IsMinimized()
+	return a.section == "home" && strings.TrimSpace(a.query) == "" && a.selected == nil && a.selectedPerson == nil && !a.playback.Active && !a.playbackLoading && !a.home.AllContinue && !a.home.HeroHover && len(a.home.Heroes) > 1 && a.loggedIn && !a.home.Closed && a.window != nil && !a.window.IsMinimized()
 }
 
 func (a *appState) syncHomeCarousel() {

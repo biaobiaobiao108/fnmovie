@@ -188,6 +188,8 @@ func (a *appState) view(c *ui.Context) {
 					a.personView(c, *a.selectedPerson)
 				case a.selected != nil:
 					a.detailView(c, *a.selected)
+				case strings.TrimSpace(a.query) != "":
+					a.libraryView(c)
 				case a.section == "home":
 					a.homeView(c)
 				default:
@@ -344,6 +346,9 @@ func (a *appState) topbar(c *ui.Context) {
 			if label == "" {
 				label = "影视库"
 			}
+			if strings.TrimSpace(a.query) != "" && a.selected == nil && a.selectedPerson == nil {
+				label = "全局搜索"
+			}
 			ui.Text(c, label).FontSize(27).Bold()
 		})
 		if state := a.catalogs[a.currentCatalogKey()]; state != nil && state.Err != "" && len(state.Items) > 0 {
@@ -356,7 +361,7 @@ func (a *appState) topbar(c *ui.Context) {
 				a.loadLibraries()
 			}
 		}
-		if a.loggedIn && a.section != "settings" && (a.section != "home" || a.selected != nil || a.selectedPerson != nil) {
+		if a.loggedIn {
 			if a.searchPending && c.Now().Sub(a.searchChangedAt) >= 300*time.Millisecond {
 				a.searchPending = false
 				a.loadLibrary()
@@ -368,7 +373,18 @@ func (a *appState) topbar(c *ui.Context) {
 			} else {
 				ui.Box(c).Size(20, 20)
 			}
-			if ui.SearchField(c, &a.query).Width(270).Placeholder("搜索影片、演员或导演").Changed() {
+			if ui.SearchField(c, &a.query).Width(270).Placeholder("全局搜索影片、演员或导演").Label("全局搜索").Changed() {
+				a.closeDetail()
+				a.closePerson()
+				a.selectedTab = 0
+				a.status = ""
+				if strings.TrimSpace(a.query) == "" {
+					a.items = nil
+					if state := a.catalogs[a.currentCatalogKey()]; state != nil {
+						a.items = state.Items
+					}
+				}
+				a.mediaView.Invalidate()
 				a.searchChangedAt = c.Now()
 				a.searchPending = true
 				c.After(320 * time.Millisecond)
@@ -435,7 +451,7 @@ func (a *appState) selectedLibraryName() string {
 
 func (a *appState) libraryView(c *ui.Context) {
 	t := c.Theme()
-	if a.section == "settings" {
+	if a.section == "settings" && strings.TrimSpace(a.query) == "" {
 		a.settingsView(c)
 		return
 	}
@@ -455,7 +471,9 @@ func (a *appState) libraryView(c *ui.Context) {
 		}
 		ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
 			ui.Text(c, "⌕").FontSize(34).TextColor(t.TextMuted)
-			if state != nil && state.Loading && len(state.Items) > 0 {
+			if a.searchPending && strings.TrimSpace(a.query) != "" {
+				ui.Text(c, "正在搜索…").FontSize(13).TextColor(t.TextMuted)
+			} else if state != nil && state.Loading && len(state.Items) > 0 {
 				ui.Text(c, "正在加载媒体…").FontSize(13).TextColor(t.TextMuted)
 			} else if a.status != "" {
 				ui.Text(c, a.status).FontSize(13).TextColor(t.TextMuted)
@@ -464,7 +482,11 @@ func (a *appState) libraryView(c *ui.Context) {
 			} else if state != nil && state.Err != "" {
 				ui.Text(c, state.Err).FontSize(13).TextColor(ui.Hex("#ad5148")).MaxLines(3)
 			} else {
-				ui.Text(c, "这里还没有内容").FontSize(14).TextColor(t.TextMuted)
+				label := "这里还没有内容"
+				if strings.TrimSpace(a.query) != "" {
+					label = "没有找到相关内容"
+				}
+				ui.Text(c, label).FontSize(14).TextColor(t.TextMuted)
 			}
 			if actionButton(c, "重新加载").Clicked() {
 				if state != nil && state.Err != "" {
@@ -1178,6 +1200,13 @@ func (a *appState) playerView(c *ui.Context) {
 
 func (a *appState) visibleItems() []MediaItem {
 	source := a.items
+	if query := strings.TrimSpace(a.query); query != "" {
+		source = nil
+		if state := a.catalogs[a.currentCatalogKey()]; state != nil {
+			source = state.Items
+		}
+		return a.mediaView.Get(mediaViewKey{Revision: a.dataRevision, Section: "search", Query: query}, source)
+	}
 	if a.section == "library" {
 		// The empty ID is also the all-media catalog key. Fail closed if a
 		// library selection goes stale instead of showing that shared catalog.
@@ -1669,19 +1698,19 @@ func (a *appState) loadLibrary() {
 	if a.server == nil {
 		return
 	}
-	if a.section == "home" {
+	if a.section == "home" && strings.TrimSpace(a.query) == "" {
 		a.loadHomeHeroes(false)
 		a.loadContinueWatching(false)
 		return
 	}
-	if a.section == "library" && strings.TrimSpace(a.libraryID) == "" {
+	if a.section == "library" && strings.TrimSpace(a.libraryID) == "" && strings.TrimSpace(a.query) == "" {
 		a.items = nil
 		a.status = "无法读取所选影视库：服务器没有返回有效的影视库标识"
 		a.window.Invalidate()
 		return
 	}
-	server, libraryID, query := a.server, a.libraryID, strings.TrimSpace(a.query)
-	mediaType := a.currentMediaType()
+	server := a.server
+	libraryID, mediaType, query := a.catalogRequestScope()
 	serverURL := a.settings.ServerURL
 	username := a.settings.Username
 	key := catalogStateKey(libraryID, mediaType, query)
@@ -1735,7 +1764,15 @@ func (a *appState) loadLibrary() {
 }
 
 func (a *appState) currentCatalogKey() string {
-	return catalogStateKey(a.libraryID, a.currentMediaType(), strings.TrimSpace(a.query))
+	libraryID, mediaType, query := a.catalogRequestScope()
+	return catalogStateKey(libraryID, mediaType, query)
+}
+
+func (a *appState) catalogRequestScope() (libraryID, mediaType, query string) {
+	if query = strings.TrimSpace(a.query); query != "" {
+		return "", "", query
+	}
+	return a.libraryID, a.currentMediaType(), ""
 }
 
 func (a *appState) currentMediaType() string {
@@ -1796,13 +1833,19 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 	username := a.settings.Username
 	go func() {
 		var refreshedCredential *Credential
-		items, total, err := server.MediaPageContext(ctx, libraryID, mediaType, query, page, catalogPageSize)
+		requestPage := func() ([]MediaItem, int, error) {
+			if query != "" {
+				return server.GlobalSearchPageContext(ctx, query, page, catalogPageSize)
+			}
+			return server.MediaPageContext(ctx, libraryID, mediaType, "", page, catalogPageSize)
+		}
+		items, total, err := requestPage()
 		if err != nil && isAuthError(err) {
 			if credentials, readErr := ReadCredential(serverURL); readErr == nil && credentials.Username == username && credentials.Password != "" {
 				if result, loginErr := server.LoginContext(ctx, credentials.Username, credentials.Password); loginErr == nil {
 					credentials.Token = result.Token
 					refreshedCredential = &credentials
-					items, total, err = server.MediaPageContext(ctx, libraryID, mediaType, query, page, catalogPageSize)
+					items, total, err = requestPage()
 				}
 			}
 		}
@@ -1827,6 +1870,9 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 			state.Cancel = nil
 			if err != nil {
 				state.Err = "影视库读取失败：" + err.Error()
+				if query != "" {
+					state.Err = "搜索失败：" + err.Error()
+				}
 				state.PageAutoRequested = true
 				if key == a.currentCatalogKey() {
 					a.status = state.Err
@@ -1893,7 +1939,8 @@ func (a *appState) loadNextCatalogPage(retry bool) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	state.Cancel, state.Loading, state.Err, state.PageAutoRequested = cancel, true, "", true
-	a.fetchCatalogPage(ctx, key, a.server, a.settings.ServerURL, a.libraryID, a.currentMediaType(), strings.TrimSpace(a.query), state.NextPage, false)
+	libraryID, mediaType, query := a.catalogRequestScope()
+	a.fetchCatalogPage(ctx, key, a.server, a.settings.ServerURL, libraryID, mediaType, query, state.NextPage, false)
 }
 
 func isAuthError(err error) bool {

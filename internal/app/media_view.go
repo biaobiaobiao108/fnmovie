@@ -43,7 +43,14 @@ func deriveVisibleItems(source []MediaItem, key mediaViewKey) []MediaItem {
 		// Movie and TV nodes belong on the library's first level; Season and
 		// Episode nodes are loaded after opening their parent show. Person
 		// nodes are visible when starred in favorites.
-		if item.Kind == "season" || (item.Kind == "episode" && key.Section != "favorites") || (item.Kind == "person" && key.Section != "favorites") {
+		if item.Kind == "season" {
+			continue
+		}
+		if key.Query != "" {
+			out = append(out, item)
+			continue
+		}
+		if (item.Kind == "episode" && key.Section != "favorites") || (item.Kind == "person" && key.Section != "favorites") {
 			continue
 		}
 		if key.Section == "library" {
@@ -68,6 +75,9 @@ func deriveVisibleItems(source []MediaItem, key mediaViewKey) []MediaItem {
 			}
 		}
 		out = append(out, item)
+	}
+	if key.Query != "" {
+		return out
 	}
 	if key.Tab == 3 {
 		sort.SliceStable(out, func(i, j int) bool { return out[i].AddedAt > out[j].AddedAt })
