@@ -109,6 +109,12 @@ func TestMovieDetailKeepsSlotsStableForLongSynopsis(t *testing.T) {
 		if !ok {
 			t.Fatal("detail title missing")
 		}
+		if title.Y > 140 || title.X > 350 {
+			t.Fatalf("title must be a separate line at the upper left: %+v", title)
+		}
+		if synopsis, ok := tester.Find("影片简介"); !ok || synopsis.H != 132 {
+			t.Fatalf("synopsis must reserve six lines: %+v, found=%v", synopsis, ok)
+		}
 		if long {
 			if title.Y != titleY || a.detailSynopsisScroll.MaxY <= 0 {
 				t.Fatalf("long synopsis must scroll without moving slots: title=%+v scroll=%+v", title, a.detailSynopsisScroll)

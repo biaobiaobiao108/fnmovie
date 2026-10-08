@@ -763,8 +763,8 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 	}
 	t := c.Theme()
 	posterWidth, posterHeight := detailPosterSize(c)
-	ui.Column(c).Grow(1).FillHeight().Gap(8).Children(func() {
-		a.detailBackButton(c)
+	ui.Column(c).Grow(1).FillHeight().Gap(16).Children(func() {
+		a.detailHeading(c, item)
 		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Center).Gap(32).Children(func() {
 			if poster := a.imageFor(item, posterWidth, posterHeight); poster != nil {
 				ui.Image(c, poster).Size(float32(posterWidth), float32(posterHeight)).Fit(ui.Cover).Radius(13)
@@ -818,8 +818,8 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 	t := c.Theme()
 	posterWidth, posterHeight := detailPosterSize(c)
-	ui.Column(c).Grow(1).FillHeight().Gap(8).Children(func() {
-		a.detailBackButton(c)
+	ui.Column(c).Grow(1).FillHeight().Gap(16).Children(func() {
+		a.detailHeading(c, item)
 		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Center).Gap(32).Children(func() {
 			if poster := a.imageFor(item, posterWidth, posterHeight); poster != nil {
 				ui.Image(c, poster).Size(float32(posterWidth), float32(posterHeight)).Fit(ui.Cover).Radius(13)
@@ -972,8 +972,8 @@ func detailPosterSize(c *ui.Context) (int, int) {
 
 func detailViewportHeight(c *ui.Context) float32 {
 	_, height := c.Size()
-	// Global header, outer padding, navigation gap and detail back action.
-	return max(float32(240), height-128)
+	// Global header, outer padding, navigation gap and single-line detail title.
+	return max(float32(240), height-146)
 }
 
 func detailContentInset(c *ui.Context) float32 {
@@ -983,10 +983,9 @@ func detailContentInset(c *ui.Context) float32 {
 // Shared fixed slots keep playback and credits anchored as metadata arrives.
 func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
 	ui.Column(c).Gap(12).Children(func() {
-		ui.Text(c, item.Title).Height(72).FontSize(28).Bold().MaxLines(2)
 		ui.Text(c, item.Subtitle()).Height(20).FontSize(14).TextColor(c.Theme().TextMuted).SingleLine()
 		advanceSmoothScroll(c, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
-		synopsis := ui.Scroll(c).Key("detail-synopsis:" + item.ID).Height(84).FillWidth().Children(func() {
+		synopsis := ui.Scroll(c).Key("detail-synopsis:" + item.ID).Height(132).FillWidth().Label("影片简介").Children(func() {
 			text := item.Overview
 			if strings.TrimSpace(text) == "" {
 				text = "暂无简介"
@@ -994,6 +993,13 @@ func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
 			ui.Text(c, text).MaxWidth(860).FontSize(15).TextColor(c.Theme().TextMuted)
 		})
 		bindSmoothScroll(c, synopsis, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
+	})
+}
+
+func (a *appState) detailHeading(c *ui.Context, item MediaItem) {
+	ui.Row(c).FillWidth().MaxWidth(1320).AlignSelf(ui.Center).Height(44).Gap(12).AlignItems(ui.Center).Children(func() {
+		a.detailBackButton(c)
+		ui.Text(c, item.Title).Grow(1).FontSize(26).Bold().SingleLine()
 	})
 }
 
