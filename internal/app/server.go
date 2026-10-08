@@ -564,14 +564,25 @@ func metadataNames(value any) []string {
 			if object, ok := entry.(map[string]any); ok {
 				name = firstString(object, "name", "title", "iso_3166_1")
 			}
-			if name != "" {
+			if isNamedMetadata(name) {
 				out = append(out, name)
 			}
 		}
-	} else if name := anyString(value); name != "" {
+	} else if name := anyString(value); isNamedMetadata(name) {
 		out = []string{name}
 	}
 	return out
+}
+
+func isNamedMetadata(name string) bool {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return false
+	}
+	// Some NAS item responses expose genre IDs instead of localized names.
+	// These identifiers are not useful presentation metadata.
+	_, err := strconv.ParseFloat(name, 64)
+	return err != nil
 }
 
 // ContinueWatchingDetailContext follows only actual parent identifiers, up to

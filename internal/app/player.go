@@ -40,18 +40,24 @@ type PlayerTrack struct {
 }
 
 type PlayerSnapshot struct {
-	Loaded         bool
-	Position       float64
-	Duration       float64
-	Paused         bool
-	Volume         float64
-	Muted          bool
-	Speed          float64
-	AudioOutput    string
-	AudioParams    string
-	AudioTracks    []PlayerTrack
-	SubtitleTracks []PlayerTrack
-	Error          string
+	ObservedAt         time.Time
+	SeekRequestID      uint64
+	SeekAcknowledgedAt time.Time
+	SeekError          string
+	Seeking            bool
+	Buffering          bool
+	Loaded             bool
+	Position           float64
+	Duration           float64
+	Paused             bool
+	Volume             float64
+	Muted              bool
+	Speed              float64
+	AudioOutput        string
+	AudioParams        string
+	AudioTracks        []PlayerTrack
+	SubtitleTracks     []PlayerTrack
+	Error              string
 }
 
 func (s PlaybackState) PositionText() string { return formatClock(s.Position) }
@@ -234,6 +240,11 @@ func (p *Player) Seek(seconds float64) {
 }
 
 func (p *Player) SeekTo(seconds float64) {
+	_, _ = p.RequestSeekTo(seconds)
+}
+
+// RequestSeekTo queues a seek without waiting for remote demuxing on the UI thread.
+func (p *Player) RequestSeekTo(seconds float64) (uint64, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if seconds < 0 {
@@ -245,8 +256,9 @@ func (p *Player) SeekTo(seconds float64) {
 	p.position = seconds
 	p.started = time.Now()
 	if p.process != nil {
-		p.process.command("seek", strconv.FormatFloat(seconds, 'f', 1, 64), "absolute")
+		return p.process.seekTo(seconds)
 	}
+	return 0, nil
 }
 
 func (p *Player) SetVolume(value float64) {

@@ -10,7 +10,7 @@ GNU General Public License, version 2 or later. The full license text is in
 [eb0ee10315](https://github.com/mpv-player/mpv/tree/eb0ee10315); the Windows
 build project and build instructions are available at the release link above.
 
-FnMovie uses the libmpv client API directly and does not bundle or launch
+哞哩影院 uses the libmpv client API directly and does not bundle or launch
 `mpv.exe`. Playback controls are drawn by the MyGo native UI.
 
 The bundled Windows build includes FFmpeg and other third-party components.

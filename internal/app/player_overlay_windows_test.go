@@ -128,7 +128,8 @@ func runNativePlaybackOverlayComposition() error {
 func checkNativePlayerMenus(a *appState) error {
 	onUI := func(fn func()) { done := make(chan struct{}); a.window.Update(func() { fn(); close(done) }); <-done }
 	var transportBounds mygo.Rectangle
-	onUI(func() { transportBounds = a.playerOverlayWindow.ContentBounds() })
+	var mainBounds mygo.Rectangle
+	onUI(func() { transportBounds = a.playerOverlayWindow.ContentBounds(); mainBounds = a.window.ContentBounds() })
 	getDC := syscall.NewLazyDLL("user32.dll").NewProc("GetDC")
 	release := syscall.NewLazyDLL("user32.dll").NewProc("ReleaseDC")
 	getPixel := syscall.NewLazyDLL("gdi32.dll").NewProc("GetPixel")
@@ -144,7 +145,10 @@ func checkNativePlayerMenus(a *appState) error {
 			}
 			a.playback.AudioTracks, a.playback.SubtitleTracks = tracks, tracks
 			a.openPlayerOverlayMenu(option)
-			if a.playerOverlayWindow.ContentBounds() != transportBounds {
+			// OS window placement may finish while this test starts. Compare
+			// placement relative to the video, allowing legitimate main-window moves.
+			currentMain, currentTransport := a.window.ContentBounds(), a.playerOverlayWindow.ContentBounds()
+			if currentTransport.Width != transportBounds.Width || currentTransport.Height != transportBounds.Height || currentTransport.X-currentMain.X != transportBounds.X-mainBounds.X || currentTransport.Y-currentMain.Y != transportBounds.Y-mainBounds.Y {
 				err = fmt.Errorf("%s menu moved or resized the transport surface: before=%+v after=%+v main=%+v", option, transportBounds, a.playerOverlayWindow.ContentBounds(), a.window.ContentBounds())
 			}
 			if a.playerMenuWindow.ContentBounds().Width != playerMenuWidth || a.playerMenuWindow.ContentBounds().Height != playerMenuHeight {
@@ -328,6 +332,10 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		finish(err)
 		return
 	}
+	if err := checkNativeSeekFeedback(a, onUI); err != nil {
+		finish(err)
+		return
+	}
 	var focusErr error
 	onUI(func() {
 		restoreWindowFocus(a.window)
@@ -379,6 +387,51 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		}
 	})
 	finish(finalErr)
+}
+
+func checkNativeSeekFeedback(a *appState, onUI func(func())) error {
+	for _, target := range []float64{5, 0} {
+		var err error
+		onUI(func() {
+			started := time.Now()
+			if target == 5 {
+				// Queue several seeks before the engine has produced a new snapshot.
+				a.requestPlayerSeek(9)
+				a.requestPlayerSeek(2)
+			}
+			a.requestPlayerSeek(target)
+			if time.Since(started) > 150*time.Millisecond || a.seekDisplayPosition() != target || !a.seekFeedback.Pending {
+				err = fmt.Errorf("seek did not immediately present target %.1f: position=%.1f pending=%t", target, a.seekDisplayPosition(), a.seekFeedback.Pending)
+			}
+		})
+		if err != nil {
+			return err
+		}
+		deadline := time.Now().Add(6 * time.Second)
+		for {
+			confirmed := false
+			onUI(func() {
+				confirmed = !a.seekFeedback.Pending
+				if a.seekFeedback.Error != "" {
+					err = fmt.Errorf("native seek failed: %s", a.seekFeedback.Error)
+				}
+				if a.seekFeedback.Pending && a.seekDisplayPosition() != target {
+					err = fmt.Errorf("native seek rolled back before confirmation")
+				}
+			})
+			if err != nil {
+				return err
+			}
+			if confirmed {
+				break
+			}
+			if time.Now().After(deadline) {
+				return fmt.Errorf("libmpv never confirmed seek %.1f", target)
+			}
+			time.Sleep(30 * time.Millisecond)
+		}
+	}
+	return nil
 }
 
 func checkNativeVideoFrames(a *appState, onUI func(func()), duration time.Duration) error {

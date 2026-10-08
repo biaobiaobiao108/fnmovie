@@ -4,7 +4,21 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/egoist/mygo"
 )
+
+func configureCompatibleAppPaths() {
+	// MyGo derives these paths from its display name by default. Preserve the
+	// existing native window state, cache and logs when the brand changes.
+	if dir, err := os.UserConfigDir(); err == nil {
+		mygo.App.SetPath(mygo.PathUserData, filepath.Join(dir, "FnMovie"))
+		mygo.App.SetPath(mygo.PathLogs, filepath.Join(dir, "FnMovie", "logs"))
+	}
+	if dir, err := os.UserCacheDir(); err == nil {
+		mygo.App.SetPath(mygo.PathCache, filepath.Join(dir, "FnMovie"))
+	}
+}
 
 type Settings struct {
 	ServerURL string `json:"serverUrl"`

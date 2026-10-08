@@ -47,6 +47,7 @@ type mpvAPI struct {
 	setOption      func(uintptr, uintptr, uintptr) int32
 	initialize     func(uintptr) int32
 	command        func(uintptr, uintptr) int32
+	commandAsync   func(uintptr, uint64, uintptr) int32
 	waitEvent      func(uintptr, float64) uintptr
 	getProperty    func(uintptr, uintptr, int32, uintptr) int32
 	getPropertyStr func(uintptr, uintptr) uintptr
@@ -83,6 +84,7 @@ func loadMpvAPI(path string) (*mpvAPI, error) {
 		}{
 			{"mpv_create", &api.create}, {"mpv_set_option_string", &api.setOption}, {"mpv_initialize", &api.initialize},
 			{"mpv_command", &api.command}, {"mpv_wait_event", &api.waitEvent}, {"mpv_get_property", &api.getProperty},
+			{"mpv_command_async", &api.commandAsync},
 			{"mpv_get_property_string", &api.getPropertyStr}, {"mpv_free", &api.free}, {"mpv_free_node_contents", &api.freeNode},
 			{"mpv_wakeup", &api.wakeup}, {"mpv_terminate_destroy", &api.terminate}, {"mpv_error_string", &api.errorString},
 		}
@@ -289,6 +291,31 @@ func (p *playerProcess) command(args ...any) int32 {
 	return code
 }
 
+func (p *playerProcess) seekTo(seconds float64) (uint64, error) {
+	p.commandMu.Lock()
+	defer p.commandMu.Unlock()
+	if p.ctx == 0 {
+		return 0, fmt.Errorf("播放器已关闭")
+	}
+	p.stateMu.Lock()
+	p.state.SeekRequestID++
+	request := p.state.SeekRequestID
+	p.state.SeekError = ""
+	p.state.SeekAcknowledgedAt = time.Time{}
+	p.stateMu.Unlock()
+	args := []string{"seek", strconv.FormatFloat(seconds, 'f', 3, 64), "absolute"}
+	ptrs := make([]*byte, len(args)+1)
+	for i, arg := range args {
+		ptrs[i], _ = syscall.BytePtrFromString(arg)
+	}
+	code := p.api.commandAsync(p.ctx, request, uintptr(unsafe.Pointer(&ptrs[0])))
+	runtime.KeepAlive(ptrs)
+	if code < 0 {
+		return request, fmt.Errorf("%s", mpvError(p.api, code))
+	}
+	return request, nil
+}
+
 func (p *playerProcess) eventLoop() {
 	defer func() {
 		p.stateMu.Lock()
@@ -309,14 +336,31 @@ func (p *playerProcess) eventLoop() {
 		if p.ctx == 0 {
 			return
 		}
-		eventPtr := p.api.waitEvent(p.ctx, 0.02)
-		if eventPtr != 0 {
+		// Drain a bounded batch: a seek acknowledgement must not wait behind
+		// startup/reconfiguration events one polling interval at a time.
+		for batch := 0; batch < 64; batch++ {
+			eventPtr := p.api.waitEvent(p.ctx, 0)
+			if eventPtr == 0 {
+				break
+			}
 			eventBytes, ok := readCBytes(eventPtr, 24)
 			if !ok {
 				continue
 			}
 			event := *(*mpvEvent)(unsafe.Pointer(&eventBytes[0]))
+			if event.id == 0 {
+				break
+			}
 			switch event.id {
+			case 5: // MPV_EVENT_COMMAND_REPLY, only the newest user seek can fail its UI request.
+				p.stateMu.Lock()
+				if event.userdata == p.state.SeekRequestID {
+					p.state.SeekAcknowledgedAt = time.Now()
+					if event.error < 0 {
+						p.state.SeekError = mpvError(p.api, event.error)
+					}
+				}
+				p.stateMu.Unlock()
 			case 1:
 				return
 			case 7:
@@ -366,6 +410,7 @@ func (p *playerProcess) finishMedia(reason, code int32) bool {
 }
 
 func (p *playerProcess) refreshState() {
+	observedAt := time.Now()
 	p.stateMu.RLock()
 	previous := p.state
 	p.stateMu.RUnlock()
@@ -375,6 +420,9 @@ func (p *playerProcess) refreshState() {
 	p.positionBits, p.durationBits, p.positionSeen = math.Float64bits(position), math.Float64bits(duration), duration > 0
 	p.state.Loaded = duration > 0
 	p.state.Position, p.state.Duration = position, duration
+	p.state.ObservedAt = observedAt
+	p.state.Seeking = p.getFlag("seeking")
+	p.state.Buffering = p.getFlag("paused-for-cache")
 	p.state.Paused = p.getFlag("pause")
 	p.state.Muted = p.getFlag("mute")
 	p.state.Volume = p.getFloat("volume", 100)

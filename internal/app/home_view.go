@@ -13,54 +13,79 @@ const homeHeroFadeDuration = 180 * time.Millisecond
 
 var homeDetailIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/></svg>`))
 
+var homeNextIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`))
+
+// Keep both home sections in the available viewport; only the record row scrolls.
+func homeViewportLayout(width, height float32, records, status, partialError bool) (heroHeight, cardWidth, rowHeight float32) {
+	cardWidth = min(float32(272), max(float32(200), (height-300)*16/9))
+	rowHeight = cardWidth*9/16 + 58
+	continueHeight := float32(38 + 10 + 64)
+	if records {
+		continueHeight = 38 + 10 + rowHeight
+		if status {
+			continueHeight += 38
+		}
+	}
+	remaining := height - continueHeight - 16
+	if partialError {
+		remaining -= 48
+	}
+	heroHeight = min(float32(560), min(width*9/16, max(float32(120), remaining)))
+	return
+}
+
 func (a *appState) homeView(c *ui.Context) {
 	if a.home.AllContinue {
 		a.homeContinueGrid(c)
 		return
 	}
-	advanceSmoothScroll(c, &a.home.Scroll, &a.home.ScrollAnimation)
-	scroll := ui.Scroll(c).Key("home-scroll").Grow(1).FillHeight().FillWidth().Children(func() {
-		ui.Column(c).FillWidth().Gap(28).Padding(0, 0, 16, 0).Children(func() {
-			a.homeCarousel(c)
-			if len(a.home.Heroes) > 0 && a.home.HeroErr != "" {
-				ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "部分推荐读取失败："+a.home.HeroErr).FontSize(13).TextColor(ui.Hex("#ad5148")).MaxLines(2).Grow(1)
-					if actionButton(c, "重试").Key("home-hero-retry").Disabled(a.home.HeroLoading).Clicked() {
-						a.loadHomeHeroes(true)
+	width, height := c.Size()
+	page := ui.Column(c).Key("home-viewport").Grow(1).FillHeight().FillWidth().Gap(16)
+	bounds := page.Bounds()
+	if bounds.W > 0 && bounds.H > 0 {
+		width, height = bounds.W, bounds.H
+	} else {
+		width, height = max(1, width-273), max(1, height-84)
+	}
+	heroHeight, cardWidth, rowHeight := homeViewportLayout(width, height, len(a.home.Continue) > 0, a.home.ContinueLoading || a.home.ContinueErr != "", len(a.home.Heroes) > 0 && a.home.HeroErr != "")
+	page.Children(func() {
+		a.homeCarouselSized(c, heroHeight)
+		if len(a.home.Heroes) > 0 && a.home.HeroErr != "" {
+			ui.Row(c).FillWidth().Gap(12).AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "部分推荐读取失败："+a.home.HeroErr).FontSize(13).TextColor(ui.Hex("#ad5148")).MaxLines(2).Grow(1)
+				if actionButton(c, "重试").Key("home-hero-retry").Disabled(a.home.HeroLoading).Clicked() {
+					a.loadHomeHeroes(true)
+				}
+			})
+		}
+		ui.Column(c).FillWidth().Gap(10).Children(func() {
+			ui.Row(c).Height(38).FillWidth().AlignItems(ui.Center).Children(func() {
+				ui.Text(c, "继续观看").FontSize(22).Bold().Grow(1)
+				if len(a.home.Continue) > 0 {
+					if actionButton(c, fmt.Sprintf("全部 · %d ›", len(a.home.Continue))).Key("home-continue-all").BorderWidth(0).Background(ui.Transparent).TextColor(c.Theme().TextMuted).Clicked() {
+						a.home.AllContinue = true
+					}
+				}
+			})
+			a.homeContinueStatus(c)
+			if len(a.home.Continue) > 0 {
+				ui.ScrollHorizontal(c).Key("home-continue-row").Height(rowHeight).TrackScroll(&a.home.RowScroll).Gap(18).Children(func() {
+					for _, item := range a.home.Continue[:min(10, len(a.home.Continue))] {
+						a.homeContinueCard(c, item, cardWidth)
 					}
 				})
 			}
-			ui.Column(c).FillWidth().Gap(14).Children(func() {
-				ui.Row(c).FillWidth().AlignItems(ui.Center).Children(func() {
-					ui.Text(c, "继续观看").FontSize(22).Bold().Grow(1)
-					if len(a.home.Continue) > 0 {
-						if actionButton(c, fmt.Sprintf("全部 · %d ›", len(a.home.Continue))).Key("home-continue-all").BorderWidth(0).Background(ui.Transparent).TextColor(c.Theme().TextMuted).Clicked() {
-							a.home.AllContinue = true
-						}
-					}
-				})
-				a.homeContinueStatus(c)
-				if len(a.home.Continue) > 0 {
-					ui.ScrollHorizontal(c).Key("home-continue-row").Height(224).TrackScroll(&a.home.RowScroll).Gap(18).Children(func() {
-						for _, item := range a.home.Continue[:min(10, len(a.home.Continue))] {
-							a.homeContinueCard(c, item, 272)
-						}
-					})
-				}
-			})
 		})
 	})
-	bindSmoothScroll(c, scroll, &a.home.Scroll, &a.home.ScrollAnimation)
 }
 
-func (a *appState) homeCarousel(c *ui.Context) {
+func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 	width, _ := c.Size()
 	hero := ui.Box(c).Key("home-carousel").FillWidth().Radius(18).Clip().Background(ui.Hex("#27352e"))
 	contentWidth := hero.Bounds().W
 	if contentWidth <= 0 {
 		contentWidth = max(1, width-273)
 	}
-	height := max(float32(340), min(float32(560), contentWidth*9/16))
 	hero.Height(height)
 	a.home.HeroHover = hero.Hovered()
 	if len(a.home.Heroes) == 0 {
@@ -105,15 +130,22 @@ func (a *appState) homeCarousel(c *ui.Context) {
 		})
 		body := actionButton(c, "").Key("home-hero-detail").Absolute().Top(0).Left(0).Fill().Padding(0).BorderWidth(0).Background(ui.Transparent).Label("查看 " + item.Title + " 详情")
 		body.Children(func() {
-			ui.Column(c).Absolute().Bottom(50).Left(32).Right(32).Gap(12).Children(func() {
-				if logo := a.imageForURL(item.Logo, 240, 88); logo != nil {
-					ui.Image(c, logo).Size(240, 88).Fit(ui.Contain)
+			fontSize, logoHeight, titleLines, overviewLines := float32(34), float32(88), 2, 3
+			if height < 340 {
+				fontSize, logoHeight, titleLines, overviewLines = 26, 56, 1, 2
+			}
+			if height < 240 {
+				fontSize, logoHeight, overviewLines = 24, 40, 1
+			}
+			ui.Column(c).Absolute().Bottom(42).Left(28).Right(28).Gap(8).Children(func() {
+				if logo := a.imageForURL(item.Logo, 240, int(logoHeight)); logo != nil {
+					ui.Image(c, logo).Size(240, logoHeight).Fit(ui.Contain)
 				} else {
-					ui.Text(c, item.Title).FontSize(34).Bold().TextColor(ui.Hex("#ffffff")).MaxLines(2)
+					ui.Text(c, item.Title).FontSize(fontSize).Bold().TextColor(ui.Hex("#ffffff")).MaxLines(titleLines)
 				}
-				ui.Text(c, homeHeroMetadata(item)).FontSize(14).Bold().TextColor(ui.RGBA(255, 255, 255, 0.92)).MaxLines(2)
+				ui.Text(c, homeHeroMetadata(item)).FontSize(14).Bold().TextColor(ui.RGBA(255, 255, 255, 0.92)).MaxLines(1)
 				if item.Overview != "" {
-					ui.Text(c, item.Overview).MaxWidth(760).FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.86)).MaxLines(3)
+					ui.Text(c, item.Overview).MaxWidth(760).FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.86)).MaxLines(overviewLines)
 				}
 			})
 		})
@@ -121,12 +153,19 @@ func (a *appState) homeCarousel(c *ui.Context) {
 			a.openDetail(item)
 		}
 		if len(a.home.Heroes) > 1 {
+			arrowTop := height/2 - 20
+			if height < 460 {
+				arrowTop = 16
+			}
 			for _, direction := range []int{-1, 1} {
 				label, icon := "上一张海报", "back"
 				if direction > 0 {
 					label, icon = "下一张海报", "forward"
 				}
-				button := actionButton(c, "").Key(fmt.Sprintf("home-hero-arrow-%d", direction)).Absolute().Top(height/2-20).Size(40, 40).Padding(0).Radius(20).BorderWidth(0).Background(ui.RGBA(8, 14, 11, 0.48)).TextColor(ui.Hex("#ffffff")).Label(label)
+				button := actionButton(c, "").Key(fmt.Sprintf("home-hero-arrow-%d", direction)).Absolute().Top(arrowTop).Size(40, 40).Padding(0).Center().Radius(20).BorderWidth(0).Background(ui.Transparent).TextColor(ui.RGBA(255, 255, 255, 0.76)).Label(label)
+				if button.Hovered() {
+					button.TextColor(ui.Hex("#ffffff"))
+				}
 				if direction < 0 {
 					button.Left(16)
 				} else {
@@ -136,7 +175,7 @@ func (a *appState) homeCarousel(c *ui.Context) {
 					if icon == "back" {
 						ui.Icon(c, playerOverlayIcons["back"]).Size(18, 18)
 					} else {
-						ui.Text(c, "›").FontSize(28).TextColor(ui.Hex("#ffffff"))
+						ui.Icon(c, homeNextIcon).Size(18, 18)
 					}
 				})
 				if button.Clicked() {
@@ -227,7 +266,16 @@ func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, wi
 				p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * progress, H: r.H}, ui.Hex("#ffffff"), 2)
 			})
 			if loading {
-				ui.Box(c).Absolute().Top(height/2-17).Left(width/2-17).Size(34, 34).Center().Radius(17).Background(ui.RGBA(8, 14, 11, 0.5)).Children(func() { ui.Spinner(c).FontSize(20).TextColor(ui.Hex("#ffffff")) })
+				ui.Box(c).Absolute().Top(height/2-19).Left(width/2-19).Size(38, 38).Center().Radius(19).Background(ui.RGBA(8, 14, 11, 0.68)).Children(func() {
+					// Spinner draws with Theme.TextMuted, rather than TextColor.
+					// Scope a high-contrast color to this progress indicator only.
+					theme := c.Theme()
+					spinnerTheme := *theme
+					spinnerTheme.TextMuted = ui.Hex("#ffffff")
+					c.SetTheme(&spinnerTheme)
+					ui.Spinner(c).Size(22, 22).Label("正在准备播放，点击卡片取消")
+					c.SetTheme(theme)
+				})
 			} else if button.Hovered() {
 				ui.Box(c).Absolute().Top(height/2-20).Left(width/2-20).Size(40, 40).Center().Radius(20).Background(ui.RGBA(8, 14, 11, 0.5)).Children(func() { ui.Icon(c, playerOverlayIcons["play"]).Size(20, 20).TextColor(ui.Hex("#ffffff")) })
 			}

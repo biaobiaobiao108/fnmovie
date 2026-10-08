@@ -250,3 +250,15 @@ func TestHomeSessionSetStableAcrossRetry(t *testing.T) {
 		}
 	}
 }
+
+func TestHomeMetadataDoesNotDisplayNumericGenreIDs(t *testing.T) {
+	genres := metadataNames([]any{float64(19), "7", map[string]any{"id": 18}, map[string]any{"name": "剧情"}, "西部", "3D"})
+	if !reflect.DeepEqual(genres, []string{"剧情", "西部", "3D"}) {
+		t.Fatalf("numeric IDs leaked into hero genres: %v", genres)
+	}
+	item := normalizeItem(map[string]any{"guid": "movie", "title": "Movie", "type": "Movie", "vote_average": 8.7, "release_date": "1992-01-01", "genres": []any{float64(19), float64(7)}, "production_countries": []any{map[string]any{"iso_3166_1": "US"}}})
+	metadata := homeHeroMetadata(item)
+	if strings.Contains(metadata, "19、7") || len(item.Genres) != 0 || !strings.Contains(metadata, "★ 8.7") || !strings.Contains(metadata, "1992") || !strings.Contains(metadata, "US") {
+		t.Fatalf("invalid home hero metadata: %s", metadata)
+	}
+}

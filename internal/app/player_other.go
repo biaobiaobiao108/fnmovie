@@ -17,9 +17,12 @@ func (p *playerProcess) start(string, string, uintptr, float64) error {
 func (p *playerProcess) startContext(context.Context, string, string, uintptr, float64) error {
 	return errors.New("embedded mpv playback is only supported on Windows")
 }
-func (p *playerProcess) running() bool                      { return false }
-func (p *playerProcess) stop()                              {}
-func (p *playerProcess) command(...any)                     {}
+func (p *playerProcess) running() bool  { return false }
+func (p *playerProcess) stop()          {}
+func (p *playerProcess) command(...any) {}
+func (p *playerProcess) seekTo(float64) (uint64, error) {
+	return 0, errors.New("playback is only supported on Windows")
+}
 func (p *playerProcess) position() (float64, float64, bool) { return 0, 0, false }
 func (p *playerProcess) snapshot() PlayerSnapshot           { return PlayerSnapshot{} }
 func (p *playerProcess) setViewport(ui.Rect)                {}

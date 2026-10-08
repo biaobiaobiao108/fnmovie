@@ -24,32 +24,39 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Build application
-        run: go tool mygo build -platform windows/amd64 -o out/fnmovie-20261007
+      - name: Test application
+        run: go test ./...
+
+      - name: Vet application
+        run: go vet ./...
+
+      - name: Build application with UTF-8 installer source
+        shell: pwsh
+        run: ./scripts/build-windows.ps1
 
       - name: Prepare Windows release assets
         shell: pwsh
         run: |
-          $config = Get-Content mygo.json -Raw | ConvertFrom-Json
+          $config = Get-Content mygo.json -Raw -Encoding utf8 | ConvertFrom-Json
           $expectedTag = "v$($config.version)"
           if ($env:GITHUB_REF_NAME -ne $expectedTag) {
             throw "Tag $env:GITHUB_REF_NAME does not match mygo.json version $expectedTag"
           }
 
           $releaseDir = Join-Path $PWD 'out\fnmovie-20261007\windows-amd64'
-          $installer = Get-ChildItem -LiteralPath $releaseDir -Filter '* Setup *.exe' | Select-Object -First 1
-          if (-not $installer) {
-            throw "MyGo did not produce a Windows installer in $releaseDir"
+          $installer = Join-Path $releaseDir "哞哩影院 Setup $($config.version).exe"
+          if (-not (Test-Path -LiteralPath $installer)) {
+            throw "MyGo did not produce the expected Windows installer: $installer"
           }
-          foreach ($required in @('FnMovie.exe', 'player\libmpv-2.dll')) {
+          foreach ($required in @('哞哩影院.exe', 'icon.png', 'THIRD-PARTY-NOTICES.md', 'licenses', 'player\libmpv-2.dll')) {
             if (-not (Test-Path -LiteralPath (Join-Path $releaseDir $required))) {
               throw "Required Windows release file is missing: $required"
             }
           }
 
-          $portableZip = Join-Path $releaseDir "FnMovie-$($config.version)-windows-amd64-portable.zip"
+          $portableZip = Join-Path $releaseDir "哞哩影院-$($config.version)-windows-amd64-portable.zip"
           Compress-Archive -Path @(
-            (Join-Path $releaseDir 'FnMovie.exe'),
+            (Join-Path $releaseDir '哞哩影院.exe'),
             (Join-Path $releaseDir 'icon.png'),
             (Join-Path $releaseDir 'THIRD-PARTY-NOTICES.md'),
             (Join-Path $releaseDir 'licenses'),
@@ -59,10 +66,10 @@ jobs:
       - name: Upload Windows build
         uses: actions/upload-artifact@v4
         with:
-          name: fnmovie-windows-amd64
+          name: 哞哩影院-windows-amd64
           path: |
-            out/fnmovie-20261007/windows-amd64/FnMovie Setup *.exe
-            out/fnmovie-20261007/windows-amd64/FnMovie-*-windows-amd64-portable.zip
+            out/fnmovie-20261007/windows-amd64/哞哩影院 Setup *.exe
+            out/fnmovie-20261007/windows-amd64/哞哩影院-*-windows-amd64-portable.zip
           if-no-files-found: error
           retention-days: 1
 
@@ -80,7 +87,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: FnMovie ${{ github.ref_name }}
+          name: 哞哩影院 ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: release-assets/*

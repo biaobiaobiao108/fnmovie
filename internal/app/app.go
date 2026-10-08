@@ -102,6 +102,7 @@ type appState struct {
 	playerOverlayAnimationTarget float64
 	seekSliderPosition           float64
 	seekDragging                 bool
+	seekFeedback                 seekFeedback
 	volumeDragging               bool
 	playbackLoading              bool
 	playbackLoadingID            string
@@ -119,6 +120,7 @@ type appState struct {
 
 // Run starts the native desktop application.
 func Run() {
+	configureCompatibleAppPaths()
 	settings, err := LoadSettings()
 	if err != nil {
 		log.Printf("settings: %v", err)
@@ -144,7 +146,7 @@ func Run() {
 
 	mygo.App.WhenReady(func() {
 		app.window = mygo.NewWindow(mygo.WindowOptions{
-			Title: "飞牛影视", Width: 1280, Height: 800, MinWidth: 960, MinHeight: 640,
+			Title: "哞哩影院", Width: 1280, Height: 800, MinWidth: 960, MinHeight: 640,
 			BackgroundColor: "#f7f6f2", StateKey: "main", Content: ui.View(app.view),
 		})
 		setWindowTheme(app.window)
@@ -226,7 +228,7 @@ func (a *appState) sidebar(c *ui.Context) {
 				ui.Image(c, a.icon).Size(38, 38).Radius(10).Fit(ui.Cover)
 			}
 			ui.Column(c).Gap(1).Children(func() {
-				ui.Text(c, "飞牛影视").FontSize(16).Bold()
+				ui.Text(c, "哞哩影院").FontSize(16).Bold()
 			})
 		})
 		ui.Box(c).Height(15)
@@ -379,8 +381,8 @@ func (a *appState) connectionView(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).Fill().Center().Children(func() {
 		ui.Column(c).Width(440).Padding(34).Gap(16).Radius(16).Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Text(c, "连接你的影视库").FontSize(22).Bold()
-			ui.Text(c, "输入飞牛影视地址和账户信息，完成连接后即可浏览与播放媒体。").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "连接哞哩影院").FontSize(22).Bold()
+			ui.Text(c, "输入飞牛影视服务器地址和账户信息，在哞哩影院浏览与播放你的媒体。").FontSize(12).TextColor(t.TextMuted)
 			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
 			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
 			ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted()
@@ -398,8 +400,8 @@ func (a *appState) loginModal(c *ui.Context) {
 	ui.Modal(c, &a.loginOpen, func() {
 		t := c.Theme()
 		ui.Column(c).Width(430).Padding(28, 30).Gap(15).Radius(16).Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Text(c, "连接飞牛影视").FontSize(22).Bold()
-			ui.Text(c, "登录后浏览你的媒体库并在本机播放影片。").FontSize(12).TextColor(t.TextMuted)
+			ui.Text(c, "连接哞哩影院").FontSize(22).Bold()
+			ui.Text(c, "使用飞牛影视账户登录，在哞哩影院浏览媒体库并播放影片。").FontSize(12).TextColor(t.TextMuted)
 			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
 			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
 			ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted()
@@ -2023,6 +2025,7 @@ func (a *appState) startPlayback(item MediaItem) {
 			a.playbackLoadingTitle = ""
 			a.playbackCancel = nil
 			a.seekSliderPosition = stream.ResumeAt
+			a.seekFeedback = seekFeedback{}
 			a.window.Invalidate()
 			a.createPlayerOverlay()
 			a.startPlayerOverlayMonitor()
@@ -2057,7 +2060,7 @@ func (a *appState) playbackCancelButton(c *ui.Context) {
 }
 
 func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Server, player *Player) {
-	ticker := time.NewTicker(time.Second)
+	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	lastProgress := time.Now()
 	for player.Running() {
@@ -2075,7 +2078,7 @@ func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Se
 			if ctx.Err() != nil || a.player != player || !a.playback.Active || a.playingItem == nil || a.playingItem.ID != item.ID {
 				return
 			}
-			a.playback.Position = position
+			a.playback.Position = a.seekFeedback.position(snapshot, a.playback.Position)
 			a.playback.Paused = snapshot.Paused
 			if !a.volumeDragging {
 				a.playback.Volume = snapshot.Volume

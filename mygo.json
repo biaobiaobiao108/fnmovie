@@ -1,7 +1,7 @@
 {
-  "name": "FnMovie",
+  "name": "哞哩影院",
   "identifier": "com.fnmovie.desktop",
-  "version": "0.1.0",
-  "copyright": "Copyright 2026 fnmovie contributors",
+  "version": "1.0.0",
+  "copyright": "Copyright 2026 哞哩影院 contributors",
   "out": "build"
 }

@@ -1,6 +1,6 @@
-# FnMovie 飞牛影视桌面客户端
+# 哞哩影院
 
-基于 Go 与 MyGo 原生 UI 构建的 Windows x64 飞牛影视客户端。界面由 MyGo 绘制，不使用 HTML、JavaScript 或 WebView；视频播放通过 Go 直接调用 libmpv DLL 完成，不启动 `mpv.exe`。
+哞哩影院是基于 Go 与 MyGo 原生 UI 构建的 Windows x64 飞牛影视客户端。界面由 MyGo 绘制，不使用 HTML、JavaScript 或 WebView；视频播放通过 Go 直接调用 libmpv DLL 完成，不启动 `mpv.exe`。
 
 ## 当前功能
 
@@ -29,7 +29,9 @@ go tool mygo dev
 go tool mygo build -platform windows/amd64 -o out\fnmovie-20261007
 ```
 
-Windows x64 的发布产物固定在 `out\fnmovie-20261007\windows-amd64`，包括可直接启动的 `FnMovie.exe` 和安装包 `FnMovie Setup 0.1.0.exe`。播放器文件位于 `resources\windows-amd64\player`，其中 `libmpv-2.dll` 由 Git LFS 管理；克隆后需安装 Git LFS 并运行 `git lfs pull`。第三方许可文本位于 `resources`。
+Windows x64 的发布产物固定在 `out\fnmovie-20261007\windows-amd64`，包括可直接启动的 `哞哩影院.exe` 和安装包 `哞哩影院 Setup 1.0.0.exe`。播放器文件位于 `resources\windows-amd64\player`，其中 `libmpv-2.dll` 由 Git LFS 管理；克隆后需安装 Git LFS 并运行 `git lfs pull`。第三方许可文本位于 `resources`。
+
+中文名称的 Windows 安装包通过 `pwsh -File scripts/build-windows.ps1` 构建；该脚本为 MyGo v0.2.18 的 NSIS 编译器显式设置 UTF-8，输出目录不变。
 
 ## 播放与服务器协议
 
@@ -44,7 +46,7 @@ $env:FNMOVIE_LIVE_TEST='1'
 $env:FNMOVIE_SERVER='http://your-nas:5666/v'
 $env:FNMOVIE_USER='your-user'
 $env:FNMOVIE_PASSWORD='your-password'
-$env:FNMOVIE_PARENT_HWND=[string](Get-Process FnMovie).MainWindowHandle
+$env:FNMOVIE_PARENT_HWND=[string](Get-Process '哞哩影院').MainWindowHandle
 go test ./internal/app -run TestLiveNASPlayback -v -count=1
 ```
 

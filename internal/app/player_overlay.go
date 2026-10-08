@@ -337,6 +337,7 @@ func (a *appState) closePlayerOverlay() {
 	a.playerOverlayContent, a.playerHeaderContent = nil, nil
 	a.playerOverlayMenu = ""
 	a.seekDragging = false
+	a.seekFeedback = seekFeedback{}
 	a.volumeDragging = false
 }
 
@@ -421,7 +422,7 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 
 func (a *appState) playerTransport(c *ui.Context) {
 	maxPosition := maxFloat(1, a.playback.Duration)
-	if !a.seekDragging {
+	if !a.seekDragging && !a.seekFeedback.Pending {
 		a.seekSliderPosition = minFloat(maxPosition, maxFloat(0, a.playback.Position))
 	}
 	ui.Column(c).Label("播放控制栏").Absolute().Bottom(16).Left(32).Right(32).Padding(8, 18, 10, 18).Gap(4).Radius(22).
@@ -429,9 +430,9 @@ func (a *appState) playerTransport(c *ui.Context) {
 		// 上层：Apple 细致时间轨与时间标签
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, formatClock(a.seekDisplayPosition())).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
-			slider := ui.Slider(c, &a.seekSliderPosition, 0, maxPosition).Grow(1)
+			slider := ui.Slider(c, &a.seekSliderPosition, 0, maxPosition).Grow(1).Label("播放进度")
 			pressed := slider.Pressed()
-			slider.Changed()
+			changed := slider.Changed()
 			if pressed && !a.seekDragging {
 				a.seekDragging = true
 				a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
@@ -439,10 +440,23 @@ func (a *appState) playerTransport(c *ui.Context) {
 			if !pressed && a.seekDragging {
 				a.seekDragging = false
 				a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
-				a.player.SeekTo(a.seekSliderPosition)
+				a.requestPlayerSeek(a.seekSliderPosition)
 				a.markPlayerOverlayActivity()
+			} else if changed && !pressed && !a.seekDragging {
+				a.requestPlayerSeek(a.seekSliderPosition)
 			}
 			ui.Text(c, formatClock(a.playback.Duration)).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
+			// Reserve the status slot so entering/leaving a seek never shifts the rail.
+			ui.Box(c).Width(72).Height(16).Children(func() {
+				if a.seekFeedback.Pending {
+					ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
+						ui.Spinner(c).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75)).Label("正在跳转")
+						ui.Text(c, "跳转中").FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
+					})
+				} else if a.seekFeedback.Error != "" {
+					ui.Text(c, "跳转失败").FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75)).Label(a.seekFeedback.Error)
+				}
+			})
 		})
 		// 下层：Apple 经典居中核心对称控制区
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
@@ -475,7 +489,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 			// 中央核心：-10s、大号圆形高光播放/暂停键、+10s
 			ui.Row(c).Grow(1).Basis(0).Gap(14).Center().Children(func() {
 				if playerAppleIconButton(c, "seek-back-10", "快退 10 秒", 34, 20).Clicked() {
-					a.player.Seek(-10)
+					a.requestPlayerSeekRelative(-10)
 					a.markPlayerOverlayActivity()
 				}
 
@@ -503,7 +517,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 				}
 
 				if playerAppleIconButton(c, "seek-forward-10", "快进 10 秒", 34, 20).Clicked() {
-					a.player.Seek(10)
+					a.requestPlayerSeekRelative(10)
 					a.markPlayerOverlayActivity()
 				}
 			})
@@ -742,7 +756,7 @@ func (a *appState) closePlayerOverlayMenu() {
 }
 
 func (a *appState) seekDisplayPosition() float64 {
-	if a.seekDragging {
+	if a.seekDragging || a.seekFeedback.Pending {
 		return a.seekSliderPosition
 	}
 	return a.playback.Position
@@ -820,9 +834,9 @@ func (a *appState) performPlayerAction(action playerAction) {
 		a.player.TogglePause()
 		a.playback.Paused = !a.playback.Paused
 	case playerSeekBack:
-		a.player.Seek(-10)
+		a.requestPlayerSeekRelative(-10)
 	case playerSeekForward:
-		a.player.Seek(10)
+		a.requestPlayerSeekRelative(10)
 	case playerVolumeUp:
 		a.player.AdjustVolume(5)
 		a.playback.Volume = minFloat(100, a.playback.Volume+5)
