@@ -15,6 +15,7 @@ type homeState struct {
 	HeroIndex, HeroPrevious                                     int
 	HeroChangedAt                                               time.Time
 	HeroHover, HeroLoading, HeroAttempted                       bool
+	HeroFromCache                                               bool
 	HeroErr                                                     string
 	Continue                                                    []ContinueWatchingItem
 	ContinueLoading                                             bool
@@ -40,9 +41,38 @@ func (a *appState) resetHome() {
 	a.home = homeState{Generation: a.home.Generation + 1}
 }
 
+func sameHomeLibraryScope(left, right []MediaLibrary) bool {
+	ids := func(libraries []MediaLibrary) map[string]bool {
+		set := make(map[string]bool, len(libraries))
+		for _, library := range libraries {
+			if library.ID != "" {
+				set[library.ID] = true
+			}
+		}
+		return set
+	}
+	a, b := ids(left), ids(right)
+	if len(a) != len(b) {
+		return false
+	}
+	for id := range a {
+		if !b[id] {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *appState) loadHomeHeroes(retry bool) {
 	if a.server == nil || a.window == nil || !a.loggedIn || !a.home.LibrariesReady || a.home.Closed || a.home.HeroLoading || a.home.HeroAttempted && !retry {
 		return
+	}
+	if !retry && len(a.home.Heroes) == 0 && a.catalogCache != nil {
+		if cached, ok := a.catalogCache.HomeHeroes(a.settings.ServerURL, a.libraries, a.settings.Username); ok {
+			a.home.Heroes = cached
+			a.home.HeroFromCache = len(cached) > 0
+			a.home.HeroIndex, a.home.HeroPrevious = 0, 0
+		}
 	}
 	if a.home.HeroCancel != nil {
 		a.home.HeroCancel()
@@ -63,9 +93,23 @@ func (a *appState) loadHomeHeroes(retry bool) {
 			a.home.HeroLoading, a.home.HeroCancel = false, nil
 			if err != nil {
 				a.home.HeroErr = err.Error()
+				// Keep a cached carousel if the server only returned partial data.
+				a.home.Heroes = mergeHomeHeroesStable(a.home.Heroes, items)
+			} else {
+				if a.home.HeroFromCache {
+					a.home.Heroes = mergeHomeHeroesStable(nil, items)
+					a.home.HeroIndex, a.home.HeroPrevious = 0, 0
+					a.home.HeroFromCache = false
+				} else {
+					a.home.Heroes = mergeHomeHeroesStable(a.home.Heroes, items)
+				}
+				if a.catalogCache != nil {
+					cache, serverURL, username := a.catalogCache, a.settings.ServerURL, a.settings.Username
+					librariesCopy := append([]MediaLibrary(nil), a.libraries...)
+					heroesCopy := cloneHomeHeroes(items)
+					go cache.SetHomeHeroes(serverURL, librariesCopy, heroesCopy, username)
+				}
 			}
-			// Retrying failed libraries must not reshuffle an existing session set.
-			a.home.Heroes = mergeHomeHeroesStable(a.home.Heroes, items)
 			a.syncHomeCarousel()
 		})
 	}()
@@ -77,6 +121,11 @@ func (a *appState) loadContinueWatching(force bool) {
 	}
 	if !force && (a.home.ContinueLoading || !a.home.ContinueUpdatedAt.IsZero() && time.Since(a.home.ContinueUpdatedAt) < 30*time.Second) {
 		return
+	}
+	if !force && len(a.home.Continue) == 0 && a.catalogCache != nil {
+		if cached, ok := a.catalogCache.HomeContinue(a.settings.ServerURL, a.settings.Username); ok {
+			a.home.Continue = cached
+		}
 	}
 	if a.home.ContinueCancel != nil {
 		a.home.ContinueCancel()
@@ -96,12 +145,17 @@ func (a *appState) loadContinueWatching(force bool) {
 			a.home.ContinueLoading, a.home.ContinueCancel = false, nil
 			if err != nil {
 				a.home.ContinueErr = err.Error()
-				if len(items) > 0 {
+				if len(a.home.Continue) == 0 && len(items) > 0 {
 					a.home.Continue, a.home.ContinueUpdatedAt = items, time.Now()
 				}
 				return
 			}
 			a.home.Continue, a.home.ContinueUpdatedAt = items, time.Now()
+			if a.catalogCache != nil {
+				cache, serverURL, username := a.catalogCache, a.settings.ServerURL, a.settings.Username
+				itemsCopy := cloneHomeContinue(items)
+				go cache.SetHomeContinue(serverURL, itemsCopy, username)
+			}
 		})
 	}()
 }

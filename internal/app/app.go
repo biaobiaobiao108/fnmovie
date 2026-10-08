@@ -1694,6 +1694,8 @@ func (a *appState) loadLibraries() {
 	a.libraryCancel = cancel
 	if cached := a.catalogCache.Libraries(serverURL, username); len(a.libraries) == 0 && len(cached) > 0 {
 		a.libraries = cached
+		a.home.LibrariesReady = true
+		a.loadHomeHeroes(false)
 		a.loadLibrary()
 	}
 	a.window.Invalidate()
@@ -1731,9 +1733,17 @@ func (a *appState) loadLibraries() {
 				return
 			}
 			a.libraryErr = ""
+			if !sameHomeLibraryScope(a.libraries, libraries) {
+				if a.home.HeroCancel != nil {
+					a.home.HeroCancel()
+					a.home.HeroCancel = nil
+				}
+				a.home.Heroes = nil
+				a.home.HeroIndex, a.home.HeroPrevious = 0, 0
+				a.home.HeroLoading, a.home.HeroAttempted, a.home.HeroFromCache = false, false, false
+			}
 			a.libraries = libraries
 			a.home.LibrariesReady = true
-			a.loadHomeHeroes(false)
 			if a.libraryID != "" {
 				found := false
 				for _, library := range libraries {
@@ -1758,6 +1768,7 @@ func (a *appState) loadLibraries() {
 			if a.libraryID == "" {
 				a.libraryID = ""
 			}
+			a.loadHomeHeroes(false)
 			a.loadLibrary()
 		})
 	}()

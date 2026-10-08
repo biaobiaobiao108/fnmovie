@@ -65,7 +65,7 @@ func (a *appState) createPlayerOverlay() {
 		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: a.playerSeekFeedbackContent,
 	})
-	a.playerSeekFeedbackWindow.SetIgnoreMouseEvents(true)
+	overlay.SetIgnoreMouseEvents(a.playerSeekFeedbackWindow, true)
 	a.registerPlayerOverlayHooks()
 	a.syncPlayerOverlay()
 	a.overlayMu.Lock()
@@ -159,6 +159,9 @@ func (a *appState) syncPlayerSeekFeedbackVisibility() {
 	}
 	a.playerSeekFeedbackVisible = visible
 	if visible {
+		if a.playerSeekFeedbackContent != nil {
+			a.playerSeekFeedbackContent.SetOpacity(a.playerSeekFeedbackWindow, a.fullscreenFade())
+		}
 		a.playerSeekFeedbackWindow.ShowInactive()
 		a.playerSeekFeedbackWindow.Invalidate()
 	} else {

@@ -36,11 +36,23 @@ type CatalogState struct {
 	Refreshed         bool
 }
 
+type HomeHeroesCache struct {
+	Items     []MediaItem `json:"items"`
+	UpdatedAt time.Time   `json:"updatedAt"`
+}
+
+type HomeContinueCache struct {
+	Items     []ContinueWatchingItem `json:"items"`
+	UpdatedAt time.Time              `json:"updatedAt"`
+}
+
 type catalogDisk struct {
-	Version   int                       `json:"version"`
-	Libraries map[string][]MediaLibrary `json:"libraries"`
-	Pages     map[string]CatalogPage    `json:"pages"`
-	Details   map[string]MediaItem      `json:"details"`
+	Version      int                          `json:"version"`
+	Libraries    map[string][]MediaLibrary    `json:"libraries"`
+	Pages        map[string]CatalogPage       `json:"pages"`
+	Details      map[string]MediaItem         `json:"details"`
+	HomeHeroes   map[string]HomeHeroesCache   `json:"homeHeroes,omitempty"`
+	HomeContinue map[string]HomeContinueCache `json:"homeContinue,omitempty"`
 	// Usage records the last write time for each cache entry. It is keyed by
 	// cache kind and entry key so identical page/detail keys stay independent.
 	Usage map[string]time.Time `json:"usage,omitempty"`
@@ -51,9 +63,11 @@ const catalogCacheVersion = 3
 // These limits bound the persistent catalog file across all servers and
 // accounts. Details are the largest entries, while pages contain many items.
 const (
-	catalogMaxLibrarySets = 32
-	catalogMaxPages       = 256
-	catalogMaxDetails     = 512
+	catalogMaxLibrarySets  = 32
+	catalogMaxPages        = 256
+	catalogMaxDetails      = 512
+	catalogMaxHomeScopes   = 16
+	homeContinueCacheLimit = 200
 )
 
 type CatalogCache struct {
@@ -80,17 +94,26 @@ func catalogNeedsMoreVisibleItems(visibleCount int, state *CatalogState) bool {
 func NewCatalogCache() *CatalogCache {
 	dir, err := os.UserConfigDir()
 	if err != nil {
-		data := catalogDisk{Version: catalogCacheVersion, Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}, Details: map[string]MediaItem{}, Usage: map[string]time.Time{}}
+		data := newCatalogDisk()
 		return &CatalogCache{data: data}
 	}
 	dir = filepath.Join(dir, "FnMovie")
 	_ = os.MkdirAll(dir, 0700)
-	c := &CatalogCache{path: filepath.Join(dir, "catalog.json"), data: catalogDisk{Version: catalogCacheVersion, Pages: map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{}, Details: map[string]MediaItem{}, Usage: map[string]time.Time{}}}
+	c := &CatalogCache{path: filepath.Join(dir, "catalog.json"), data: newCatalogDisk()}
 	if raw, err := os.ReadFile(c.path); err == nil {
 		_ = json.Unmarshal(raw, &c.data)
 	}
 	migrateCatalogDisk(&c.data)
 	return c
+}
+
+func newCatalogDisk() catalogDisk {
+	return catalogDisk{
+		Version: catalogCacheVersion,
+		Pages:   map[string]CatalogPage{}, Libraries: map[string][]MediaLibrary{},
+		Details: map[string]MediaItem{}, HomeHeroes: map[string]HomeHeroesCache{},
+		HomeContinue: map[string]HomeContinueCache{}, Usage: map[string]time.Time{},
+	}
 }
 
 func migrateCatalogDisk(data *catalogDisk) {
@@ -111,12 +134,20 @@ func migrateCatalogDisk(data *catalogDisk) {
 	if data.Details == nil {
 		data.Details = map[string]MediaItem{}
 	}
+	if data.HomeHeroes == nil {
+		data.HomeHeroes = map[string]HomeHeroesCache{}
+	}
+	if data.HomeContinue == nil {
+		data.HomeContinue = map[string]HomeContinueCache{}
+	}
 	if data.Usage == nil {
 		data.Usage = map[string]time.Time{}
 	}
 	trimCatalogEntries(data.Libraries, data.Usage, "libraries", catalogMaxLibrarySets)
 	trimCatalogEntries(data.Pages, data.Usage, "pages", catalogMaxPages)
 	trimCatalogEntries(data.Details, data.Usage, "details", catalogMaxDetails)
+	trimCatalogEntries(data.HomeHeroes, data.Usage, "home-heroes", catalogMaxHomeScopes)
+	trimCatalogEntries(data.HomeContinue, data.Usage, "home-continue", catalogMaxHomeScopes)
 }
 
 func catalogUsageKey(kind, key string) string { return kind + "\x00" + key }
@@ -187,6 +218,90 @@ func catalogCacheScope(libraryID, mediaType string) string {
 		return "@system:" + mediaType
 	}
 	return libraryID + "@type:" + mediaType
+}
+
+func homeHeroesCacheKey(serverURL string, libraries []MediaLibrary, username ...string) string {
+	ids := make([]string, 0, len(libraries))
+	seen := make(map[string]bool, len(libraries))
+	for _, library := range libraries {
+		if library.ID != "" && !seen[library.ID] {
+			seen[library.ID] = true
+			ids = append(ids, library.ID)
+		}
+	}
+	sort.Strings(ids)
+	sum := sha256.Sum256([]byte(strings.Join(ids, "\x00")))
+	return catalogServerKey(serverURL, username...) + ":" + hex.EncodeToString(sum[:12])
+}
+
+func homeCacheMedia(item MediaItem) MediaItem {
+	item.Genres = append([]string(nil), item.Genres...)
+	item.Countries = append([]string(nil), item.Countries...)
+	item.Raw = nil
+	item.Sources = nil
+	item.Cast = nil
+	item.Episodes = nil
+	item.Seasons = nil
+	return item
+}
+
+func cloneHomeHeroes(items []MediaItem) []MediaItem {
+	if len(items) > homeHighlightLimit {
+		items = items[:homeHighlightLimit]
+	}
+	out := make([]MediaItem, len(items))
+	for i, item := range items {
+		out[i] = homeCacheMedia(item)
+	}
+	return out
+}
+
+func cloneHomeContinue(items []ContinueWatchingItem) []ContinueWatchingItem {
+	if len(items) > homeContinueCacheLimit {
+		items = items[:homeContinueCacheLimit]
+	}
+	out := make([]ContinueWatchingItem, len(items))
+	for i, item := range items {
+		item.Media = homeCacheMedia(item.Media)
+		out[i] = item
+	}
+	return out
+}
+
+func (c *CatalogCache) HomeHeroes(serverURL string, libraries []MediaLibrary, username ...string) ([]MediaItem, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.data.HomeHeroes[homeHeroesCacheKey(serverURL, libraries, username...)]
+	return cloneHomeHeroes(entry.Items), ok
+}
+
+func (c *CatalogCache) SetHomeHeroes(serverURL string, libraries []MediaLibrary, items []MediaItem, username ...string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ensureUsageLocked()
+	key := homeHeroesCacheKey(serverURL, libraries, username...)
+	c.data.HomeHeroes[key] = HomeHeroesCache{Items: cloneHomeHeroes(items), UpdatedAt: time.Now()}
+	recordCatalogWrite(c.data.Usage, "home-heroes", key)
+	trimCatalogEntries(c.data.HomeHeroes, c.data.Usage, "home-heroes", catalogMaxHomeScopes)
+	c.saveLocked()
+}
+
+func (c *CatalogCache) HomeContinue(serverURL string, username ...string) ([]ContinueWatchingItem, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	entry, ok := c.data.HomeContinue[catalogServerKey(serverURL, username...)]
+	return cloneHomeContinue(entry.Items), ok
+}
+
+func (c *CatalogCache) SetHomeContinue(serverURL string, items []ContinueWatchingItem, username ...string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ensureUsageLocked()
+	key := catalogServerKey(serverURL, username...)
+	c.data.HomeContinue[key] = HomeContinueCache{Items: cloneHomeContinue(items), UpdatedAt: time.Now()}
+	recordCatalogWrite(c.data.Usage, "home-continue", key)
+	trimCatalogEntries(c.data.HomeContinue, c.data.Usage, "home-continue", catalogMaxHomeScopes)
+	c.saveLocked()
 }
 
 func (c *CatalogCache) Libraries(serverURL string, username ...string) []MediaLibrary {

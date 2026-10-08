@@ -38,3 +38,17 @@ func (c *Content) SetOpacity(window *mygo.Window, opacity float64) {
 		c.presenter.setOpacity(window, opacity)
 	}
 }
+
+// SetIgnoreMouseEvents makes a per-pixel playback surface click-through while
+// preserving the native layered-window mode used by its presenter.
+func SetIgnoreMouseEvents(window *mygo.Window, ignore bool) {
+	setIgnoreMouseEvents(window, ignore)
+}
+
+func ignoreMouseEventsStyle(style uintptr, ignore bool) uintptr {
+	const wsExTransparent = uintptr(0x00000020)
+	if ignore {
+		return style | wsExTransparent
+	}
+	return style &^ wsExTransparent
+}

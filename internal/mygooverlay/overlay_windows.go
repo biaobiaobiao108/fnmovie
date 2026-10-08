@@ -22,6 +22,7 @@ var (
 	getDC         = user32.NewProc("GetDC")
 	getClientRect = user32.NewProc("GetClientRect")
 	releaseDC     = user32.NewProc("ReleaseDC")
+	setWindowPos  = user32.NewProc("SetWindowPos")
 	createDC      = gdi32.NewProc("CreateCompatibleDC")
 	deleteDC      = gdi32.NewProc("DeleteDC")
 	createDIB     = gdi32.NewProc("CreateDIBSection")
@@ -58,6 +59,25 @@ func attach(conn *surface.Conn) *presenter {
 	setWindowLong.Call(p.hwnd, exStyle, style|0x80000) // WS_EX_LAYERED
 	conn.Surface = p
 	return p
+}
+
+func setIgnoreMouseEvents(window *mygo.Window, ignore bool) {
+	if window == nil {
+		return
+	}
+	const (
+		gwlExStyle      = ^uintptr(19) // GWL_EXSTYLE (-20)
+		swpFrameChanged = uintptr(0x0020)
+		swpNoActivate   = uintptr(0x0010)
+		swpNoZOrder     = uintptr(0x0004)
+		swpNoSize       = uintptr(0x0001)
+		swpNoMove       = uintptr(0x0002)
+	)
+	hwnd := window.NativeHandle()
+	style, _, _ := getWindowLong.Call(hwnd, gwlExStyle)
+	style = ignoreMouseEventsStyle(style, ignore)
+	setWindowLong.Call(hwnd, gwlExStyle, style)
+	setWindowPos.Call(hwnd, 0, 0, 0, 0, 0, swpFrameChanged|swpNoActivate|swpNoZOrder|swpNoSize|swpNoMove)
 }
 
 // Returning no GPU target selects MyGo's alpha-preserving software rasterizer.

@@ -101,6 +101,70 @@ func TestCatalogCacheIsolatesAccountsOnSameServer(t *testing.T) {
 	}
 }
 
+func TestHomeCachePersistsAndIsolatesAccountAndLibraryScope(t *testing.T) {
+	cache := &CatalogCache{path: filepath.Join(t.TempDir(), "catalog.json"), data: newCatalogDisk()}
+	server := "http://nas.example/v"
+	libraries := []MediaLibrary{{ID: "movies"}, {ID: "series"}}
+	heroes := []MediaItem{{ID: "hero", Title: "Cached hero", Raw: map[string]any{"secret": "discard"}}}
+	continueItems := []ContinueWatchingItem{{RecordGUID: "record", Position: 12, Duration: 120, Media: MediaItem{ID: "movie", Title: "Cached film", Raw: map[string]any{"large": "discard"}}}}
+	cache.SetHomeHeroes(server, libraries, heroes, "alice")
+	cache.SetHomeContinue(server, continueItems, "alice")
+
+	reloaded := &CatalogCache{path: cache.path, data: newCatalogDisk()}
+	raw, err := os.ReadFile(cache.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &reloaded.data); err != nil {
+		t.Fatal(err)
+	}
+	migrateCatalogDisk(&reloaded.data)
+	gotHeroes, ok := reloaded.HomeHeroes(server, []MediaLibrary{{ID: "series"}, {ID: "movies"}}, "alice")
+	if !ok || len(gotHeroes) != 1 || gotHeroes[0].Title != "Cached hero" || gotHeroes[0].Raw != nil {
+		t.Fatalf("cached heroes = %+v, found=%t", gotHeroes, ok)
+	}
+	gotContinue, ok := reloaded.HomeContinue(server, "alice")
+	if !ok || len(gotContinue) != 1 || gotContinue[0].Position != 12 || gotContinue[0].Media.Raw != nil {
+		t.Fatalf("cached continue = %+v, found=%t", gotContinue, ok)
+	}
+	if _, ok := reloaded.HomeHeroes(server, []MediaLibrary{{ID: "other"}}, "alice"); ok {
+		t.Fatal("hero cache leaked across library scopes")
+	}
+	if _, ok := reloaded.HomeHeroes(server, libraries, "bob"); ok {
+		t.Fatal("hero cache leaked across accounts")
+	}
+	if _, ok := reloaded.HomeContinue(server, "bob"); ok {
+		t.Fatal("continue cache leaked across accounts")
+	}
+	if _, ok := reloaded.HomeContinue("http://other-nas.example/v", "alice"); ok {
+		t.Fatal("continue cache leaked across servers")
+	}
+}
+
+func TestHomeContinueCacheIsBounded(t *testing.T) {
+	cache := &CatalogCache{data: newCatalogDisk()}
+	items := make([]ContinueWatchingItem, homeContinueCacheLimit+1)
+	for i := range items {
+		items[i].RecordGUID = strconv.Itoa(i)
+	}
+	cache.SetHomeContinue("http://nas.example/v", items, "alice")
+	got, ok := cache.HomeContinue("http://nas.example/v", "alice")
+	if !ok || len(got) != homeContinueCacheLimit {
+		t.Fatalf("cached continue count=%d found=%t, want %d", len(got), ok, homeContinueCacheLimit)
+	}
+}
+
+func TestHomeLibraryScopeIgnoresOrderAndEmptyIDs(t *testing.T) {
+	left := []MediaLibrary{{ID: "movies"}, {}, {ID: "series"}}
+	right := []MediaLibrary{{ID: "series"}, {ID: "movies"}}
+	if !sameHomeLibraryScope(left, right) {
+		t.Fatal("library order or empty records changed the cache scope")
+	}
+	if sameHomeLibraryScope(left, []MediaLibrary{{ID: "movies"}}) {
+		t.Fatal("different library sets shared the same cache scope")
+	}
+}
+
 func TestCatalogCacheEvictsOldestEntriesWithinEachBound(t *testing.T) {
 	usage := map[string]time.Time{}
 	check := func(kind string, keys []string) {
