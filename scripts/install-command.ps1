@@ -13,11 +13,11 @@ $commandBlock = @'
 function fnmovie {
     $repoRoot = & git rev-parse --show-toplevel 2>$null
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace(($repoRoot -join ''))) {
-        throw 'Run fnmovie from inside a fnmovie Git worktree.'
+        throw '请在 fnmovie 项目的 Git 工作区内运行 fnmovie 命令。'
     }
     $releaseScript = Join-Path ($repoRoot -join '').Trim() 'scripts/release.ps1'
     if (-not (Test-Path -LiteralPath $releaseScript)) {
-        throw "Release script not found: $releaseScript"
+        throw "找不到发版脚本：$releaseScript"
     }
     & $releaseScript @args
 }
@@ -38,5 +38,5 @@ if ([regex]::IsMatch($profileContents, $blockPattern)) {
 $separator = if ($profileContents.Length -gt 0 -and -not $profileContents.EndsWith("`n")) { "`r`n`r`n" } elseif ($profileContents.Length -gt 0) { "`r`n" } else { '' }
 $profileContents += $separator + $commandBlock + "`r`n"
 [System.IO.File]::WriteAllText($profilePath, $profileContents, [System.Text.UTF8Encoding]::new($false))
-Write-Host "Installed fnmovie in PowerShell profile: $profilePath"
-Write-Host 'Open a new PowerShell session, or reload the profile, to use fnmovie patch|minor|major.'
+Write-Host "✅ 已将 fnmovie 命令安装到 PowerShell 配置：$profilePath" -ForegroundColor Green
+Write-Host '🔄 重新打开 PowerShell，或重新加载配置，即可运行 fnmovie patch|minor|major。' -ForegroundColor Cyan

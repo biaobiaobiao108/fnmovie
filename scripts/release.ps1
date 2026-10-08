@@ -28,41 +28,52 @@ function Invoke-Git {
 
     $result = Invoke-GitResult -GitArgs $GitArgs
     if ($result.ExitCode -ne 0) {
-        throw "git $($GitArgs -join ' ') failed (exit $($result.ExitCode)): $($result.Text)"
+        throw "Git 命令执行失败：git $($GitArgs -join ' ')（退出代码 $($result.ExitCode)）。$($result.Text)"
     }
     $result.Text
+}
+
+function Write-ReleaseMessage {
+    param(
+        [Parameter(Mandatory)][string]$Icon,
+        [Parameter(Mandatory)][string]$Message,
+        [ConsoleColor]$Color = [ConsoleColor]::Gray
+    )
+
+    Write-Host "$Icon $Message" -ForegroundColor $Color
 }
 
 $repoRoot = Invoke-Git -GitArgs @('-C', $PSScriptRoot, 'rev-parse', '--show-toplevel')
 Push-Location -LiteralPath $repoRoot
 try {
+    Write-ReleaseMessage '🔍' '正在检查工作区、远程分支和版本标签…' DarkCyan
     $branch = Invoke-Git -GitArgs @('branch', '--show-current')
     if ([string]::IsNullOrWhiteSpace($branch)) {
-        throw 'Release must run from a named branch, not detached HEAD.'
+        throw '请在具名分支上运行发版命令，不能处于分离的 HEAD 状态。'
     }
 
     $upstream = Invoke-Git -GitArgs @('rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}')
     $separator = $upstream.IndexOf('/')
     if ($separator -lt 1 -or $separator -eq ($upstream.Length - 1)) {
-        throw "Could not determine the remote branch from upstream '$upstream'."
+        throw "无法从上游分支 '$upstream' 中识别远程仓库和分支。"
     }
     $remote = $upstream.Substring(0, $separator)
     $remoteBranch = $upstream.Substring($separator + 1)
 
     $workingTree = Invoke-Git -GitArgs @('status', '--porcelain', '--untracked-files=all')
     if (-not [string]::IsNullOrWhiteSpace($workingTree)) {
-        throw 'Release requires a clean worktree. Commit, stash, or discard the current changes first.'
+        throw '工作区有未提交的改动。请先提交、暂存或处理这些改动，再运行发版命令。'
     }
 
-    Invoke-Git -GitArgs @('fetch', $remote, '--tags') | Out-Host
+    Invoke-Git -GitArgs @('fetch', $remote, '--tags') | Out-Null
     $counts = (Invoke-Git -GitArgs @('rev-list', '--left-right', '--count', "$upstream...HEAD")) -split '\s+'
     if ($counts.Count -ne 2) {
-        throw "Could not compare HEAD with '$upstream'."
+        throw "无法比较当前分支与上游分支 '$upstream'。"
     }
     $behind = [int]$counts[0]
     $ahead = [int]$counts[1]
     if ($behind -gt 0) {
-        throw "Branch '$branch' is behind '$upstream' by $behind commit(s). Pull or rebase before releasing."
+        throw "当前分支 '$branch' 落后上游 '$upstream' $behind 个提交。请先拉取或变基，再发版。"
     }
 
     Invoke-Git -GitArgs @('var', 'GIT_AUTHOR_IDENT') | Out-Null
@@ -73,7 +84,7 @@ try {
     $config = $configText | ConvertFrom-Json
     $currentVersion = [string]$config.version
     if ($currentVersion -notmatch '^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$') {
-        throw "mygo.json version '$currentVersion' is not a plain major.minor.patch version."
+        throw "mygo.json 中的版本号 '$currentVersion' 不符合 major.minor.patch 格式。"
     }
     $major = [long]::Parse($Matches[1], [Globalization.CultureInfo]::InvariantCulture)
     $minor = [long]::Parse($Matches[2], [Globalization.CultureInfo]::InvariantCulture)
@@ -90,24 +101,31 @@ try {
         if ([string]::IsNullOrWhiteSpace($remoteTag)) {
             $head = Invoke-Git -GitArgs @('rev-parse', 'HEAD')
             if ($localTag.ExitCode -eq 0 -and $localTag.Text -ne $head) {
-                throw "Local tag '$currentTag' points to a different commit; refusing to move it."
+                throw "本地标签 '$currentTag' 指向了其他提交，为避免覆盖标签，已停止发版。"
             }
             if ($localTag.ExitCode -gt 1) {
-                throw "Could not inspect local tag '$currentTag': $($localTag.Text)"
+                throw "无法检查本地标签 '$currentTag'：$($localTag.Text)"
             }
 
             if ($WhatIf) {
-                Write-Host "Would resume release $currentTag (branch is ahead by $ahead commit(s))."
+                Write-ReleaseMessage '🔁' "将继续发布 $currentTag。" DarkCyan
+                if ($ahead -gt 0) {
+                    Write-ReleaseMessage '⬆️' "同时推送分支 '$branch' 上已有的 $ahead 个本地提交。" DarkYellow
+                }
+                Write-ReleaseMessage '📋' "预览模式结束，未修改文件或推送内容。" DarkGray
                 return
             }
             if ($localTag.ExitCode -ne 0) {
-                Invoke-Git -GitArgs @('tag', '-a', $currentTag, '-m', "$($config.name) $currentTag") | Out-Host
+                Write-ReleaseMessage '🏷️' "创建标签 $currentTag…" DarkCyan
+                Invoke-Git -GitArgs @('tag', '-a', $currentTag, '-m', "$($config.name) $currentTag") | Out-Null
             }
             if ($ahead -gt 0) {
-                Invoke-Git -GitArgs @('push', $remote, "HEAD:refs/heads/$remoteBranch") | Out-Host
+                Write-ReleaseMessage '⬆️' "推送分支 '$branch'…" DarkCyan
+                Invoke-Git -GitArgs @('push', $remote, "HEAD:refs/heads/$remoteBranch") | Out-Null
             }
-            Invoke-Git -GitArgs @('push', $remote, "refs/tags/$currentTag") | Out-Host
-            Write-Host "Resumed and pushed release $currentTag. GitHub Actions will build and publish it."
+            Write-ReleaseMessage '⬆️' "推送标签 $currentTag…" DarkCyan
+            Invoke-Git -GitArgs @('push', $remote, "refs/tags/$currentTag") | Out-Null
+            Write-ReleaseMessage '✅' "$currentTag 已发布，GitHub Actions 将自动构建 Windows amd64 程序并创建 Release。" Green
             return
         }
     }
@@ -122,46 +140,62 @@ try {
 
     $localTag = Invoke-GitResult -GitArgs @('show-ref', '--verify', '--quiet', "refs/tags/$nextTag")
     if ($localTag.ExitCode -eq 0) {
-        throw "Local tag '$nextTag' already exists."
+        throw "本地标签 '$nextTag' 已存在，无法重复发布。"
     }
     if ($localTag.ExitCode -ne 1) {
-        throw "Could not check local tag '$nextTag': $($localTag.Text)"
+        throw "无法检查本地标签 '$nextTag'：$($localTag.Text)"
     }
     $remoteTag = Invoke-Git -GitArgs @('ls-remote', '--refs', $remote, "refs/tags/$nextTag")
     if (-not [string]::IsNullOrWhiteSpace($remoteTag)) {
-        throw "Remote tag '$nextTag' already exists."
+        throw "远程标签 '$nextTag' 已存在，无法重复发布。"
     }
 
     $versionPattern = '(?m)^(\s*"version"\s*:\s*")[^"]+("\s*,?\s*)$'
     $versionMatches = [regex]::Matches($configText, $versionPattern)
     if ($versionMatches.Count -ne 1) {
-        throw 'Expected exactly one top-level version field in mygo.json.'
+        throw 'mygo.json 中应当且只能有一个顶层 version 字段。'
     }
     $updatedConfig = [regex]::Replace($configText, $versionPattern, ('${1}' + $nextVersion + '${2}'), 1)
     $null = $updatedConfig | ConvertFrom-Json
 
     if ($WhatIf) {
-        Write-Host "Would bump $currentVersion -> $nextVersion ($Level), commit mygo.json, create tag $nextTag, then push '$branch' and the tag."
-        if ($ahead -gt 0) {
-            Write-Host "This will also push the $ahead already-committed local commit(s) on '$branch'."
+        $levelName = switch ($Level) {
+            'patch' { '补丁版本' }
+            'minor' { '次版本' }
+            'major' { '主版本' }
         }
+        Write-ReleaseMessage '📦' "版本：$currentVersion → $nextVersion（$levelName）" Cyan
+        Write-ReleaseMessage '📝' "将更新 mygo.json 并创建提交，然后创建标签 $nextTag。" Gray
+        Write-ReleaseMessage '⬆️' "将推送分支 '$branch' 和标签 $nextTag。" Gray
+        if ($ahead -gt 0) {
+            Write-ReleaseMessage '⚠️' "还会一并推送分支上的 $ahead 个已有本地提交。" DarkYellow
+        }
+        Write-ReleaseMessage '📋' '预览模式结束，未修改文件或推送内容。' DarkGray
         return
     }
 
+    Write-ReleaseMessage '📦' "准备发布：$currentVersion → $nextVersion" Cyan
+    if ($ahead -gt 0) {
+        Write-ReleaseMessage 'ℹ️' "分支 '$branch' 还有 $ahead 个已提交的本地提交，也会一并推送。" DarkYellow
+    }
     [System.IO.File]::WriteAllText($configPath, $updatedConfig, [System.Text.UTF8Encoding]::new($false))
 
-    Invoke-Git -GitArgs @('add', '--', 'mygo.json') | Out-Host
-    Invoke-Git -GitArgs @('commit', '-m', "Bump application version to $nextVersion") | Out-Host
-    Invoke-Git -GitArgs @('tag', '-a', $nextTag, '-m', "$($config.name) $nextTag") | Out-Host
+    Write-ReleaseMessage '📝' '更新版本号并创建提交…' DarkCyan
+    Invoke-Git -GitArgs @('add', '--', 'mygo.json') | Out-Null
+    Invoke-Git -GitArgs @('commit', '-m', "Bump application version to $nextVersion") | Out-Null
+    Write-ReleaseMessage '🏷️' "创建标签 $nextTag…" DarkCyan
+    Invoke-Git -GitArgs @('tag', '-a', $nextTag, '-m', "$($config.name) $nextTag") | Out-Null
 
     try {
-        Invoke-Git -GitArgs @('push', $remote, "HEAD:refs/heads/$remoteBranch") | Out-Host
-        Invoke-Git -GitArgs @('push', $remote, "refs/tags/$nextTag") | Out-Host
+        Write-ReleaseMessage '⬆️' "推送分支 '$branch'…" DarkCyan
+        Invoke-Git -GitArgs @('push', $remote, "HEAD:refs/heads/$remoteBranch") | Out-Null
+        Write-ReleaseMessage '⬆️' "推送标签 $nextTag…" DarkCyan
+        Invoke-Git -GitArgs @('push', $remote, "refs/tags/$nextTag") | Out-Null
     } catch {
-        throw "Release $nextTag is committed and tagged locally, but a push failed. Run 'fnmovie $Level' again to resume, or push the branch and tag manually. $($_.Exception.Message)"
+        throw "$nextTag 已在本地提交并创建标签，但推送失败。再次运行 'fnmovie $Level' 可继续发布；也可以手动推送分支和标签。$($_.Exception.Message)"
     }
 
-    Write-Host "Pushed release $nextTag. GitHub Actions will build and publish it."
+    Write-ReleaseMessage '✅' "$nextTag 已推送，GitHub Actions 将自动构建 Windows amd64 程序并创建 Release。" Green
 } finally {
     Pop-Location
 }
