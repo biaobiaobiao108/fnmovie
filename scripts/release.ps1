@@ -41,8 +41,8 @@ function Write-ReleaseMessage {
         [ConsoleColor]$MessageColor = [ConsoleColor]::Gray
     )
 
-    Write-Host " $Glyph " -NoNewline -ForegroundColor $IconColor
-    Write-Host $Message -ForegroundColor $MessageColor
+    Write-Host " $Glyph" -NoNewline -ForegroundColor $IconColor
+    Write-Host " $Message" -ForegroundColor $MessageColor
 }
 
 $repoRoot = Invoke-Git -GitArgs @('-C', $PSScriptRoot, 'rev-parse', '--show-toplevel')
