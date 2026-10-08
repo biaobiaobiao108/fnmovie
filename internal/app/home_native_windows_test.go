@@ -42,9 +42,19 @@ func TestHomeNavigationAndVirtualization(t *testing.T) {
 	if a.home.HeroIndex != 1 || a.selected != nil {
 		t.Fatalf("arrow navigated away from carousel: index=%d selected=%v", a.home.HeroIndex, a.selected)
 	}
-	if !tester.HasText("还没有观看记录") {
-		t.Fatal("empty continue state is not visible")
+	if tester.HasText("还没有观看记录") || tester.HasText("正在读取观看记录") {
+		t.Fatal("home should keep the empty continue area free of transient status text")
 	}
+	emptyHero, _ := tester.Find("下一张海报")
+	a.home.ContinueLoading = true
+	a.home.ContinueErr = "观看记录暂不可用"
+	a.home.HeroErr = "推荐读取部分失败"
+	tester.Frame()
+	statusHero, _ := tester.Find("下一张海报")
+	if emptyHero != statusHero {
+		t.Fatalf("transient home status changed carousel layout: before=%+v after=%+v", emptyHero, statusHero)
+	}
+	a.home.ContinueLoading, a.home.ContinueErr, a.home.HeroErr = false, "", ""
 	a.home.Continue = make([]ContinueWatchingItem, 1000)
 	for i := range a.home.Continue {
 		a.home.Continue[i] = ContinueWatchingItem{RecordGUID: fmt.Sprintf("record-%d", i), Media: MediaItem{Title: fmt.Sprintf("继续影片 %d", i)}, Position: 120, Duration: 3600}
