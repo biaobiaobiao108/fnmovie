@@ -17,7 +17,7 @@ var homeNextIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/sv
 
 // Keep both home sections in the available viewport; only the record row scrolls.
 func homeViewportLayout(width, height float32, records, status, partialError bool) (heroHeight, cardWidth, rowHeight float32) {
-	cardWidth = min(float32(272), max(float32(200), (height-300)*16/9))
+	cardWidth = min(float32(240), max(float32(200), (height-300)*16/9))
 	rowHeight = cardWidth*9/16 + 58
 	continueHeight := float32(38 + 10 + 64)
 	if records {
@@ -154,7 +154,7 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 		}
 		if len(a.home.Heroes) > 1 {
 			arrowTop := height/2 - 20
-			if height < 460 {
+			if height < 520 {
 				arrowTop = 16
 			}
 			for _, direction := range []int{-1, 1} {
@@ -289,7 +289,7 @@ func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, wi
 		}
 		ui.Row(c).Width(width).Gap(6).AlignItems(ui.Center).Children(func() {
 			ui.Column(c).Grow(1).Gap(3).Children(func() {
-				ui.Text(c, media.Title).FontSize(15).Bold().SingleLine()
+				ui.Text(c, media.Title).FontSize(14).Bold().SingleLine()
 				if subtitle := homeContinueSubtitle(media); subtitle != "" {
 					ui.Text(c, subtitle).FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
 				}
@@ -332,9 +332,9 @@ func (a *appState) homeContinueGrid(c *ui.Context) {
 		})
 		a.homeContinueStatus(c)
 		advanceSmoothScroll(c, &a.home.GridScroll, &a.home.GridAnimation)
-		grid := ui.GridView(c, &a.home.Grid, len(a.home.Continue), 272, 224, func(i int) {
+		grid := ui.GridView(c, &a.home.Grid, len(a.home.Continue), 240, 198, func(i int) {
 			if i < len(a.home.Continue) {
-				a.homeContinueCard(c, a.home.Continue[i], 272)
+				a.homeContinueCard(c, a.home.Continue[i], 240)
 			}
 		}).Grow(1).FillHeight().FillWidth()
 		bindSmoothScroll(c, grid, &a.home.GridScroll, &a.home.GridAnimation)

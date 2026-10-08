@@ -506,13 +506,13 @@ func (a *appState) libraryView(c *ui.Context) {
 		gridCount++
 	}
 	windowWidth, _ := c.Size()
-	gridColumns := max(1, int((windowWidth-273)/170))
-	grid := ui.GridView(c, &a.grid, gridCount, 168, 326, func(i int) {
+	gridColumns := max(1, int((windowWidth-273)/152))
+	grid := ui.GridView(c, &a.grid, gridCount, 150, 286, func(i int) {
 		if i >= len(items) {
 			if state != nil && !state.Loading && !state.Exhausted && !state.PageAutoRequested && state.Err == "" {
 				a.loadNextCatalogPage(false)
 			}
-			ui.Box(c).Size(168, 252).Center().Children(func() {
+			ui.Box(c).Size(150, 225).Center().Children(func() {
 				label := "继续加载…"
 				if state != nil && state.Err != "" {
 					if actionButton(c, "加载失败，点击重试").Padding(8, 10).Clicked() {
@@ -528,28 +528,28 @@ func (a *appState) libraryView(c *ui.Context) {
 		}
 		item := items[i]
 		if next := i + gridColumns; next < len(items) {
-			a.requestPoster(items[next], 168, 252)
+			a.requestPoster(items[next], 150, 225)
 		}
 		card := actionButton(c, "").Key(item.ID).Padding(0).BorderWidth(0).Background(ui.Color{}).TextColor(t.Text)
 		card.Children(func() {
 			ui.Column(c).Gap(8).Center().Children(func() {
-				cover := ui.Box(c).Size(168, 252).Radius(10).Clip().BorderWidth(0)
+				cover := ui.Box(c).Size(150, 225).Radius(10).Clip().BorderWidth(0)
 				cover.Children(func() {
-					poster := a.imageFor(item, 168, 252)
+					poster := a.imageFor(item, 150, 225)
 					if poster != nil {
-						ui.Image(c, poster).Size(168, 252).Fit(ui.Cover)
+						ui.Image(c, poster).Size(150, 225).Fit(ui.Cover)
 					} else {
-						ui.Box(c).Size(168, 252).Background(ui.Hex("#e8e8e2")).Center().Children(func() {
+						ui.Box(c).Size(150, 225).Background(ui.Hex("#e8e8e2")).Center().Children(func() {
 							ui.Text(c, "FILM").FontSize(10).Bold().TextColor(ui.Hex("#969d96"))
 						})
 					}
 					if item.Rating != "" {
 						ui.Text(c, item.Rating).Absolute().Top(10).Left(10).Padding(4, 8).Radius(6).
-							Background(ui.Hex("#376655")).FontSize(14).Bold().TextColor(ui.Hex("#fffefa"))
+							Background(ui.Hex("#376655")).FontSize(12).Bold().TextColor(ui.Hex("#fffefa"))
 					}
 				})
-				ui.Text(c, item.Title).FontSize(16).Bold().TextAlign(ui.Center).SingleLine()
-				ui.Text(c, cardCaption(item)).FontSize(14).TextColor(t.TextMuted).TextAlign(ui.Center).SingleLine()
+				ui.Text(c, item.Title).FontSize(14).Bold().TextAlign(ui.Center).SingleLine()
+				ui.Text(c, cardCaption(item)).FontSize(12).TextColor(t.TextMuted).TextAlign(ui.Center).SingleLine()
 			})
 		})
 		if card.Clicked() {
@@ -1458,7 +1458,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 			} else {
 				items := a.personItems
 				advanceSmoothScroll(c, &a.personScroll, &a.personScrollAnimation)
-				grid := ui.GridView(c, &a.personGrid, len(items), 168, 326, func(i int) {
+				grid := ui.GridView(c, &a.personGrid, len(items), 150, 286, func(i int) {
 					if i >= len(items) {
 						return
 					}
@@ -1467,13 +1467,13 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 						Background(ui.Color{}).TextColor(t.Text)
 					card.Children(func() {
 						ui.Column(c).Gap(8).Center().Children(func() {
-							cover := ui.Box(c).Size(168, 252).Radius(10).Clip().BorderWidth(0)
+							cover := ui.Box(c).Size(150, 225).Radius(10).Clip().BorderWidth(0)
 							cover.Children(func() {
-								poster := a.imageFor(item, 168, 252)
+								poster := a.imageFor(item, 150, 225)
 								if poster != nil {
-									ui.Image(c, poster).Size(168, 252).Fit(ui.Cover)
+									ui.Image(c, poster).Size(150, 225).Fit(ui.Cover)
 								} else {
-									ui.Box(c).Size(168, 252).Background(ui.Hex("#e8e8e2")).Center().Children(func() {
+									ui.Box(c).Size(150, 225).Background(ui.Hex("#e8e8e2")).Center().Children(func() {
 										ui.Text(c, "FILM").FontSize(10).Bold().TextColor(ui.Hex("#969d96"))
 									})
 								}
