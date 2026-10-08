@@ -27,6 +27,8 @@ var nativeOverlayResult error
 func TestMain(m *testing.M) {
 	if os.Getenv("FNMOVIE_NATIVE_UI_TEST") == "1" {
 		nativeOverlayResult = runNativePlaybackOverlayComposition()
+	} else if os.Getenv("FNMOVIE_NATIVE_HOME_TEST") == "1" {
+		nativeOverlayResult = runNativeHomeVerification()
 	}
 	os.Exit(m.Run())
 }

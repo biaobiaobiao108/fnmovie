@@ -19,6 +19,7 @@ import (
 var appIconPNG []byte
 
 type appState struct {
+	home                         homeState
 	window                       *mygo.Window
 	settings                     Settings
 	serverAddress                string
@@ -126,7 +127,7 @@ func Run() {
 	if iconErr != nil {
 		log.Printf("app icon: %v", iconErr)
 	}
-	app := &appState{settings: settings, serverAddress: settings.ServerURL, section: "movies", status: "连接飞牛影视服务器后开始浏览", loginOpen: true, player: NewPlayer(), posters: NewPosterLoader(), catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache(), favoritePending: map[string]bool{}, icon: icon}
+	app := &appState{settings: settings, serverAddress: settings.ServerURL, section: "home", status: "连接飞牛影视服务器后开始浏览", loginOpen: true, player: NewPlayer(), posters: NewPosterLoader(), catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache(), favoritePending: map[string]bool{}, icon: icon}
 	if settings.ServerURL != "" {
 		app.server = NewServer(settings.ServerURL, "")
 		if settings.Username != "" {
@@ -150,6 +151,8 @@ func Run() {
 		app.displayScale = windowScale(app.window.NativeHandle())
 		app.window.OnResize(app.updateDisplayScale)
 		app.window.OnMove(app.updateDisplayScale)
+		app.window.OnMinimize(app.pauseHomeCarousel)
+		app.window.OnRestore(func() { app.syncHomeLifecycle() })
 		if err := app.window.SetIcon(appIconPNG); err != nil {
 			log.Printf("set app icon: %v", err)
 		}
@@ -158,13 +161,14 @@ func Run() {
 			app.loadLibraries()
 		}
 	})
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { app.stopPlaybackAndWait() })
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { app.resetHome(); app.home.Closed = true; app.stopPlaybackAndWait() })
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
 }
 
 func (a *appState) view(c *ui.Context) {
+	a.syncHomeLifecycle()
 	c.SetTheme(movieTheme())
 	a.advancePlayerFullscreen(c)
 	if a.playback.Active {
@@ -182,6 +186,8 @@ func (a *appState) view(c *ui.Context) {
 					a.personView(c, *a.selectedPerson)
 				case a.selected != nil:
 					a.detailView(c, *a.selected)
+				case a.section == "home":
+					a.homeView(c)
 				default:
 					a.libraryView(c)
 				}
@@ -189,6 +195,7 @@ func (a *appState) view(c *ui.Context) {
 		})
 	})
 	a.loginModal(c)
+	a.syncHomeCarousel()
 }
 
 func movieTheme() *ui.Theme {
@@ -223,6 +230,7 @@ func (a *appState) sidebar(c *ui.Context) {
 			})
 		})
 		ui.Box(c).Height(15)
+		a.navButton(c, "", "首页", "home")
 		a.navButton(c, "▣", "电影", "movies")
 		a.navButton(c, "▤", "电视节目", "tv")
 		a.navButton(c, "♡", "我的收藏", "favorites")
@@ -301,11 +309,18 @@ func (a *appState) navButton(c *ui.Context, icon, label, key string) {
 		}
 	}
 	e.Children(func() {
-		ui.Text(c, icon).FontSize(16).Width(20).TextAlign(ui.Center)
+		if key == "home" {
+			ui.Icon(c, homeNavigationIcon).Size(20, 20)
+		} else {
+			ui.Text(c, icon).FontSize(16).Width(20).TextAlign(ui.Center)
+		}
 		ui.Text(c, label).FontSize(13)
 	})
 	if e.Clicked() {
 		a.section = key
+		if key == "home" {
+			a.home.AllContinue = false
+		}
 		a.closeDetail()
 		a.closePerson()
 		a.query = ""
@@ -323,7 +338,7 @@ func (a *appState) topbar(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(14).Children(func() {
 		ui.Column(c).Grow(1).Gap(3).Children(func() {
-			label := map[string]string{"movies": "电影", "tv": "电视节目", "favorites": "我的收藏", "settings": "服务器设置", "library": a.selectedLibraryName()}[a.section]
+			label := map[string]string{"home": "首页", "movies": "电影", "tv": "电视节目", "favorites": "我的收藏", "settings": "服务器设置", "library": a.selectedLibraryName()}[a.section]
 			if label == "" {
 				label = "影视库"
 			}
@@ -339,7 +354,7 @@ func (a *appState) topbar(c *ui.Context) {
 				a.loadLibraries()
 			}
 		}
-		if a.loggedIn && a.section != "settings" {
+		if a.loggedIn && a.section != "settings" && (a.section != "home" || a.selected != nil || a.selectedPerson != nil) {
 			if a.searchPending && c.Now().Sub(a.searchChangedAt) >= 300*time.Millisecond {
 				a.searchPending = false
 				a.loadLibrary()
@@ -1100,6 +1115,7 @@ func (a *appState) settingsView(c *ui.Context) {
 }
 
 func (a *appState) logout() {
+	a.resetHome()
 	serverURL := a.settings.ServerURL
 	if a.loginCancel != nil {
 		a.loginCancel()
@@ -1128,7 +1144,7 @@ func (a *appState) logout() {
 	a.server = nil
 	a.favoritePending = map[string]bool{}
 	a.seriesEpisodeRequest++
-	a.section = "movies"
+	a.section = "home"
 	a.status = "已退出登录"
 	_ = DeleteCredential(serverURL)
 	_ = SaveSettings(a.settings)
@@ -1539,6 +1555,7 @@ func (a *appState) login() {
 				return
 			}
 			a.server = server
+			a.resetHome()
 			a.settings = settings
 			if a.libraryCancel != nil {
 				a.libraryCancel()
@@ -1557,7 +1574,7 @@ func (a *appState) login() {
 			a.catalogs = map[string]*CatalogState{}
 			a.items = nil
 			a.closeDetail()
-			a.section = "movies"
+			a.section = "home"
 			a.libraryID = ""
 			a.status = "连接成功，正在读取影视库…"
 			a.loadLibraries()
@@ -1615,6 +1632,8 @@ func (a *appState) loadLibraries() {
 			}
 			a.libraryErr = ""
 			a.libraries = libraries
+			a.home.LibrariesReady = true
+			a.loadHomeHeroes(false)
 			if a.libraryID != "" {
 				found := false
 				for _, library := range libraries {
@@ -1646,6 +1665,11 @@ func (a *appState) loadLibraries() {
 
 func (a *appState) loadLibrary() {
 	if a.server == nil {
+		return
+	}
+	if a.section == "home" {
+		a.loadHomeHeroes(false)
+		a.loadContinueWatching(false)
 		return
 	}
 	if a.section == "library" && strings.TrimSpace(a.libraryID) == "" {
@@ -2114,6 +2138,11 @@ func (a *appState) stopPlayback() {
 					}
 				})
 			}
+			a.window.Update(func() {
+				if a.server == server && !a.home.Closed {
+					a.loadContinueWatching(true)
+				}
+			})
 		}()
 	}
 	if a.window != nil {

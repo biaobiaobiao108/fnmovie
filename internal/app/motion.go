@@ -21,6 +21,9 @@ func (a *appState) navigationKey() string {
 	if a.selected != nil {
 		return "detail:" + a.selected.ID
 	}
+	if a.section == "home" && a.home.AllContinue {
+		return "home:continue"
+	}
 	return "section:" + a.section + ":" + a.libraryID
 }
 

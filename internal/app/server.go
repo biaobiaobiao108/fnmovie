@@ -28,10 +28,11 @@ const (
 )
 
 type Server struct {
-	mu      sync.RWMutex
-	baseURL string
-	token   string
-	client  *http.Client
+	mu       sync.RWMutex
+	baseURL  string
+	token    string
+	client   *http.Client
+	homeGate chan struct{}
 }
 
 type MediaItem struct {
@@ -51,6 +52,10 @@ type MediaItem struct {
 	Rating         string
 	Overview       string
 	Poster         string
+	Backdrop       string
+	Logo           string
+	Genres         []string
+	Countries      []string
 	Favorite       bool
 	Watched        bool
 	AddedAt        string
@@ -470,6 +475,187 @@ func (s *Server) Detail(item MediaItem) (MediaItem, error) {
 	return mergeMediaDetail(item, detail), nil
 }
 
+// ItemDetailContext reads the current unified item endpoint without changing
+// the legacy detail flow used by existing pages.
+func (s *Server) ItemDetailContext(ctx context.Context, item MediaItem) (MediaItem, error) {
+	if strings.TrimSpace(item.ID) == "" {
+		return item, errors.New("媒体缺少标识")
+	}
+	release, err := s.acquireHomeRequest(ctx)
+	if err != nil {
+		return item, err
+	}
+	defer release()
+	var response any
+	if err := s.requestContext(ctx, "GET", "v1", "item/"+url.PathEscape(item.ID), nil, &response, s.tokenValue()); err != nil {
+		return item, err
+	}
+	return mergeMediaDetail(item, normalizeItem(detailObject(unwrapData(response)))), nil
+}
+
+type ContinueWatchingItem struct {
+	Media      MediaItem
+	RecordGUID string
+	ParentGUID string
+	Position   float64
+	Duration   float64
+}
+
+func (s *Server) ContinueWatchingContext(ctx context.Context) ([]ContinueWatchingItem, error) {
+	release, err := s.acquireHomeRequest(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
+	var response any
+	if err := s.requestContext(ctx, "GET", "v1", "play/list", nil, &response, s.tokenValue()); err != nil {
+		return nil, err
+	}
+	out := make([]ContinueWatchingItem, 0)
+	for _, object := range mapsFromList(unwrapData(response)) {
+		mediaObject := object
+		if nested, ok := object["item"].(map[string]any); ok {
+			mediaObject = nested
+		}
+		media := normalizeItem(mediaObject)
+		guid := firstString(object, "item_guid", "guid")
+		if guid == "" {
+			guid = media.ID
+		}
+		if media.ID == "" {
+			media.ID = guid
+		}
+		if guid == "" || media.Title == "" {
+			continue
+		}
+		parent := firstString(object, "parent_guid")
+		if parent == "" {
+			parent = media.SeriesParentID
+		}
+		position := nonnegativeNumber(object, "ts", "position", "playback_position")
+		duration := nonnegativeNumber(object, "duration", "total_duration")
+		if duration == 0 {
+			duration = nonnegativeNumber(mediaObject, "duration")
+		}
+		if video, ok := object["video_stream"].(map[string]any); ok && duration == 0 {
+			duration = nonnegativeNumber(video, "duration")
+		}
+		if duration > 0 && position > duration {
+			position = duration
+		}
+		out = append(out, ContinueWatchingItem{Media: media, RecordGUID: guid, ParentGUID: parent, Position: position, Duration: duration})
+	}
+	return out, nil
+}
+
+func nonnegativeNumber(object map[string]any, keys ...string) float64 {
+	value, err := strconv.ParseFloat(firstString(object, keys...), 64)
+	if err != nil || value < 0 || value != value || value > 1e12 {
+		return 0
+	}
+	return value
+}
+
+func metadataNames(value any) []string {
+	var out []string
+	if list, ok := value.([]any); ok {
+		for _, entry := range list {
+			name := anyString(entry)
+			if object, ok := entry.(map[string]any); ok {
+				name = firstString(object, "name", "title", "iso_3166_1")
+			}
+			if name != "" {
+				out = append(out, name)
+			}
+		}
+	} else if name := anyString(value); name != "" {
+		out = []string{name}
+	}
+	return out
+}
+
+// ContinueWatchingDetailContext follows only actual parent identifiers, up to
+// Episode -> Season -> TV. It never groups records by a title string.
+func (s *Server) ContinueWatchingDetailContext(ctx context.Context, record ContinueWatchingItem) (MediaItem, error) {
+	item, err := s.ItemDetailContext(ctx, record.Media)
+	if err != nil {
+		return item, err
+	}
+	if item.SeriesParentID == "" {
+		item.SeriesParentID = record.ParentGUID
+	}
+	seen := map[string]bool{item.ID: true}
+	for depth := 0; depth < 2 && (item.Kind == "episode" || item.Kind == "season"); depth++ {
+		parent := item.SeriesParentID
+		if item.SeriesID != "" {
+			parent = item.SeriesID
+		}
+		if parent == "" || seen[parent] {
+			break
+		}
+		seen[parent] = true
+		item, err = s.ItemDetailContext(ctx, MediaItem{ID: parent})
+		if err != nil {
+			return record.Media, err
+		}
+	}
+	return item, nil
+}
+
+func (s *Server) HomeCandidatesPageContext(ctx context.Context, libraryID string, page, pageSize int) ([]MediaItem, int, error) {
+	if strings.TrimSpace(libraryID) == "" {
+		return nil, 0, errors.New("首页候选必须指定影视库")
+	}
+	release, err := s.acquireHomeRequest(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer release()
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 || pageSize > 200 {
+		pageSize = 60
+	}
+	body := map[string]any{"ancestor_guid": libraryID, "page": page, "page_size": pageSize, "tags": map[string]any{"type": []string{"Movie", "TV"}}}
+	var response any
+	if err := s.requestContext(ctx, "POST", "v1", "item/list", body, &response, s.tokenValue()); err != nil {
+		return nil, 0, err
+	}
+	data := unwrapData(response)
+	items := filterLibraryItems(normalizeItems(findItemsList(data)), libraryID)
+	out := make([]MediaItem, 0, len(items))
+	for _, item := range items {
+		if item.Kind == "movie" || item.Kind == "tv" {
+			out = append(out, item)
+		}
+	}
+	total, _ := asInt(valueAt(data, "total"))
+	if total < int64(len(out)) {
+		total = int64(len(out))
+	}
+	return out, int(total), nil
+}
+
+func (s *Server) acquireHomeRequest(ctx context.Context) (func(), error) {
+	s.mu.Lock()
+	if s.homeGate == nil {
+		s.homeGate = make(chan struct{}, 2)
+	}
+	gate := s.homeGate
+	s.mu.Unlock()
+	select {
+	case gate <- struct{}{}:
+		if err := ctx.Err(); err != nil {
+			<-gate
+			return nil, err
+		}
+		return func() { <-gate }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func detailObject(value any) map[string]any {
 	object := firstObject(value)
 	for _, key := range []string{"item", "info", "detail", "movie", "tv"} {
@@ -492,6 +678,7 @@ func mergeMediaDetail(base, detail MediaItem) MediaItem {
 	}
 	if detail.Kind != "" {
 		base.Kind = detail.Kind
+		base.IsSeries = detail.IsSeries
 	}
 	if detail.Year != "" {
 		base.Year = detail.Year
@@ -504,6 +691,27 @@ func mergeMediaDetail(base, detail MediaItem) MediaItem {
 	}
 	if detail.Poster != "" {
 		base.Poster = detail.Poster
+	}
+	if detail.Backdrop != "" {
+		base.Backdrop = detail.Backdrop
+	}
+	if detail.Logo != "" {
+		base.Logo = detail.Logo
+	}
+	if len(detail.Genres) > 0 {
+		base.Genres = detail.Genres
+	}
+	if len(detail.Countries) > 0 {
+		base.Countries = detail.Countries
+	}
+	if detail.SeriesParentID != "" {
+		base.SeriesParentID = detail.SeriesParentID
+	}
+	if detail.SeasonNumber > 0 {
+		base.SeasonNumber = detail.SeasonNumber
+	}
+	if detail.EpisodeNumber > 0 {
+		base.EpisodeNumber = detail.EpisodeNumber
 	}
 	if detail.SeriesTitle != "" {
 		base.SeriesTitle = detail.SeriesTitle
@@ -1021,6 +1229,10 @@ func normalizeItem(object map[string]any) MediaItem {
 	item.Rating = formatRating(firstString(object, "rating", "score", "vote_average"))
 	item.Overview = firstString(object, "overview", "description", "summary", "plot")
 	item.Poster = firstImagePath(object, "poster", "posters", "poster_list", "poster_url", "posterUrl", "image", "image_url", "cover", "poster_path", "posterPath", "avatar", "photo", "profile_path", "head_path", "thumb")
+	item.Backdrop = firstImagePath(object, "backdrops", "backdrop", "backdrop_path", "backdrop_url")
+	item.Logo = firstImagePath(object, "logos", "logo", "logo_path", "logo_url")
+	item.Genres = metadataNames(object["genres"])
+	item.Countries = metadataNames(object["production_countries"])
 	item.Favorite = anyBool(object["favorite"]) || anyBool(object["is_favorite"]) || anyBool(object["isFavorite"])
 	item.Watched = anyBool(object["is_watched"]) || anyBool(object["watched"])
 	item.AddedAt = firstString(object, "create_time", "created_at", "ts", "release_date")

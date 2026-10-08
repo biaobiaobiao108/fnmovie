@@ -347,6 +347,13 @@ func (p *PosterLoader) Stats() (items int, bytes int64, pending int) {
 	return len(p.entries), p.used, len(p.pending)
 }
 
+// A pending backdrop must not cause an additional full-size poster decode.
+func (p *PosterLoader) HasFailed(remoteURL string, width, height int) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return time.Now().Before(p.failed[posterKey{URL: remoteURL, Width: width, Height: height}])
+}
+
 func loadPoster(server *Server, remoteURL string, maxWidth, maxHeight int) (*ui.Bitmap, int64, error) {
 	data, err := server.FetchImage(remoteURL)
 	if err != nil {
