@@ -87,6 +87,31 @@ func TestServerSessionLibraryAndPlayback(t *testing.T) {
 	}
 }
 
+func TestNormalizeResumePositionRestartsOnlyNearTheEnd(t *testing.T) {
+	tests := []struct {
+		name, want string
+		position   float64
+		duration   float64
+	}{
+		{name: "ordinary resume", position: 600, duration: 3600, want: "keep"},
+		{name: "inside two percent", position: 3540, duration: 3600, want: "restart"},
+		{name: "inside capped window", position: 7190, duration: 7200, want: "restart"},
+		{name: "outside capped window", position: 7070, duration: 7200, want: "keep"},
+		{name: "short video minimum window", position: 90, duration: 100, want: "restart"},
+		{name: "short video outside window", position: 80, duration: 100, want: "keep"},
+		{name: "exact end", position: 3600, duration: 3600, want: "restart"},
+		{name: "unknown duration", position: 200, duration: 0, want: "keep"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeResumePosition(tt.position, tt.duration)
+			if tt.want == "restart" && got != 0 || tt.want == "keep" && got != tt.position {
+				t.Fatalf("normalizeResumePosition(%v, %v)=%v, want %s", tt.position, tt.duration, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestServerListsAccessibleLibrariesAndScopesItems(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "session-token" {

@@ -933,6 +933,8 @@ func (s *Server) Playback(item MediaItem) (PlaybackResult, error) {
 	resumeAt, _ := info["ts"].(float64)
 	if resumeAt < 0 || duration > 0 && resumeAt > duration {
 		resumeAt = 0
+	} else {
+		resumeAt = normalizeResumePosition(resumeAt, duration)
 	}
 	if selected != nil {
 		candidate, err := s.absoluteURL(firstString(selected, "url"))
@@ -950,6 +952,29 @@ func (s *Server) Playback(item MediaItem) (PlaybackResult, error) {
 		}
 	}
 	return PlaybackResult{URL: s.endpoint("v1", "media/range/"+url.PathEscape(mediaGuid)), Quality: "NAS 原画", MediaID: mediaGuid, Duration: duration, ResumeAt: resumeAt}, nil
+}
+
+// A resume point at the very end leaves no time to interact with playback
+// controls and immediately completes the media. Restart near-complete items
+// so the user can replay or seek to a different position.
+func normalizeResumePosition(position, duration float64) float64 {
+	if position <= 0 || duration <= 0 || position >= duration {
+		if duration > 0 && position >= duration {
+			return 0
+		}
+		return position
+	}
+	threshold := duration * 0.02
+	if threshold < 15 {
+		threshold = 15
+	}
+	if threshold > 120 {
+		threshold = 120
+	}
+	if duration-position <= threshold {
+		return 0
+	}
+	return position
 }
 
 // ProxyPlayback streams media through a random loopback URL so mpv never needs
