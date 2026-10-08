@@ -404,9 +404,7 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 			backBtn.Background(ui.RGBA(255, 255, 255, 0.22))
 		}
 		backBtn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(16, 16) })
-		if backBtn.Clicked() {
-			a.stopPlayback()
-		}
+		backBtn.OnClick(a.stopPlayback)
 		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, a.playback.Title).FontSize(13).Bold().TextColor(ui.RGB(255, 255, 255)).SingleLine()
 			quality := strings.TrimSpace(a.playback.Quality)
@@ -420,31 +418,39 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	})
 }
 
-func (a *appState) playerTransport(c *ui.Context) {
-	maxPosition := maxFloat(1, a.playback.Duration)
-	if !a.seekDragging && !a.seekFeedback.Pending {
+// Input is applied after construction in MyGo 0.3. Preserve the model edit
+// until its change notice is observed, rather than restoring an old snapshot.
+func (a *appState) playerSeekSlider(c *ui.Context, maxPosition float64, commit func(float64)) {
+	slider := ui.Slider(c.Key("player-seek"), &a.seekSliderPosition, 0, maxPosition).Grow(1).Label("播放进度")
+	pressed, changed := slider.Pressed(), slider.Changed()
+	released := !pressed && a.seekDragging
+	if !pressed && !changed && !a.seekDragging && !a.seekFeedback.Pending {
 		a.seekSliderPosition = minFloat(maxPosition, maxFloat(0, a.playback.Position))
 	}
+	if pressed != a.seekDragging {
+		a.seekDragging = pressed
+		a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
+	}
+	if released {
+		commit(a.seekSliderPosition)
+		a.markPlayerOverlayActivity()
+	}
+	slider.OnChange(func() {
+		// Pointer edits remain local during a drag; keyboard edits commit once.
+		if !pressed && !released {
+			commit(a.seekSliderPosition)
+		}
+	})
+}
+
+func (a *appState) playerTransport(c *ui.Context) {
+	maxPosition := maxFloat(1, a.playback.Duration)
 	ui.Column(c).Label("播放控制栏").Absolute().Bottom(16).Left(32).Right(32).Padding(8, 18, 10, 18).Gap(4).Radius(22).
 		Background(ui.RGBA(18, 20, 24, 0.52)).Border(1, ui.RGBA(255, 255, 255, 0.18)).Children(func() {
 		// 上层：Apple 细致时间轨与时间标签
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, formatClock(a.seekDisplayPosition())).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
-			slider := ui.Slider(c, &a.seekSliderPosition, 0, maxPosition).Grow(1).Label("播放进度")
-			pressed := slider.Pressed()
-			changed := slider.Changed()
-			if pressed && !a.seekDragging {
-				a.seekDragging = true
-				a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
-			}
-			if !pressed && a.seekDragging {
-				a.seekDragging = false
-				a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
-				a.requestPlayerSeek(a.seekSliderPosition)
-				a.markPlayerOverlayActivity()
-			} else if changed && !pressed && !a.seekDragging {
-				a.requestPlayerSeek(a.seekSliderPosition)
-			}
+			a.playerSeekSlider(c, maxPosition, a.requestPlayerSeek)
 			ui.Text(c, formatClock(a.playback.Duration)).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
 			// Reserve the status slot so entering/leaving a seek never shifts the rail.
 			ui.Box(c).Width(72).Height(16).Children(func() {
@@ -466,17 +472,17 @@ func (a *appState) playerTransport(c *ui.Context) {
 				if a.playback.Muted || a.playback.Volume <= 0 {
 					volumeIcon = "muted"
 				}
-				if playerAppleIconButton(c, volumeIcon, "静音", 32, 17).Clicked() {
+				playerAppleIconButton(c, volumeIcon, "静音", 32, 17).OnClick(func() {
 					a.player.ToggleMute()
 					a.playback.Muted = !a.playback.Muted
 					a.markPlayerOverlayActivity()
-				}
-				volume := ui.Slider(c, &a.playback.Volume, 0, 100).Width(82)
+				})
+				volume := ui.Slider(c.Key("player-volume"), &a.playback.Volume, 0, 100).Width(82)
 				volumePressed := volume.Pressed()
-				if volume.Changed() {
+				volume.OnChange(func() {
 					a.player.SetVolume(a.playback.Volume)
 					a.markPlayerOverlayActivity()
-				}
+				})
 				if volumePressed {
 					a.volumeDragging = true
 					a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
@@ -488,10 +494,10 @@ func (a *appState) playerTransport(c *ui.Context) {
 
 			// 中央核心：-10s、大号圆形高光播放/暂停键、+10s
 			ui.Row(c).Grow(1).Basis(0).Gap(14).Center().Children(func() {
-				if playerAppleIconButton(c, "seek-back-10", "快退 10 秒", 34, 20).Clicked() {
+				playerAppleIconButton(c, "seek-back-10", "快退 10 秒", 34, 20).OnClick(func() {
 					a.requestPlayerSeekRelative(-10)
 					a.markPlayerOverlayActivity()
-				}
+				})
 
 				playIcon := "play"
 				if !a.playback.Paused {
@@ -510,16 +516,16 @@ func (a *appState) playerTransport(c *ui.Context) {
 					}
 					ui.Icon(c, playerOverlayIcons[playIcon]).Size(iconSize, iconSize)
 				})
-				if playBtn.Clicked() {
+				playBtn.OnClick(func() {
 					a.player.TogglePause()
 					a.playback.Paused = !a.playback.Paused
 					a.markPlayerOverlayActivity()
-				}
+				})
 
-				if playerAppleIconButton(c, "seek-forward-10", "快进 10 秒", 34, 20).Clicked() {
+				playerAppleIconButton(c, "seek-forward-10", "快进 10 秒", 34, 20).OnClick(func() {
 					a.requestPlayerSeekRelative(10)
 					a.markPlayerOverlayActivity()
-				}
+				})
 			})
 
 			// 右侧功能胶囊：倍速、字幕、音轨、全屏
@@ -531,12 +537,13 @@ func (a *appState) playerTransport(c *ui.Context) {
 				if a.window != nil && a.window.IsFullScreen() {
 					fullscreenIcon = "window"
 				}
-				if playerAppleIconButton(c, fullscreenIcon, "切换全屏", 32, 17).Clicked() {
+				reduceMotion := c.Preferences().ReduceMotion
+				playerAppleIconButton(c, fullscreenIcon, "切换全屏", 32, 17).OnClick(func() {
 					if a.window != nil {
-						a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
+						a.togglePlayerFullscreen(reduceMotion)
 					}
 					a.markPlayerOverlayActivity()
-				}
+				})
 			})
 		})
 	})
@@ -560,7 +567,7 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 		accessibleLabel = "音轨"
 	}
 
-	var btn *ui.Element
+	var btn ui.Element
 	if iconName != "" {
 		btn = ui.Button(c, "").Size(32, 32).Padding(0).Radius(16).BorderWidth(0).
 			Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.9)).
@@ -589,14 +596,14 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 		})
 	}
 
-	if btn.Clicked() {
+	btn.OnClick(func() {
 		if a.playerOverlayMenu == option {
 			a.closePlayerOverlayMenu()
 		} else {
 			a.openPlayerOverlayMenu(option)
 		}
 		a.markPlayerOverlayActivity()
-	}
+	})
 }
 
 func (a *appState) openPlayerOverlayMenu(option string) {
@@ -671,11 +678,11 @@ func (a *appState) playerPopover(c *ui.Context) {
 			case "speed":
 				for _, speed := range []float64{0.5, 0.75, 1, 1.25, 1.5, 1.75, 2} {
 					label := fmt.Sprintf("%.2g×", speed)
-					if playerAppleMenuItem(c, label, absFloat(a.playback.Speed-speed) < 0.01) {
+					playerAppleMenuItem(c, label, absFloat(a.playback.Speed-speed) < 0.01).OnClick(func() {
 						a.player.SetSpeed(speed)
 						a.playback.Speed = speed
 						a.closePlayerOverlayMenu()
-					}
+					})
 				}
 			}
 		})
@@ -683,17 +690,17 @@ func (a *appState) playerPopover(c *ui.Context) {
 }
 
 func (a *appState) playerTrackMenuItem(c *ui.Context, label string, trackID int, selected, subtitle bool) {
-	if playerAppleMenuItem(c, label, selected) {
+	playerAppleMenuItem(c, label, selected).OnClick(func() {
 		kind := "audio"
 		if subtitle {
 			kind = "subtitle"
 		}
 		a.player.SelectTrack(kind, trackID)
 		a.closePlayerOverlayMenu()
-	}
+	})
 }
 
-func playerAppleMenuItem(c *ui.Context, label string, selected bool) bool {
+func playerAppleMenuItem(c *ui.Context, label string, selected bool) ui.Element {
 	btn := ui.Button(c, "").Height(34).Padding(6, 10).Radius(9).BorderWidth(0).
 		Background(ui.RGBA(0, 0, 0, 0)).FillWidth().MinWidth(0).Clip().Label(label).
 		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
@@ -711,10 +718,10 @@ func playerAppleMenuItem(c *ui.Context, label string, selected bool) bool {
 	btn.Children(func() {
 		ui.Text(c, prefix+label).FontSize(12).TextColor(txtColor).Grow(1).MinWidth(0).SingleLine()
 	})
-	return btn.Clicked()
+	return btn
 }
 
-func playerAppleIconButton(c *ui.Context, name, label string, size, iconSize float32) *ui.Element {
+func playerAppleIconButton(c *ui.Context, name, label string, size, iconSize float32) ui.Element {
 	b := ui.Button(c, "").Size(size, size).Padding(0).Radius(size / 2).BorderWidth(0).
 		Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.9)).Label(label).
 		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
@@ -862,7 +869,7 @@ func (a *appState) performPlayerAction(action playerAction) {
 	}
 }
 
-func playerIconButton(c *ui.Context, name, label string) *ui.Element {
+func playerIconButton(c *ui.Context, name, label string) ui.Element {
 	b := ui.Button(c, "").Size(38, 36).Padding(0).Radius(9).BorderWidth(0).
 		Background(ui.RGBA(0, 0, 0, 0)).TextColor(ui.RGB(255, 255, 255)).Label(label).
 		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
@@ -873,7 +880,7 @@ func playerIconButton(c *ui.Context, name, label string) *ui.Element {
 	return b
 }
 
-func playerTextButton(c *ui.Context, label string) *ui.Element {
+func playerTextButton(c *ui.Context, label string) ui.Element {
 	b := ui.Button(c, "").Padding(9, 10).Radius(8).BorderWidth(0).
 		Background(ui.RGBA(0, 0, 0, 0)).TextColor(ui.RGBA(255, 255, 255, 0.9)).
 		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})

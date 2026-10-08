@@ -185,7 +185,7 @@ func (a *appState) view(c *ui.Context) {
 		a.sidebar(c)
 		ui.Column(c).Grow(1).FillHeight().Padding(16, 34, 12, 34).Gap(18).Children(func() {
 			a.topbar(c)
-			ui.Column(c).Key(a.navigationKey()).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
+			ui.Column(c.Key(a.navigationKey())).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
 				switch {
 				case a.selectedPerson != nil:
 					a.personView(c, *a.selectedPerson)
@@ -379,7 +379,7 @@ func (a *appState) topbar(c *ui.Context) {
 			} else {
 				ui.Box(c).Size(20, 20)
 			}
-			if ui.SearchField(c, &a.query).Width(270).Placeholder("全局搜索影片、演员或导演").Label("全局搜索").Changed() {
+			ui.SearchField(c.Key("global-search"), &a.query).Width(270).Placeholder("全局搜索影片、演员或导演").Label("全局搜索").OnChange(func() {
 				a.closeDetail()
 				a.closePerson()
 				a.selectedTab = 0
@@ -394,7 +394,7 @@ func (a *appState) topbar(c *ui.Context) {
 				a.searchChangedAt = c.Now()
 				a.searchPending = true
 				c.After(320 * time.Millisecond)
-			}
+			})
 		}
 	})
 }
@@ -536,7 +536,7 @@ func (a *appState) libraryView(c *ui.Context) {
 		if next := i + gridColumns; next < len(items) {
 			a.requestPoster(items[next], 150, 225)
 		}
-		card := actionButton(c, "").Key(item.ID).Padding(0).BorderWidth(0).Background(ui.Color{}).TextColor(t.Text)
+		card := actionButton(c.Key(item.ID), "").Padding(0).BorderWidth(0).Background(ui.Color{}).TextColor(t.Text)
 		card.Children(func() {
 			ui.Column(c).Gap(8).Center().Children(func() {
 				cover := ui.Box(c).Size(150, 225).Radius(10).Clip().BorderWidth(0)
@@ -772,7 +772,7 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Center).Gap(32).Children(func() {
 			a.detailPosterActions(c, item)
 			advanceSmoothScroll(c, &a.detailScroll, &a.detailScrollAnimation)
-			scroll := ui.Scroll(c).Key("movie-detail:" + item.ID).Grow(1).AlignSelf(ui.Stretch).FillHeight().Children(func() {
+			scroll := ui.Scroll(c.Key("movie-detail:" + item.ID)).Grow(1).AlignSelf(ui.Stretch).FillHeight().Children(func() {
 				ui.Column(c).Padding(detailContentInset(c), 0, 20, 0).Gap(17).Children(func() {
 					a.detailIntro(c, item)
 					ui.Column(c).Height(200).Children(func() { a.castSection(c, item) })
@@ -888,7 +888,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 						return
 					}
 					episode := episodes[i-3]
-					row := actionButton(c, "").Key(episode.ID).FillWidth().Padding(10, 8).Gap(12).AlignItems(ui.Center).
+					row := actionButton(c.Key(episode.ID), "").FillWidth().Padding(10, 8).Gap(12).AlignItems(ui.Center).
 						BorderWidth(0).Radius(8).Background(ui.Transparent).TextColor(t.Text).Label("播放 " + episode.Title).Disabled(a.playbackLoading)
 					if row.Hovered() {
 						row.Background(ui.Hex("#eeece6"))
@@ -965,7 +965,7 @@ func (a *appState) detailPosterActions(c *ui.Context, item MediaItem) {
 	})
 }
 
-func detailPlayButton(c *ui.Context, label string) *ui.Element {
+func detailPlayButton(c *ui.Context, label string) ui.Element {
 	return primaryActionButton(c, label).Width(136).Height(32).Padding(6, 10).Radius(8).BorderWidth(0).FontSize(13)
 }
 
@@ -983,7 +983,7 @@ func detailContentInset(c *ui.Context) float32 {
 func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
 	ui.Column(c).Gap(12).Children(func() {
 		ui.Text(c, item.Subtitle()).Height(20).FontSize(14).TextColor(c.Theme().TextMuted).SingleLine()
-		ui.Column(c).Key("detail-synopsis:" + item.ID).Height(132).FillWidth().Label("影片简介").Children(func() {
+		ui.Column(c.Key("detail-synopsis:" + item.ID)).Height(132).FillWidth().Label("影片简介").Children(func() {
 			text := item.Overview
 			if strings.TrimSpace(text) == "" {
 				text = "暂无简介"
@@ -1521,7 +1521,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 						return
 					}
 					item := items[i]
-					card := actionButton(c, "").Key("person-" + item.ID).Padding(0).BorderWidth(0).
+					card := actionButton(c.Key("person-"+item.ID), "").Padding(0).BorderWidth(0).
 						Background(ui.Color{}).TextColor(t.Text)
 					card.Children(func() {
 						ui.Column(c).Gap(8).Center().Children(func() {

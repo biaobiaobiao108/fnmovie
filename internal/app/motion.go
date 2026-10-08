@@ -31,10 +31,10 @@ func (a *appState) navigationKey() string {
 	return "section:" + a.section + ":" + a.libraryID
 }
 
-func actionButton(c *ui.Context, label string) *ui.Element {
+func actionButton(c *ui.Context, label string) ui.Element {
 	return ui.Button(c, label).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 }
 
-func primaryActionButton(c *ui.Context, label string) *ui.Element {
+func primaryActionButton(c *ui.Context, label string) ui.Element {
 	return ui.PrimaryButton(c, label).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 }

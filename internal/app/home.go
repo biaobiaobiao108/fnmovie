@@ -10,6 +10,7 @@ import (
 )
 
 type homeState struct {
+	ViewportHandle, HeroHandle                                  ui.Handle
 	Heroes                                                      []MediaItem
 	HeroIndex, HeroPrevious                                     int
 	HeroChangedAt                                               time.Time

@@ -39,13 +39,14 @@ func advanceSmoothScroll(c *ui.Context, state *ui.ScrollState, motion *smoothScr
 
 // bindSmoothScroll attaches wheel handling after the container is built. Call
 // advanceSmoothScroll before building it; do not also advance the spring elsewhere.
-func bindSmoothScroll(c *ui.Context, element *ui.Element, state *ui.ScrollState, motion *smoothScroll) {
+func bindSmoothScroll(c *ui.Context, element ui.Element, state *ui.ScrollState, motion *smoothScroll) {
+	now, reduceMotion, services := c.Now(), c.Preferences().ReduceMotion, c.Services()
 	element.TrackScroll(state).HandleInput(func(event ui.InputEvent) bool {
-		if !handleSmoothScroll(event, state, motion, c.Now(), c.Preferences().ReduceMotion) {
+		if !handleSmoothScroll(event, state, motion, now, reduceMotion) {
 			return false
 		}
 		if motion.Active {
-			c.AnimationFrame()
+			services.Invalidate()
 		}
 		return true
 	})
