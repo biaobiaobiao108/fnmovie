@@ -106,6 +106,15 @@ type mpvNode struct {
 	pad    int32
 }
 
+const (
+	mpvFormatFlag  = 3
+	mpvFormatInt64 = 4
+)
+
+func mpvNodeFlag(node mpvNode) bool {
+	return node.format == mpvFormatFlag && uint32(node.value) != 0
+}
+
 type mpvNodeList struct {
 	num    int32
 	pad    int32
@@ -513,7 +522,7 @@ func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack) {
 			continue
 		}
 		fieldValues := unsafe.Slice((*mpvNode)(unsafe.Pointer(&fieldBytes[0])), int(fields.num))
-		track := PlayerTrack{}
+		track := PlayerTrack{MainSelection: -1}
 		kind := ""
 		for i, field := range fieldValues {
 			key := cString(uintptr(binary.LittleEndian.Uint64(keyBytes[i*8:])))
@@ -523,7 +532,7 @@ func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack) {
 			}
 			switch key {
 			case "id":
-				if field.format == 4 {
+				if field.format == mpvFormatInt64 {
 					track.ID = int(int64(field.value))
 				}
 			case "title":
@@ -533,9 +542,14 @@ func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack) {
 			case "type":
 				kind = str
 			case "selected":
-				track.Selected = field.value != 0
+				track.Selected = mpvNodeFlag(field)
 			case "external":
-				track.External = field.value != 0
+				track.External = mpvNodeFlag(field)
+			case "main-selection":
+				if field.format == mpvFormatInt64 {
+					track.MainSelection = int(int64(field.value))
+					track.HasMainSelection = true
+				}
 			}
 		}
 		if track.Title == "" {
@@ -547,6 +561,8 @@ func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack) {
 			subtitles = append(subtitles, track)
 		}
 	}
+	normalizeSelectedTracks(audio, false)
+	normalizeSelectedTracks(subtitles, true)
 	return audio, subtitles
 }
 

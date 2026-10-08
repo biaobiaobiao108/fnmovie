@@ -771,12 +771,8 @@ func playerAppleMenuItem(c *ui.Context, label string, selected bool) ui.Element 
 	} else if btn.Hovered() {
 		btn.Background(ui.RGBA(255, 255, 255, 0.10))
 	}
-	prefix := "   "
-	if selected {
-		prefix = "✓  "
-	}
 	btn.Children(func() {
-		ui.Text(c, prefix+label).FontSize(12).TextColor(txtColor).Grow(1).MinWidth(0).SingleLine()
+		ui.Text(c, label).FontSize(12).TextColor(txtColor).Grow(1).MinWidth(0).SingleLine()
 	})
 	return btn
 }

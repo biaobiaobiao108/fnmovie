@@ -32,11 +32,36 @@ type PlaybackState struct {
 }
 
 type PlayerTrack struct {
-	ID       int
-	Title    string
-	Language string
-	Selected bool
-	External bool
+	ID               int
+	Title            string
+	Language         string
+	Selected         bool
+	External         bool
+	MainSelection    int
+	HasMainSelection bool
+}
+
+func normalizeSelectedTracks(tracks []PlayerTrack, preferMain bool) {
+	selected := -1
+	if preferMain {
+		for i := range tracks {
+			if tracks[i].HasMainSelection && tracks[i].MainSelection == 0 {
+				selected = i
+				break
+			}
+		}
+	}
+	if selected < 0 {
+		for i := range tracks {
+			if tracks[i].Selected {
+				selected = i
+				break
+			}
+		}
+	}
+	for i := range tracks {
+		tracks[i].Selected = i == selected
+	}
 }
 
 type PlayerSnapshot struct {

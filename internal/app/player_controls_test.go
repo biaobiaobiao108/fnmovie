@@ -138,3 +138,29 @@ func TestPlayerTrackLabelContainsStableLanguageTitleAndID(t *testing.T) {
 		t.Fatalf("track label = %q, want %q", got, want)
 	}
 }
+
+func TestNormalizeSelectedTracksKeepsOneSubtitleHighlight(t *testing.T) {
+	tracks := []PlayerTrack{
+		{ID: 2, Selected: true, MainSelection: 1, HasMainSelection: true},
+		{ID: 3, Selected: true, MainSelection: 0, HasMainSelection: true},
+		{ID: 4, Selected: true, MainSelection: 1, HasMainSelection: true},
+	}
+
+	normalizeSelectedTracks(tracks, true)
+
+	for i, track := range tracks {
+		if got, want := track.Selected, i == 1; got != want {
+			t.Errorf("track %d selected = %v, want %v", track.ID, got, want)
+		}
+	}
+}
+
+func TestNormalizeSelectedTracksFallsBackToOneSelectedTrack(t *testing.T) {
+	tracks := []PlayerTrack{{ID: 1, Selected: true}, {ID: 2, Selected: true}}
+
+	normalizeSelectedTracks(tracks, true)
+
+	if !tracks[0].Selected || tracks[1].Selected {
+		t.Fatalf("fallback selection = [%v, %v], want only first track selected", tracks[0].Selected, tracks[1].Selected)
+	}
+}
