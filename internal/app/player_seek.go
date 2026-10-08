@@ -66,10 +66,12 @@ func (a *appState) requestPlayerSeek(target float64) {
 	if err != nil {
 		a.seekFeedback.Pending = false
 		a.seekFeedback.Error = "跳转失败，请重试"
+		a.syncPlayerSeekFeedbackVisibility()
 		return
 	}
 	a.playback.Position, a.seekSliderPosition = target, target
 	a.markPlayerOverlayActivity()
+	a.syncPlayerSeekFeedbackVisibility()
 	if a.playerOverlayWindow != nil {
 		a.playerOverlayWindow.Invalidate()
 	}

@@ -85,10 +85,13 @@ type appState struct {
 	displayScale                 float64
 	playerOverlayWindow          *mygo.Window
 	playerHeaderWindow           *mygo.Window
+	playerSeekFeedbackWindow     *mygo.Window
 	playerMenuWindow             *mygo.Window
 	playerOverlayContent         *overlay.Content
 	playerHeaderContent          *overlay.Content
+	playerSeekFeedbackContent    *overlay.Content
 	playerMenuContent            *overlay.Content
+	playerSeekFeedbackVisible    bool
 	fullscreenMotion             playerFullscreenMotion
 	playerOverlayHooks           bool
 	playerOverlayMonitorDone     chan struct{}
@@ -2191,7 +2194,11 @@ func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Se
 			if ctx.Err() != nil || a.player != player || !a.playback.Active || a.playingItem == nil || a.playingItem.ID != item.ID {
 				return
 			}
+			seekWasPending, seekError := a.seekFeedback.Pending, a.seekFeedback.Error
 			a.playback.Position = a.seekFeedback.position(snapshot, a.playback.Position)
+			if seekWasPending != a.seekFeedback.Pending || seekError != a.seekFeedback.Error {
+				a.syncPlayerSeekFeedbackVisibility()
+			}
 			a.playback.Paused = snapshot.Paused
 			if !a.volumeDragging {
 				a.playback.Volume = snapshot.Volume

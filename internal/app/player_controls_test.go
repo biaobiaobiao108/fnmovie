@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -51,6 +52,10 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 				if math.Abs(float64(play.X+play.W/2)-float64(width)/2) > 0.5 {
 					t.Fatalf("play center %.2f != window center %.2f", play.X+play.W/2, float64(width)/2)
 				}
+				progress, progressOK := tester.Find("播放进度")
+				if !progressOK || math.Abs(float64(progress.X+progress.W/2)-float64(width)/2) > 0.5 {
+					t.Fatalf("progress rail is not centered: %+v (found=%v)", progress, progressOK)
+				}
 				back, backOK := tester.Find("快退 10 秒")
 				forward, forwardOK := tester.Find("快进 10 秒")
 				if !backOK || !forwardOK || math.Abs(float64(back.X+back.W/2+forward.X+forward.W/2)-float64(width)) > 0.5 {
@@ -63,6 +68,21 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestPlayerSeekFeedbackIsCenteredAndVisible(t *testing.T) {
+	bounds := playerSeekFeedbackBounds(mygo.Rectangle{X: 40, Y: 60, Width: 1280, Height: 800})
+	if bounds.X+bounds.Width/2 != 40+1280/2 || bounds.Y+bounds.Height/2 != 60+800/2 {
+		t.Fatalf("seek feedback bounds are not centered: %+v", bounds)
+	}
+	a := &appState{seekFeedback: seekFeedback{Pending: true}}
+	tester := ui.NewTester(a.playerSeekFeedbackView, playerSeekFeedbackWidth, playerSeekFeedbackHeight)
+	tester.Frame()
+	spinner, hasSpinner := tester.Find("正在跳转")
+	status, hasStatus := tester.Find("跳转中")
+	if !hasSpinner || !hasStatus || spinner.W <= 0 || spinner.H <= 0 {
+		t.Fatalf("center seek feedback is missing its animated status: spinner=%+v status=%+v", spinner, status)
 	}
 }
 

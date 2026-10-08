@@ -17,6 +17,8 @@ const (
 	playerOverlayControlHeight = 118
 	playerOverlayFadeDuration  = 180 * time.Millisecond
 	playerOverlayTargetOpacity = 1.0
+	playerSeekFeedbackWidth    = 180
+	playerSeekFeedbackHeight   = 56
 	playerMenuWidth            = 300
 	playerMenuHeight           = 330
 )
@@ -42,6 +44,7 @@ func (a *appState) createPlayerOverlay() {
 	bounds := a.window.ContentBounds()
 	a.playerOverlayContent = overlay.View(a.playerOverlayView)
 	a.playerHeaderContent = overlay.View(a.playerHeaderView)
+	a.playerSeekFeedbackContent = overlay.View(a.playerSeekFeedbackView)
 	controlHeight := min(a.playerOverlayContentHeight(), bounds.Height)
 	headerHeight := min(playerOverlayHeaderHeight, bounds.Height-controlHeight)
 	a.playerOverlayWindow = mygo.NewWindow(mygo.WindowOptions{
@@ -56,6 +59,13 @@ func (a *appState) createPlayerOverlay() {
 		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: a.playerHeaderContent,
 	})
+	a.playerSeekFeedbackWindow = mygo.NewWindow(mygo.WindowOptions{
+		Title: "跳转状态", X: bounds.X, Y: bounds.Y, Width: playerSeekFeedbackWidth, Height: playerSeekFeedbackHeight,
+		Parent: a.window, Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
+		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
+		Content: a.playerSeekFeedbackContent,
+	})
+	a.playerSeekFeedbackWindow.SetIgnoreMouseEvents(true)
 	a.registerPlayerOverlayHooks()
 	a.syncPlayerOverlay()
 	a.overlayMu.Lock()
@@ -78,6 +88,7 @@ func (a *appState) registerPlayerOverlayHooks() {
 	a.window.OnMinimize(func() {
 		a.cancelPlayerFullscreen()
 		a.hidePlayerOverlay(false)
+		a.syncPlayerSeekFeedbackVisibility()
 	})
 	a.window.OnRestore(func() {
 		a.syncPlayerOverlay()
@@ -105,6 +116,13 @@ func (a *appState) syncPlayerOverlay() {
 	if a.playerHeaderWindow.ContentBounds() != headerBounds {
 		a.playerHeaderWindow.SetContentBounds(headerBounds)
 	}
+	if a.playerSeekFeedbackWindow != nil {
+		feedbackBounds := playerSeekFeedbackBounds(bounds)
+		if a.playerSeekFeedbackWindow.ContentBounds() != feedbackBounds {
+			a.playerSeekFeedbackWindow.SetContentBounds(feedbackBounds)
+		}
+		a.syncPlayerSeekFeedbackVisibility()
+	}
 	a.playerOverlayWindow.Invalidate()
 	a.playerHeaderWindow.Invalidate()
 	if a.playerMenuWindow != nil {
@@ -116,6 +134,35 @@ func (a *appState) syncPlayerOverlay() {
 	if a.player != nil {
 		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
 		a.player.SetViewport(ui.Rect{W: float32(width), H: float32(height)})
+	}
+}
+
+func playerSeekFeedbackBounds(bounds mygo.Rectangle) mygo.Rectangle {
+	width := min(playerSeekFeedbackWidth, max(1, bounds.Width-24))
+	height := min(playerSeekFeedbackHeight, max(1, bounds.Height-24))
+	return mygo.Rectangle{
+		X: bounds.X + (bounds.Width-width)/2, Y: bounds.Y + (bounds.Height-height)/2,
+		Width: width, Height: height,
+	}
+}
+
+func (a *appState) syncPlayerSeekFeedbackVisibility() {
+	if a.playerSeekFeedbackWindow == nil || a.window == nil {
+		return
+	}
+	visible := (a.seekFeedback.Pending || a.seekFeedback.Error != "") && !a.window.IsMinimized()
+	if visible == a.playerSeekFeedbackVisible {
+		if visible {
+			a.playerSeekFeedbackWindow.Invalidate()
+		}
+		return
+	}
+	a.playerSeekFeedbackVisible = visible
+	if visible {
+		a.playerSeekFeedbackWindow.ShowInactive()
+		a.playerSeekFeedbackWindow.Invalidate()
+	} else {
+		a.playerSeekFeedbackWindow.Hide()
 	}
 }
 
@@ -261,6 +308,9 @@ func (a *appState) setPlayerOverlayOpacity(alpha float64) {
 	if a.playerMenuContent != nil && a.playerMenuWindow != nil {
 		a.playerMenuContent.SetOpacity(a.playerMenuWindow, alpha)
 	}
+	if a.playerSeekFeedbackContent != nil && a.playerSeekFeedbackWindow != nil {
+		a.playerSeekFeedbackContent.SetOpacity(a.playerSeekFeedbackWindow, a.fullscreenFade())
+	}
 }
 
 func (a *appState) advancePlayerOverlayAnimation(c *ui.Context) {
@@ -326,6 +376,10 @@ func (a *appState) closePlayerOverlay() {
 		a.playerHeaderWindow.Destroy()
 		a.playerHeaderWindow = nil
 	}
+	if a.playerSeekFeedbackWindow != nil {
+		a.playerSeekFeedbackWindow.Destroy()
+		a.playerSeekFeedbackWindow = nil
+	}
 	if a.window != nil {
 		restoreWindowFocus(a.window)
 	}
@@ -334,7 +388,8 @@ func (a *appState) closePlayerOverlay() {
 	a.playerOverlayTransition++
 	a.playerOverlayAnimationStart = time.Time{}
 	a.overlayMu.Unlock()
-	a.playerOverlayContent, a.playerHeaderContent = nil, nil
+	a.playerOverlayContent, a.playerHeaderContent, a.playerSeekFeedbackContent = nil, nil, nil
+	a.playerSeekFeedbackVisible = false
 	a.playerOverlayMenu = ""
 	a.seekDragging = false
 	a.seekFeedback = seekFeedback{}
@@ -374,6 +429,23 @@ func (a *appState) playerOverlayView(c *ui.Context) {
 	c.SetTheme(playerOverlayTheme)
 	a.playerShortcuts(c)
 	a.playerTransport(c)
+}
+
+func (a *appState) playerSeekFeedbackView(c *ui.Context) {
+	c.Root().Background(ui.Transparent)
+	theme := ui.DarkTheme()
+	theme.Background, theme.Surface = ui.Transparent, ui.Transparent
+	theme.TextMuted = ui.RGBA(255, 255, 255, 0.78)
+	c.SetTheme(theme)
+	ui.Row(c).Absolute().Fill().Center().Gap(9).Padding(12, 18).Radius(28).
+		Background(ui.RGBA(18, 20, 24, 0.58)).Border(1, ui.RGBA(255, 255, 255, 0.20)).Children(func() {
+		if a.seekFeedback.Pending {
+			ui.Spinner(c).Size(18, 18).Label("正在跳转")
+			ui.Text(c, "跳转中").FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.78))
+		} else if a.seekFeedback.Error != "" {
+			ui.Text(c, "跳转失败").FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.78)).Label(a.seekFeedback.Error)
+		}
+	})
 }
 
 func (a *appState) playerMenuView(c *ui.Context) {
@@ -449,20 +521,9 @@ func (a *appState) playerTransport(c *ui.Context) {
 		Background(ui.RGBA(18, 20, 24, 0.52)).Border(1, ui.RGBA(255, 255, 255, 0.18)).Children(func() {
 		// 上层：Apple 细致时间轨与时间标签
 		ui.Row(c).Gap(12).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, formatClock(a.seekDisplayPosition())).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
+			ui.Text(c, formatClock(a.seekDisplayPosition())).Width(60).Shrink(0).TextAlign(ui.End).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
 			a.playerSeekSlider(c, maxPosition, a.requestPlayerSeek)
-			ui.Text(c, formatClock(a.playback.Duration)).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
-			// Reserve the status slot so entering/leaving a seek never shifts the rail.
-			ui.Box(c).Width(72).Height(16).Children(func() {
-				if a.seekFeedback.Pending {
-					ui.Row(c).Gap(5).AlignItems(ui.Center).Children(func() {
-						ui.Spinner(c).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75)).Label("正在跳转")
-						ui.Text(c, "跳转中").FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
-					})
-				} else if a.seekFeedback.Error != "" {
-					ui.Text(c, "跳转失败").FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75)).Label(a.seekFeedback.Error)
-				}
-			})
+			ui.Text(c, formatClock(a.playback.Duration)).Width(60).Shrink(0).TextAlign(ui.Start).FontSize(11).TextColor(ui.RGBA(255, 255, 255, 0.75))
 		})
 		// 下层：Apple 经典居中核心对称控制区
 		ui.Row(c).AlignItems(ui.Center).Children(func() {
