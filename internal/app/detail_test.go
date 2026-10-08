@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"image/png"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -133,6 +134,7 @@ func TestMovieAndSeriesShareDetailAnchors(t *testing.T) {
 		var moviePlay, movieCast ui.Rect
 		for _, series := range []bool{false, true} {
 			item := MediaItem{ID: "anchors", Title: "统一详情布局", Kind: "movie", Overview: "短简介"}
+			item.Year = "2024"
 			if series {
 				item.Kind, item.IsSeries = "tv", true
 				item.Overview = strings.Repeat("更长的简介也不改变操作区域位置。", 20)
@@ -150,6 +152,14 @@ func TestMovieAndSeriesShareDetailAnchors(t *testing.T) {
 			cast, castOK := tester.Find("演职人员")
 			if !playOK || !castOK {
 				t.Fatal("missing anchored controls")
+			}
+			poster, posterOK := tester.Find("影片海报")
+			meta, metaOK := tester.Find("2024")
+			if !posterOK || !metaOK || play.Y < poster.Y+poster.H {
+				t.Fatalf("actions must be below the poster: poster=%+v play=%+v", poster, play)
+			}
+			if delta := math.Abs(float64(meta.Y + 381/2.0 - (poster.Y + poster.H/2))); delta > 3 {
+				t.Fatalf("information must center against poster: delta=%v, meta=%+v poster=%+v", delta, meta, poster)
 			}
 			if !series {
 				moviePlay, movieCast = play, cast

@@ -762,37 +762,14 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 		return
 	}
 	t := c.Theme()
-	posterWidth, posterHeight := detailPosterSize(c)
 	ui.Column(c).Grow(1).FillHeight().Gap(16).Children(func() {
 		a.detailHeading(c, item)
 		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Center).Gap(32).Children(func() {
-			if poster := a.imageFor(item, posterWidth, posterHeight); poster != nil {
-				ui.Image(c, poster).Size(float32(posterWidth), float32(posterHeight)).Fit(ui.Cover).Radius(13)
-			} else {
-				ui.Box(c).Size(float32(posterWidth), float32(posterHeight)).Radius(13).Background(ui.Hex("#e8e8e2"))
-			}
+			a.detailPosterActions(c, item)
 			advanceSmoothScroll(c, &a.detailScroll, &a.detailScrollAnimation)
 			scroll := ui.Scroll(c).Key("movie-detail:" + item.ID).Grow(1).AlignSelf(ui.Stretch).FillHeight().Children(func() {
 				ui.Column(c).Padding(detailContentInset(c), 0, 20, 0).Gap(17).Children(func() {
 					a.detailIntro(c, item)
-					ui.Row(c).Height(36).Gap(13).AlignItems(ui.Center).Children(func() {
-						if a.playbackLoading && a.playbackLoadingID == item.ID {
-							btn := actionButton(c, "").Width(168).Padding(9, 16).Radius(8).BorderWidth(0).
-								Background(t.Accent).TextColor(t.AccentText).Disabled(true)
-							btn.Children(func() {
-								ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-									ui.Spinner(c).FontSize(13)
-									ui.Text(c, "正在准备播放…").FontSize(13).Bold()
-								})
-							})
-						} else {
-							if primaryActionButton(c, "▶  立即播放").Width(168).Clicked() {
-								a.startPlayback(item)
-							}
-						}
-						a.favoriteButton(c, item)
-						a.playbackCancelButton(c)
-					})
 					ui.Column(c).Height(200).Children(func() { a.castSection(c, item) })
 					if len(item.Sources) > 0 {
 						ui.Text(c, "可播放版本").FontSize(15).Bold().TextColor(t.TextMuted)
@@ -817,15 +794,10 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 
 func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 	t := c.Theme()
-	posterWidth, posterHeight := detailPosterSize(c)
 	ui.Column(c).Grow(1).FillHeight().Gap(16).Children(func() {
 		a.detailHeading(c, item)
 		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Center).Gap(32).Children(func() {
-			if poster := a.imageFor(item, posterWidth, posterHeight); poster != nil {
-				ui.Image(c, poster).Size(float32(posterWidth), float32(posterHeight)).Fit(ui.Cover).Radius(13)
-			} else {
-				ui.Box(c).Size(float32(posterWidth), float32(posterHeight)).Radius(13).Background(ui.Hex("#e8e8e2"))
-			}
+			a.detailPosterActions(c, item)
 			episodes := a.seriesEpisodes
 			showEpisodes := !a.seriesEpisodeLoading && a.seriesEpisodeError == "" && len(episodes) > 0
 			rows := 4
@@ -847,27 +819,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 				case 0:
 					ui.Column(c).Gap(17).Padding(0, 0, 15, 0).Children(func() {
 						a.detailIntro(c, item)
-						ui.Row(c).Height(36).Gap(13).AlignItems(ui.Center).Children(func() {
-							if len(a.seriesEpisodes) > 0 {
-								firstEp := a.seriesEpisodes[0]
-								if a.playbackLoading && a.playbackLoadingID == firstEp.ID {
-									btn := actionButton(c, "").Width(168).Padding(9, 16).Radius(8).BorderWidth(0).
-										Background(t.Accent).TextColor(t.AccentText).Disabled(true)
-									btn.Children(func() {
-										ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-											ui.Spinner(c).FontSize(13)
-											ui.Text(c, "正在准备首集…").FontSize(13).Bold()
-										})
-									})
-								} else if primaryActionButton(c, "▶  播放本季首集").Width(168).Clicked() {
-									a.startPlayback(firstEp)
-								}
-							} else {
-								primaryActionButton(c, "▶  播放本季首集").Width(168).Disabled(true)
-							}
-							a.favoriteButton(c, item)
-							a.playbackCancelButton(c)
-						})
+
 					})
 				case 1:
 					ui.Column(c).Height(200).Children(func() { a.castSection(c, item) })
@@ -966,8 +918,46 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 
 func detailPosterSize(c *ui.Context) (int, int) {
 	width, _ := c.Size()
-	posterWidth := min(max(250, min(360, int(float64(width)*0.23))), int((detailViewportHeight(c)-24)*2/3))
+	posterWidth := min(max(250, min(360, int(float64(width)*0.23))), int((detailViewportHeight(c)-78)*2/3))
 	return posterWidth, posterWidth * 3 / 2
+}
+
+func (a *appState) detailPosterActions(c *ui.Context, item MediaItem) {
+	width, height := detailPosterSize(c)
+	ui.Column(c).Width(float32(width)).Gap(12).Children(func() {
+		if poster := a.imageFor(item, width, height); poster != nil {
+			ui.Image(c, poster).Size(float32(width), float32(height)).Fit(ui.Cover).Radius(13).Label("影片海报")
+		} else {
+			ui.Box(c).Size(float32(width), float32(height)).Radius(13).Background(ui.Hex("#e8e8e2")).Label("影片海报")
+		}
+		ui.Row(c).Height(42).FillWidth().Justify(ui.Center).Gap(13).AlignItems(ui.Center).Children(func() {
+			playItem, label := item, "▶  立即播放"
+			available := true
+			if item.IsSeries {
+				label = "▶  播放本季首集"
+				available = len(a.seriesEpisodes) > 0
+				if available {
+					playItem = a.seriesEpisodes[0]
+				}
+			}
+			loading := a.playbackLoading && a.playbackLoadingID == playItem.ID
+			if loading {
+				button := primaryActionButton(c, "").Width(168).Label("取消准备播放")
+				button.Children(func() {
+					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
+						ui.Spinner(c).FontSize(13)
+						ui.Text(c, "正在准备播放…").FontSize(13).Bold()
+					})
+				})
+				if button.Clicked() {
+					a.cancelPlaybackLoading()
+				}
+			} else if primaryActionButton(c, label).Width(168).Disabled(!available).Clicked() {
+				a.startPlayback(playItem)
+			}
+			a.favoriteButton(c, item)
+		})
+	})
 }
 
 func detailViewportHeight(c *ui.Context) float32 {
@@ -977,7 +967,7 @@ func detailViewportHeight(c *ui.Context) float32 {
 }
 
 func detailContentInset(c *ui.Context) float32 {
-	return max(float32(12), (detailViewportHeight(c)-640)/2)
+	return max(float32(12), (detailViewportHeight(c)-54-381)/2)
 }
 
 // Shared fixed slots keep playback and credits anchored as metadata arrives.
