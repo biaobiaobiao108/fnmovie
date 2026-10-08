@@ -761,7 +761,7 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 	posterWidth, posterHeight := detailPosterSize(c)
 	ui.Column(c).Grow(1).FillHeight().Gap(8).Children(func() {
 		a.detailBackButton(c)
-		ui.Row(c).Grow(1).FillHeight().AlignItems(ui.Start).Gap(30).Children(func() {
+		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Center).Gap(32).Children(func() {
 			if poster := a.imageFor(item, posterWidth, posterHeight); poster != nil {
 				ui.Image(c, poster).Size(float32(posterWidth), float32(posterHeight)).Fit(ui.Cover).Radius(13)
 			} else {
@@ -769,11 +769,11 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 			}
 			advanceSmoothScroll(c, &a.detailScroll, &a.detailScrollAnimation)
 			scroll := ui.Scroll(c).Key("movie-detail:" + item.ID).Grow(1).AlignSelf(ui.Stretch).FillHeight().Children(func() {
-				ui.Column(c).Padding(8, 0).Gap(17).Children(func() {
-					ui.Text(c, item.Title).FontSize(34).Bold()
+				ui.Column(c).MinHeight(detailViewportHeight(c)).Justify(ui.Center).Padding(20, 0).Gap(17).Children(func() {
+					ui.Text(c, item.Title).FontSize(30).Bold()
 					ui.Text(c, item.Subtitle()).FontSize(15).TextColor(t.TextMuted)
 					if item.Overview != "" {
-						ui.Text(c, item.Overview).FontSize(16).TextColor(ui.Hex("#66716b"))
+						ui.Text(c, item.Overview).MaxWidth(860).FontSize(15).TextColor(ui.Hex("#66716b"))
 					}
 					ui.Row(c).Gap(13).AlignItems(ui.Center).Children(func() {
 						if a.playbackLoading && a.playbackLoadingID == item.ID {
@@ -820,7 +820,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 	posterWidth, posterHeight := detailPosterSize(c)
 	ui.Column(c).Grow(1).FillHeight().Gap(8).Children(func() {
 		a.detailBackButton(c)
-		ui.Row(c).Grow(1).FillHeight().AlignItems(ui.Start).Gap(30).Children(func() {
+		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Start).Gap(32).Padding(12, 0).Children(func() {
 			if poster := a.imageFor(item, posterWidth, posterHeight); poster != nil {
 				ui.Image(c, poster).Size(float32(posterWidth), float32(posterHeight)).Fit(ui.Cover).Radius(13)
 			} else {
@@ -849,7 +849,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 						ui.Text(c, item.Title).FontSize(28).Bold()
 						ui.Text(c, item.Subtitle()).FontSize(15).TextColor(t.TextMuted)
 						if item.Overview != "" {
-							ui.Text(c, item.Overview).FontSize(15).TextColor(t.TextMuted).MaxLines(5)
+							ui.Text(c, item.Overview).MaxWidth(860).FontSize(15).TextColor(t.TextMuted).MaxLines(5)
 						}
 						ui.Row(c).Gap(13).AlignItems(ui.Center).Children(func() {
 							if len(a.seriesEpisodes) > 0 {
@@ -967,10 +967,15 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 }
 
 func detailPosterSize(c *ui.Context) (int, int) {
-	width, height := c.Size()
-	posterWidth := max(270, min(360, int(float64(width)*0.23)))
-	posterHeight := max(390, min(540, int(float64(height)*0.70)))
-	return posterWidth, posterHeight
+	width, _ := c.Size()
+	posterWidth := min(max(250, min(360, int(float64(width)*0.23))), int((detailViewportHeight(c)-24)*2/3))
+	return posterWidth, posterWidth * 3 / 2
+}
+
+func detailViewportHeight(c *ui.Context) float32 {
+	_, height := c.Size()
+	// Global header, outer padding, navigation gap and detail back action.
+	return max(float32(240), height-128)
 }
 
 func episodeOverview(episode MediaItem) string {

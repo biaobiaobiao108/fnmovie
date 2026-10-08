@@ -5,6 +5,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -91,6 +92,29 @@ func TestMovieDetailViewLayout(t *testing.T) {
 	rectSource, okSource := tester.Find("4K 原画")
 	if !okSource || rectSource.W <= 0 || rectSource.H <= 0 {
 		t.Fatalf("Movie source version not visible: ok=%v, rect=%+v", okSource, rectSource)
+	}
+	saveDetailPreview(t, tester, "movie")
+}
+
+func TestMovieDetailCentersShortContentAndScrollsLongContent(t *testing.T) {
+	for _, long := range []bool{false, true} {
+		item := MediaItem{ID: "layout", Kind: "movie", Title: "居中详情", Overview: "简洁的影片介绍。"}
+		if long {
+			item.Overview = strings.Repeat("长简介保持完整显示，超出窗口时可以滚动浏览。\n", 70)
+		}
+		a := &appState{section: "movies", selected: &item, catalogs: map[string]*CatalogState{}}
+		tester := ui.NewTester(a.view, 1280, 1000)
+		title, ok := tester.Find(item.Title)
+		if !ok {
+			t.Fatal("detail title missing")
+		}
+		if long {
+			if title.Y > 200 || a.detailScroll.MaxY <= 0 {
+				t.Fatalf("long detail must start at top and scroll: title=%+v scroll=%+v", title, a.detailScroll)
+			}
+		} else if title.Y < 300 || a.detailScroll.MaxY > 1 {
+			t.Fatalf("short detail must center without overflow: title=%+v scroll=%+v", title, a.detailScroll)
+		}
 	}
 }
 
