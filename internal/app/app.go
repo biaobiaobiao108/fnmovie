@@ -512,8 +512,9 @@ func (a *appState) libraryView(c *ui.Context) {
 	if state != nil && !state.Exhausted {
 		gridCount++
 	}
+	const scrollbarGutter float32 = 14
 	windowWidth, _ := c.Size()
-	gridColumns := max(1, int((windowWidth-273)/152))
+	gridColumns := max(1, int((windowWidth-273-scrollbarGutter)/152))
 	grid := ui.GridView(c, &a.grid, gridCount, 150, 286, func(i int) {
 		if i >= len(items) {
 			if state != nil && !state.Loading && !state.Exhausted && !state.PageAutoRequested && state.Err == "" {
@@ -570,7 +571,7 @@ func (a *appState) libraryView(c *ui.Context) {
 				a.openDetail(item)
 			}
 		}
-	}).Grow(1)
+	}).Grow(1).Padding(0, scrollbarGutter, 0, 0)
 	bindSmoothScroll(c, grid, &a.catalogScroll, &a.catalogScrollAnimation)
 	background := t.Background
 	grid.DrawOver(func(p *ui.Painter, rect ui.Rect) {
@@ -584,7 +585,7 @@ func (a *appState) libraryView(c *ui.Context) {
 			From: background.Alpha(0), To: background, Angle: 180,
 		}, 0)
 		if a.catalogScroll.MaxY > 0 && rect.H > 40 {
-			track := ui.Rect{X: rect.X + rect.W - 4, Y: rect.Y + 12, W: 3, H: rect.H - 24}
+			track := ui.Rect{X: rect.X + rect.W - 3, Y: rect.Y + 12, W: 3, H: rect.H - 24}
 			thumbHeight := max(float32(26), track.H*track.H/(track.H+a.catalogScroll.MaxY))
 			thumbY := track.Y + (track.H-thumbHeight)*float32(a.catalogScroll.Y/max(float32(1), a.catalogScroll.MaxY))
 			p.Fill(ui.Rect{X: track.X, Y: thumbY, W: track.W, H: min(thumbHeight, track.H)}, ui.RGBA(92, 104, 96, 0.24), 1.5)
