@@ -35,18 +35,22 @@ function Invoke-Git {
 
 function Write-ReleaseMessage {
     param(
-        [Parameter(Mandatory)][string]$Icon,
+        [Parameter(Mandatory)][string]$Glyph,
+        [Parameter(Mandatory)][string]$Label,
         [Parameter(Mandatory)][string]$Message,
-        [ConsoleColor]$Color = [ConsoleColor]::Gray
+        [ConsoleColor]$LabelColor = [ConsoleColor]::Gray,
+        [ConsoleColor]$MessageColor = [ConsoleColor]::Gray
     )
 
-    Write-Host "$Icon $Message" -ForegroundColor $Color
+    Write-Host " $Glyph " -NoNewline -ForegroundColor $LabelColor
+    Write-Host "[$Label] " -NoNewline -ForegroundColor $LabelColor
+    Write-Host $Message -ForegroundColor $MessageColor
 }
 
 $repoRoot = Invoke-Git -GitArgs @('-C', $PSScriptRoot, 'rev-parse', '--show-toplevel')
 Push-Location -LiteralPath $repoRoot
 try {
-    Write-ReleaseMessage '🔍' '正在检查工作区、远程分支和版本标签…' DarkCyan
+    Write-ReleaseMessage '' 'CHECK' '正在检查工作区、远程分支和版本标签…' Cyan
     $branch = Invoke-Git -GitArgs @('branch', '--show-current')
     if ([string]::IsNullOrWhiteSpace($branch)) {
         throw '请在具名分支上运行发版命令，不能处于分离的 HEAD 状态。'
@@ -108,24 +112,24 @@ try {
             }
 
             if ($WhatIf) {
-                Write-ReleaseMessage '🔁' "将继续发布 $currentTag。" DarkCyan
+                Write-ReleaseMessage '' 'RESUME' "将继续发布 $currentTag。" Cyan
                 if ($ahead -gt 0) {
-                    Write-ReleaseMessage '⬆️' "同时推送分支 '$branch' 上已有的 $ahead 个本地提交。" DarkYellow
+                    Write-ReleaseMessage '' 'INFO' "同时推送分支 '$branch' 上已有的 $ahead 个本地提交。" Yellow
                 }
-                Write-ReleaseMessage '📋' "预览模式结束，未修改文件或推送内容。" DarkGray
+                Write-ReleaseMessage '' 'PREVIEW' '预览模式结束，未修改文件或推送内容。' DarkGray
                 return
             }
             if ($localTag.ExitCode -ne 0) {
-                Write-ReleaseMessage '🏷️' "创建标签 $currentTag…" DarkCyan
+                Write-ReleaseMessage '' 'TAG' "创建标签 $currentTag…" Cyan
                 Invoke-Git -GitArgs @('tag', '-a', $currentTag, '-m', "$($config.name) $currentTag") | Out-Null
             }
             if ($ahead -gt 0) {
-                Write-ReleaseMessage '⬆️' "推送分支 '$branch'…" DarkCyan
+                Write-ReleaseMessage '' 'PUSH' "推送分支 '$branch'…" Cyan
                 Invoke-Git -GitArgs @('push', $remote, "HEAD:refs/heads/$remoteBranch") | Out-Null
             }
-            Write-ReleaseMessage '⬆️' "推送标签 $currentTag…" DarkCyan
+            Write-ReleaseMessage '' 'PUSH' "推送标签 $currentTag…" Cyan
             Invoke-Git -GitArgs @('push', $remote, "refs/tags/$currentTag") | Out-Null
-            Write-ReleaseMessage '✅' "$currentTag 已发布，GitHub Actions 将自动构建 Windows amd64 程序并创建 Release。" Green
+            Write-ReleaseMessage '' 'DONE' "$currentTag 已发布，GitHub Actions 将自动构建 Windows amd64 程序并创建 Release。" Green Green
             return
         }
     }
@@ -164,38 +168,38 @@ try {
             'minor' { '次版本' }
             'major' { '主版本' }
         }
-        Write-ReleaseMessage '📦' "版本：$currentVersion → $nextVersion（$levelName）" Cyan
-        Write-ReleaseMessage '📝' "将更新 mygo.json 并创建提交，然后创建标签 $nextTag。" Gray
-        Write-ReleaseMessage '⬆️' "将推送分支 '$branch' 和标签 $nextTag。" Gray
+        Write-ReleaseMessage '' 'VERSION' "版本：$currentVersion → $nextVersion（$levelName）" Cyan
+        Write-ReleaseMessage '' 'COMMIT' "将更新 mygo.json 并创建提交，然后创建标签 $nextTag。" Gray
+        Write-ReleaseMessage '' 'PUSH' "将推送分支 '$branch' 和标签 $nextTag。" Gray
         if ($ahead -gt 0) {
-            Write-ReleaseMessage '⚠️' "还会一并推送分支上的 $ahead 个已有本地提交。" DarkYellow
+            Write-ReleaseMessage '' 'WARN' "还会一并推送分支上的 $ahead 个已有本地提交。" Yellow
         }
-        Write-ReleaseMessage '📋' '预览模式结束，未修改文件或推送内容。' DarkGray
+        Write-ReleaseMessage '' 'PREVIEW' '预览模式结束，未修改文件或推送内容。' DarkGray
         return
     }
 
-    Write-ReleaseMessage '📦' "准备发布：$currentVersion → $nextVersion" Cyan
+    Write-ReleaseMessage '' 'VERSION' "准备发布：$currentVersion → $nextVersion" Cyan
     if ($ahead -gt 0) {
-        Write-ReleaseMessage 'ℹ️' "分支 '$branch' 还有 $ahead 个已提交的本地提交，也会一并推送。" DarkYellow
+        Write-ReleaseMessage '' 'INFO' "分支 '$branch' 还有 $ahead 个已提交的本地提交，也会一并推送。" Yellow
     }
     [System.IO.File]::WriteAllText($configPath, $updatedConfig, [System.Text.UTF8Encoding]::new($false))
 
-    Write-ReleaseMessage '📝' '更新版本号并创建提交…' DarkCyan
+    Write-ReleaseMessage '' 'COMMIT' '更新版本号并创建提交…' Cyan
     Invoke-Git -GitArgs @('add', '--', 'mygo.json') | Out-Null
     Invoke-Git -GitArgs @('commit', '-m', "Bump application version to $nextVersion") | Out-Null
-    Write-ReleaseMessage '🏷️' "创建标签 $nextTag…" DarkCyan
+    Write-ReleaseMessage '' 'TAG' "创建标签 $nextTag…" Cyan
     Invoke-Git -GitArgs @('tag', '-a', $nextTag, '-m', "$($config.name) $nextTag") | Out-Null
 
     try {
-        Write-ReleaseMessage '⬆️' "推送分支 '$branch'…" DarkCyan
+        Write-ReleaseMessage '' 'PUSH' "推送分支 '$branch'…" Cyan
         Invoke-Git -GitArgs @('push', $remote, "HEAD:refs/heads/$remoteBranch") | Out-Null
-        Write-ReleaseMessage '⬆️' "推送标签 $nextTag…" DarkCyan
+        Write-ReleaseMessage '' 'PUSH' "推送标签 $nextTag…" Cyan
         Invoke-Git -GitArgs @('push', $remote, "refs/tags/$nextTag") | Out-Null
     } catch {
         throw "$nextTag 已在本地提交并创建标签，但推送失败。再次运行 'fnmovie $Level' 可继续发布；也可以手动推送分支和标签。$($_.Exception.Message)"
     }
 
-    Write-ReleaseMessage '✅' "$nextTag 已推送，GitHub Actions 将自动构建 Windows amd64 程序并创建 Release。" Green
+    Write-ReleaseMessage '' 'DONE' "$nextTag 已推送，GitHub Actions 将自动构建 Windows amd64 程序并创建 Release。" Green Green
 } finally {
     Pop-Location
 }
