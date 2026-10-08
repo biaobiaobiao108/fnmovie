@@ -117,8 +117,17 @@ func TestMovieDetailKeepsSlotsStableForLongSynopsis(t *testing.T) {
 			t.Fatalf("synopsis must reserve six lines: %+v, found=%v", synopsis, ok)
 		}
 		if long {
-			if title.Y != titleY || a.detailSynopsisScroll.MaxY <= 0 {
-				t.Fatalf("long synopsis must scroll without moving slots: title=%+v scroll=%+v", title, a.detailSynopsisScroll)
+			preview, ok := tester.Find(item.Overview)
+			if title.Y != titleY || !ok || preview.H != 110 {
+				t.Fatalf("preview must show whole lines without moving slots: title=%+v preview=%+v", title, preview)
+			}
+			tester.Click("展开简介")
+			if !a.detailSynopsisOpen || a.detailSynopsisScroll.MaxY <= 0 {
+				t.Fatalf("full synopsis must remain readable: open=%v scroll=%+v", a.detailSynopsisOpen, a.detailSynopsisScroll)
+			}
+			tester.Click("收起简介")
+			if a.detailSynopsisOpen {
+				t.Fatal("reading view should close explicitly")
 			}
 		} else {
 			titleY = title.Y

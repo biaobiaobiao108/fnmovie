@@ -59,6 +59,7 @@ type appState struct {
 	detailScrollAnimation        smoothScroll
 	detailSynopsisScroll         ui.ScrollState
 	detailSynopsisAnimation      smoothScroll
+	detailSynopsisOpen           bool
 	personScroll                 ui.ScrollState
 	personScrollAnimation        smoothScroll
 	posters                      *PosterLoader
@@ -201,6 +202,7 @@ func (a *appState) view(c *ui.Context) {
 		})
 	})
 	a.loginModal(c)
+	a.detailSynopsisDialog(c)
 	a.syncHomeCarousel()
 }
 
@@ -659,6 +661,7 @@ func (a *appState) openDetail(item MediaItem) {
 	a.detailScrollAnimation.Stop(0)
 	a.detailSynopsisScroll = ui.ScrollState{}
 	a.detailSynopsisAnimation.Stop(0)
+	a.detailSynopsisOpen = false
 	a.seriesLoading, a.seriesError, a.selectedSeasonID = false, "", ""
 	a.castLoading, a.castError = true, ""
 	a.seriesEpisodes, a.seriesEpisodeCache = nil, nil
@@ -942,22 +945,26 @@ func (a *appState) detailPosterActions(c *ui.Context, item MediaItem) {
 			}
 			loading := a.playbackLoading && a.playbackLoadingID == playItem.ID
 			if loading {
-				button := primaryActionButton(c, "").Width(168).Label("取消准备播放")
+				button := detailPlayButton(c, "").Label("取消准备播放")
 				button.Children(func() {
-					ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-						ui.Spinner(c).FontSize(13)
-						ui.Text(c, "正在准备播放…").FontSize(13).Bold()
+					ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+						ui.Spinner(c).Size(12, 12)
+						ui.Text(c, "正在准备播放…").FontSize(12)
 					})
 				})
 				if button.Clicked() {
 					a.cancelPlaybackLoading()
 				}
-			} else if primaryActionButton(c, label).Width(168).Disabled(!available).Clicked() {
+			} else if detailPlayButton(c, label).Disabled(!available).Clicked() {
 				a.startPlayback(playItem)
 			}
 			a.favoriteButton(c, item)
 		})
 	})
+}
+
+func detailPlayButton(c *ui.Context, label string) *ui.Element {
+	return primaryActionButton(c, label).Width(136).Height(32).Padding(6, 10).Radius(8).BorderWidth(0).FontSize(13)
 }
 
 func detailViewportHeight(c *ui.Context) float32 {
@@ -974,15 +981,44 @@ func detailContentInset(c *ui.Context) float32 {
 func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
 	ui.Column(c).Gap(12).Children(func() {
 		ui.Text(c, item.Subtitle()).Height(20).FontSize(14).TextColor(c.Theme().TextMuted).SingleLine()
-		advanceSmoothScroll(c, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
-		synopsis := ui.Scroll(c).Key("detail-synopsis:" + item.ID).Height(132).FillWidth().Label("影片简介").Children(func() {
+		ui.Column(c).Key("detail-synopsis:" + item.ID).Height(132).FillWidth().Label("影片简介").Children(func() {
 			text := item.Overview
 			if strings.TrimSpace(text) == "" {
 				text = "暂无简介"
 			}
-			ui.Text(c, text).MaxWidth(860).FontSize(15).TextColor(c.Theme().TextMuted)
+			ui.Text(c, text).Height(110).MaxWidth(860).FontSize(15).FixedLineHeight(22).MaxLines(5).TextColor(c.Theme().TextMuted)
+			if strings.TrimSpace(item.Overview) != "" {
+				if actionButton(c, "展开简介").AlignSelf(ui.Start).Height(22).Padding(0).BorderWidth(0).Background(ui.Transparent).FontSize(12).TextColor(c.Theme().Accent).Clicked() {
+					a.detailSynopsisOpen = true
+					a.detailSynopsisScroll = ui.ScrollState{}
+					a.detailSynopsisAnimation.Stop(0)
+				}
+			}
 		})
-		bindSmoothScroll(c, synopsis, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
+	})
+}
+
+func (a *appState) detailSynopsisDialog(c *ui.Context) {
+	if a.selected == nil || a.playback.Active {
+		a.detailSynopsisOpen = false
+		return
+	}
+	item := *a.selected
+	width, height := c.Size()
+	ui.Modal(c, &a.detailSynopsisOpen, func() {
+		ui.Column(c).Width(min(float32(760), width-64)).Padding(24).Gap(16).Radius(12).Background(c.Theme().Surface).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
+				ui.Text(c, item.Title).Grow(1).FontSize(20).Bold().SingleLine()
+				if actionButton(c, "收起简介").FontSize(12).Clicked() {
+					a.detailSynopsisOpen = false
+				}
+			})
+			advanceSmoothScroll(c, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
+			scroll := ui.Scroll(c).Height(min(float32(440), height-180)).FillWidth().Children(func() {
+				ui.Text(c, item.Overview).FontSize(15).FixedLineHeight(22).TextColor(c.Theme().TextMuted)
+			})
+			bindSmoothScroll(c, scroll, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
+		})
 	})
 }
 
