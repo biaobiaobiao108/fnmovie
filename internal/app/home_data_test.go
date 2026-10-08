@@ -51,10 +51,28 @@ func TestLiveNASHomeReadOnly(t *testing.T) {
 }
 
 func TestContinueWatchingRecordsAndDetailHierarchy(t *testing.T) {
+	var infoRequests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/play/list":
-			writeJSON(t, w, `{"code":0,"data":[{"guid":"episode","title":"Episode title","type":"Episode","parent_guid":"season","tv_title":"Series","ts":125,"duration":100,"single_child_guid":"do-not-use"},{"guid":"movie","title":"Movie","type":"Movie","ts":-2},{"title":"Invalid"}]}`)
+			writeJSON(t, w, `{"code":0,"data":[{"guid":"episode","title":"Episode title","type":"Episode","parent_guid":"season","tv_title":"Series","ts":25,"duration":100,"single_child_guid":"do-not-use"},{"guid":"movie","title":"Movie","type":"Movie","ts":-2},{"title":"Invalid"}]}`)
+		case "/api/v1/play/info":
+			var body struct {
+				ItemGUID string `json:"item_guid"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode play info request: %v", err)
+			}
+			infoRequests = append(infoRequests, body.ItemGUID)
+			switch body.ItemGUID {
+			case "episode":
+				writeJSON(t, w, `{"code":0,"data":{"ts":125}}`)
+			case "movie":
+				writeJSON(t, w, `{"code":0,"data":{"ts":42}}`)
+			default:
+				t.Errorf("unexpected play info item GUID %q", body.ItemGUID)
+				writeJSON(t, w, `{"code":0,"data":{}}`)
+			}
 		case "/api/v1/item/episode":
 			writeJSON(t, w, `{"code":0,"data":{"guid":"episode","title":"Episode title","type":"Episode","parent_guid":"season"}}`)
 		case "/api/v1/item/season":
@@ -71,12 +89,50 @@ func TestContinueWatchingRecordsAndDetailHierarchy(t *testing.T) {
 	if err != nil || len(records) != 2 {
 		t.Fatalf("records=%+v err=%v", records, err)
 	}
-	if records[0].RecordGUID != "episode" || records[0].Media.ID != "episode" || records[0].Position != 100 || records[1].Position != 0 || records[1].Duration != 0 {
+	if records[0].RecordGUID != "episode" || records[0].Media.ID != "episode" || records[0].Position != 100 || records[1].RecordGUID != "movie" || records[1].Position != 42 || records[1].Duration != 0 {
 		t.Fatalf("normalization=%+v", records)
+	}
+	if !reflect.DeepEqual(infoRequests, []string{"episode", "movie"}) {
+		t.Fatalf("play info requests=%v", infoRequests)
 	}
 	detail, err := client.ContinueWatchingDetailContext(context.Background(), records[0])
 	if err != nil || detail.ID != "tv" || !detail.IsSeries || detail.Backdrop != "wide.jpg" || detail.Logo != "logo.png" || !reflect.DeepEqual(detail.Genres, []string{"Drama"}) || !reflect.DeepEqual(detail.Countries, []string{"China"}) {
 		t.Fatalf("detail=%+v err=%v", detail, err)
+	}
+}
+
+func TestContinueWatchingKeepsRecordsWhenOnePlayInfoLookupFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/play/list":
+			writeJSON(t, w, `{"code":0,"data":[{"guid":"first","title":"First","type":"Movie","ts":10},{"guid":"missing","title":"Missing","type":"Movie","ts":20},{"guid":"last","title":"Last","type":"Movie","ts":30}]}`)
+		case "/api/v1/play/info":
+			var body struct {
+				ItemGUID string `json:"item_guid"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode play info request: %v", err)
+			}
+			if body.ItemGUID == "missing" {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			writeJSON(t, w, `{"code":0,"data":{"ts":5}}`)
+		default:
+			t.Errorf("unexpected request %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	items, err := NewServer(server.URL, "token").ContinueWatchingContext(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "missing") {
+		t.Fatalf("expected a per-record info error, got %v", err)
+	}
+	if len(items) != 2 || items[0].RecordGUID != "first" || items[1].RecordGUID != "last" {
+		t.Fatalf("successful records/order not preserved: %+v", items)
+	}
+	if items[0].Position != 5 || items[1].Position != 5 {
+		t.Fatalf("progress did not come from play/info: %+v", items)
 	}
 }
 

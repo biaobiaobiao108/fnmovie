@@ -96,6 +96,9 @@ func (a *appState) loadContinueWatching(force bool) {
 			a.home.ContinueLoading, a.home.ContinueCancel = false, nil
 			if err != nil {
 				a.home.ContinueErr = err.Error()
+				if len(items) > 0 {
+					a.home.Continue, a.home.ContinueUpdatedAt = items, time.Now()
+				}
 				return
 			}
 			a.home.Continue, a.home.ContinueUpdatedAt = items, time.Now()

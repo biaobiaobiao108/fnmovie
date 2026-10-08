@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
+	"time"
 )
 
 func TestCatalogCachePersistsDetailAndCastByServer(t *testing.T) {
@@ -96,5 +98,70 @@ func TestCatalogCacheIsolatesAccountsOnSameServer(t *testing.T) {
 	bob, _ := cache.Detail(server, item.ID, "bob")
 	if alice.Title == bob.Title || !alice.Favorite || bob.Favorite {
 		t.Fatalf("account-specific details overwritten: alice=%+v bob=%+v", alice, bob)
+	}
+}
+
+func TestCatalogCacheEvictsOldestEntriesWithinEachBound(t *testing.T) {
+	usage := map[string]time.Time{}
+	check := func(kind string, keys []string) {
+		t.Helper()
+		for i, key := range keys {
+			usage[catalogUsageKey(kind, key)] = time.Unix(int64(i+1), 0)
+		}
+	}
+	keys := func(limit int) []string {
+		result := make([]string, limit+1)
+		for i := range result {
+			result[i] = strconv.Itoa(i)
+		}
+		return result
+	}
+
+	libraryKeys := keys(catalogMaxLibrarySets)
+	pageKeys := keys(catalogMaxPages)
+	detailKeys := keys(catalogMaxDetails)
+	check("libraries", libraryKeys)
+	check("pages", pageKeys)
+	check("details", detailKeys)
+
+	libraries := make(map[string]int, len(libraryKeys))
+	for _, key := range libraryKeys {
+		libraries[key] = 1
+	}
+	pages := make(map[string]int, len(pageKeys))
+	for _, key := range pageKeys {
+		pages[key] = 1
+	}
+	details := make(map[string]int, len(detailKeys))
+	for _, key := range detailKeys {
+		details[key] = 1
+	}
+	trimCatalogEntries(libraries, usage, "libraries", catalogMaxLibrarySets)
+	trimCatalogEntries(pages, usage, "pages", catalogMaxPages)
+	trimCatalogEntries(details, usage, "details", catalogMaxDetails)
+
+	for _, entry := range []struct {
+		kind    string
+		limit   int
+		entries map[string]int
+		oldest  string
+		newest  string
+	}{
+		{"libraries", catalogMaxLibrarySets, libraries, libraryKeys[0], libraryKeys[len(libraryKeys)-1]},
+		{"pages", catalogMaxPages, pages, pageKeys[0], pageKeys[len(pageKeys)-1]},
+		{"details", catalogMaxDetails, details, detailKeys[0], detailKeys[len(detailKeys)-1]},
+	} {
+		if len(entry.entries) != entry.limit {
+			t.Errorf("%s cache size = %d, want %d", entry.kind, len(entry.entries), entry.limit)
+		}
+		if _, ok := entry.entries[entry.oldest]; ok {
+			t.Errorf("%s cache retained oldest entry %q", entry.kind, entry.oldest)
+		}
+		if _, ok := entry.entries[entry.newest]; !ok {
+			t.Errorf("%s cache evicted newest entry %q", entry.kind, entry.newest)
+		}
+	}
+	if len(usage) != catalogMaxLibrarySets+catalogMaxPages+catalogMaxDetails {
+		t.Fatalf("eviction left stale usage records: %d", len(usage))
 	}
 }

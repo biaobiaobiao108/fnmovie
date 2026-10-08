@@ -64,6 +64,7 @@ type appState struct {
 	personScrollAnimation        smoothScroll
 	posters                      *PosterLoader
 	selected                     *MediaItem
+	detailRequest                uint64
 	seriesLoading                bool
 	seriesError                  string
 	castLoading                  bool
@@ -645,6 +646,8 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 }
 
 func (a *appState) openDetail(item MediaItem) {
+	a.detailRequest++
+	detailRequest := a.detailRequest
 	a.catalogScrollAnimation.Stop(a.catalogScroll.Y)
 	a.personScrollAnimation.Stop(a.personScroll.Y)
 	a.closePerson()
@@ -697,11 +700,13 @@ func (a *appState) openDetail(item MediaItem) {
 			}
 			if detailErr == nil {
 				detail.Seasons = seasons
-				cache.SetDetail(serverURL, detail, username)
 			}
 			a.window.Update(func() {
-				if a.server != server || a.selected == nil || a.selected.ID != item.ID {
+				if !a.isCurrentDetailRequest(server, item.ID, detailRequest) {
 					return
+				}
+				if detailErr == nil {
+					go cache.SetDetail(serverURL, detail, username)
 				}
 				a.seriesLoading = false
 				a.seriesRootCast = append([]CastMember(nil), people...)
@@ -738,11 +743,13 @@ func (a *appState) openDetail(item MediaItem) {
 			} else {
 				detail.Cast = item.Cast
 			}
-			cache.SetDetail(serverURL, detail, username)
 		}
 		a.window.Update(func() {
-			if a.server != server || a.selected == nil || a.selected.ID != item.ID {
+			if !a.isCurrentDetailRequest(server, item.ID, detailRequest) {
 				return
+			}
+			if err == nil {
+				go cache.SetDetail(serverURL, detail, username)
 			}
 			a.castLoading = false
 			if err != nil {

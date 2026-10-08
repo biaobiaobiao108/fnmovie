@@ -31,12 +31,30 @@ func TestCatalogStatesKeepRecentAndActiveResults(t *testing.T) {
 func TestCloseDetailReleasesEpisodesAndInvalidatesRequests(t *testing.T) {
 	a := &appState{selected: &MediaItem{}, seriesEpisodes: []MediaItem{{ID: "episode"}},
 		seriesEpisodeCache: map[string][]MediaItem{"season": {{ID: "episode"}}},
-		seriesRootCast:     []CastMember{{}}, seriesEpisodeRequest: 2, seriesCastRequest: 3}
+		seriesRootCast:     []CastMember{{}}, seriesEpisodeRequest: 2, seriesCastRequest: 3, detailRequest: 7}
 	a.closeDetail()
 	if a.selected != nil || a.seriesEpisodes != nil || a.seriesEpisodeCache != nil || a.seriesRootCast != nil {
 		t.Fatal("closed detail retained derived metadata")
 	}
 	if a.seriesEpisodeRequest != 3 || a.seriesCastRequest != 4 {
 		t.Fatal("pending requests still valid")
+	}
+	if a.detailRequest != 8 {
+		t.Fatal("pending detail request still valid")
+	}
+}
+
+func TestDetailRequestGenerationRejectsPreviousOpen(t *testing.T) {
+	server := NewServer("http://nas.example/v", "")
+	a := &appState{server: server, selected: &MediaItem{ID: "movie"}, detailRequest: 2}
+	if !a.isCurrentDetailRequest(server, "movie", 2) {
+		t.Fatal("current detail request was rejected")
+	}
+	if a.isCurrentDetailRequest(server, "movie", 1) {
+		t.Fatal("previous detail open was accepted")
+	}
+	a.selected.ID = "other"
+	if a.isCurrentDetailRequest(server, "movie", 2) {
+		t.Fatal("request for another selected item was accepted")
 	}
 }

@@ -522,6 +522,7 @@ func (s *Server) ContinueWatchingContext(ctx context.Context) ([]ContinueWatchin
 		return nil, err
 	}
 	out := make([]ContinueWatchingItem, 0)
+	var infoErrors []error
 	for _, object := range mapsFromList(unwrapData(response)) {
 		mediaObject := object
 		if nested, ok := object["item"].(map[string]any); ok {
@@ -542,7 +543,21 @@ func (s *Server) ContinueWatchingContext(ctx context.Context) ([]ContinueWatchin
 		if parent == "" {
 			parent = media.SeriesParentID
 		}
-		position := nonnegativeNumber(object, "ts", "position", "playback_position")
+		// /play/list supplies the ordered record set and its item GUIDs, but its
+		// progress can be stale. Resolve the current playback position from the
+		// authoritative /play/info endpoint for each record.
+		infoBody := struct {
+			ItemGuid string `json:"item_guid"`
+		}{guid}
+		var infoResponse any
+		if err := s.requestContext(ctx, "POST", "v1", "play/info", infoBody, &infoResponse, s.tokenValue()); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			infoErrors = append(infoErrors, fmt.Errorf("读取续播位置失败（%s）：%w", guid, err))
+			continue
+		}
+		position := nonnegativeNumber(firstObject(unwrapData(infoResponse)), "ts", "position", "playback_position")
 		duration := nonnegativeNumber(object, "duration", "total_duration")
 		if duration == 0 {
 			duration = nonnegativeNumber(mediaObject, "duration")
@@ -555,7 +570,7 @@ func (s *Server) ContinueWatchingContext(ctx context.Context) ([]ContinueWatchin
 		}
 		out = append(out, ContinueWatchingItem{Media: media, RecordGUID: guid, ParentGUID: parent, Position: position, Duration: duration})
 	}
-	return out, nil
+	return out, errors.Join(infoErrors...)
 }
 
 func nonnegativeNumber(object map[string]any, keys ...string) float64 {
