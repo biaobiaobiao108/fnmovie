@@ -59,3 +59,7 @@ pwsh -File scripts/build-windows.ps1
 ```
 
 Windows x64 构建输出到 `out\fnmovie-20261007\windows-amd64`。
+
+### 发布版本
+
+在 PowerShell 中运行一次 `pwsh -File scripts/install-command.ps1`，然后在仓库目录输入 `fnmovie patch`、`fnmovie minor` 或 `fnmovie major`。命令会更新 `mygo.json` 版本、提交并创建对应的 `vX.Y.Z` tag，再依次推送当前分支和 tag；tag 会触发 GitHub Actions 构建并发布 Windows amd64 安装包。发布要求工作区干净且当前分支配置了远程 upstream；当前分支上已提交但尚未推送的提交也会一起推送。可用 `fnmovie patch -WhatIf` 预览。
