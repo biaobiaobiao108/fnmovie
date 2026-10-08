@@ -9,8 +9,6 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-var homeNavigationIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m3 10 9-7 9 7M5 9v11h5v-6h4v6h5V9"/></svg>`))
-
 type homeState struct {
 	Heroes                                                      []MediaItem
 	HeroIndex, HeroPrevious                                     int

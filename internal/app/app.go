@@ -238,10 +238,10 @@ func (a *appState) sidebar(c *ui.Context) {
 			})
 		})
 		ui.Box(c).Height(15)
-		a.navButton(c, "", "首页", "home")
-		a.navButton(c, "▣", "电影", "movies")
-		a.navButton(c, "▤", "电视节目", "tv")
-		a.navButton(c, "♡", "我的收藏", "favorites")
+		a.navButton(c, sidebarNavIcon("home"), "首页", "home")
+		a.navButton(c, sidebarNavIcon("movies"), "电影", "movies")
+		a.navButton(c, sidebarNavIcon("tv"), "电视节目", "tv")
+		a.navButton(c, sidebarNavIcon("favorites"), "我的收藏", "favorites")
 		ui.Text(c, "影视库").Padding(6, 14).FontSize(11).Bold().TextColor(t.TextMuted)
 		libraries := a.libraries
 		a.sidebarList.Key = func(i int) any { return libraries[i].ID }
@@ -281,7 +281,7 @@ func (a *appState) sidebar(c *ui.Context) {
 				exitBtn.Background(ui.Hex("#eeece6"))
 			}
 			exitBtn.Children(func() {
-				ui.Text(c, "⇥").FontSize(16).Width(20).TextAlign(ui.Center)
+				ui.Icon(c, sidebarNavIcon("logout")).Size(20, 20).TextColor(t.TextMuted)
 				ui.Text(c, "退出登录").FontSize(13)
 			})
 			if exitBtn.Clicked() {
@@ -289,12 +289,12 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 		} else if !a.loggedIn {
 			loginBtn := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
-				Background(ui.Color{}).TextColor(t.TextMuted)
+				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
 			if loginBtn.Hovered() {
 				loginBtn.Background(ui.Hex("#eeece6"))
 			}
 			loginBtn.Children(func() {
-				ui.Text(c, "🔑").FontSize(14).Width(20).TextAlign(ui.Center)
+				ui.Icon(c, sidebarNavIcon("login")).Size(20, 20).TextColor(t.TextMuted)
 				ui.Text(c, "登录到服务器").FontSize(13)
 			})
 			if loginBtn.Clicked() {
@@ -304,7 +304,7 @@ func (a *appState) sidebar(c *ui.Context) {
 	})
 }
 
-func (a *appState) navButton(c *ui.Context, icon, label, key string) {
+func (a *appState) navButton(c *ui.Context, icon *ui.SVG, label, key string) {
 	selected := a.section == key
 	e := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0)
 	e.Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
@@ -317,10 +317,12 @@ func (a *appState) navButton(c *ui.Context, icon, label, key string) {
 		}
 	}
 	e.Children(func() {
-		if key == "home" {
-			ui.Icon(c, homeNavigationIcon).Size(20, 20)
-		} else {
-			ui.Text(c, icon).FontSize(16).Width(20).TextAlign(ui.Center)
+		iconColor := c.Theme().TextMuted
+		if selected {
+			iconColor = c.Theme().Accent
+		}
+		if icon != nil {
+			ui.Icon(c, icon).Size(20, 20).TextColor(iconColor)
 		}
 		ui.Text(c, label).FontSize(13)
 	})
