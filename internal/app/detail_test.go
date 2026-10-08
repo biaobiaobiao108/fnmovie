@@ -96,7 +96,8 @@ func TestMovieDetailViewLayout(t *testing.T) {
 	saveDetailPreview(t, tester, "movie")
 }
 
-func TestMovieDetailCentersShortContentAndScrollsLongContent(t *testing.T) {
+func TestMovieDetailKeepsSlotsStableForLongSynopsis(t *testing.T) {
+	var titleY float32
 	for _, long := range []bool{false, true} {
 		item := MediaItem{ID: "layout", Kind: "movie", Title: "居中详情", Overview: "简洁的影片介绍。"}
 		if long {
@@ -109,11 +110,46 @@ func TestMovieDetailCentersShortContentAndScrollsLongContent(t *testing.T) {
 			t.Fatal("detail title missing")
 		}
 		if long {
-			if title.Y > 200 || a.detailScroll.MaxY <= 0 {
-				t.Fatalf("long detail must start at top and scroll: title=%+v scroll=%+v", title, a.detailScroll)
+			if title.Y != titleY || a.detailSynopsisScroll.MaxY <= 0 {
+				t.Fatalf("long synopsis must scroll without moving slots: title=%+v scroll=%+v", title, a.detailSynopsisScroll)
 			}
-		} else if title.Y < 300 || a.detailScroll.MaxY > 1 {
-			t.Fatalf("short detail must center without overflow: title=%+v scroll=%+v", title, a.detailScroll)
+		} else {
+			titleY = title.Y
+			if a.detailSynopsisScroll.MaxY > 1 {
+				t.Fatalf("short synopsis must not overflow: %+v", a.detailSynopsisScroll)
+			}
+		}
+	}
+}
+
+func TestMovieAndSeriesShareDetailAnchors(t *testing.T) {
+	for _, size := range [][2]int{{960, 640}, {1280, 800}, {1920, 1080}} {
+		var moviePlay, movieCast ui.Rect
+		for _, series := range []bool{false, true} {
+			item := MediaItem{ID: "anchors", Title: "统一详情布局", Kind: "movie", Overview: "短简介"}
+			if series {
+				item.Kind, item.IsSeries = "tv", true
+				item.Overview = strings.Repeat("更长的简介也不改变操作区域位置。", 20)
+				item.Cast = []CastMember{{Name: "演员", Role: "主角"}}
+				item.Seasons = []MediaSeason{{ID: "season", Title: "第 1 季"}}
+			}
+			a := &appState{selected: &item, section: "movies", catalogs: map[string]*CatalogState{},
+				seriesEpisodes: []MediaItem{{ID: "episode", Title: "第一集"}}}
+			tester := ui.NewTester(a.view, size[0], size[1])
+			playLabel := "▶  立即播放"
+			if series {
+				playLabel = "▶  播放本季首集"
+			}
+			play, playOK := tester.Find(playLabel)
+			cast, castOK := tester.Find("演职人员")
+			if !playOK || !castOK {
+				t.Fatal("missing anchored controls")
+			}
+			if !series {
+				moviePlay, movieCast = play, cast
+			} else if play.X+play.W/2 != moviePlay.X+moviePlay.W/2 || play.Y != moviePlay.Y || cast.X != movieCast.X || cast.Y != movieCast.Y {
+				t.Fatalf("%v anchors differ: movie=%+v/%+v series=%+v/%+v", size, moviePlay, movieCast, play, cast)
+			}
 		}
 	}
 }
@@ -230,7 +266,7 @@ func TestSeriesDetailViewScroll(t *testing.T) {
 
 	// Scroll down within the scroll container
 	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
-	tester.Scroll(600, 300, 0, 800)
+	tester.Scroll(600, 700, 0, 1200)
 
 	// After scrolling, later episodes should become visible
 	r25, ok25 := tester.Find("第25集")

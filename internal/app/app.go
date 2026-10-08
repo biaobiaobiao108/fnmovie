@@ -57,6 +57,8 @@ type appState struct {
 	detailList                   ui.ListState
 	detailScroll                 ui.ScrollState
 	detailScrollAnimation        smoothScroll
+	detailSynopsisScroll         ui.ScrollState
+	detailSynopsisAnimation      smoothScroll
 	personScroll                 ui.ScrollState
 	personScrollAnimation        smoothScroll
 	posters                      *PosterLoader
@@ -655,6 +657,8 @@ func (a *appState) openDetail(item MediaItem) {
 	a.detailList = ui.ListState{}
 	a.detailScroll = ui.ScrollState{}
 	a.detailScrollAnimation.Stop(0)
+	a.detailSynopsisScroll = ui.ScrollState{}
+	a.detailSynopsisAnimation.Stop(0)
 	a.seriesLoading, a.seriesError, a.selectedSeasonID = false, "", ""
 	a.castLoading, a.castError = true, ""
 	a.seriesEpisodes, a.seriesEpisodeCache = nil, nil
@@ -769,15 +773,11 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 			}
 			advanceSmoothScroll(c, &a.detailScroll, &a.detailScrollAnimation)
 			scroll := ui.Scroll(c).Key("movie-detail:" + item.ID).Grow(1).AlignSelf(ui.Stretch).FillHeight().Children(func() {
-				ui.Column(c).MinHeight(detailViewportHeight(c)).Justify(ui.Center).Padding(20, 0).Gap(17).Children(func() {
-					ui.Text(c, item.Title).FontSize(30).Bold()
-					ui.Text(c, item.Subtitle()).FontSize(15).TextColor(t.TextMuted)
-					if item.Overview != "" {
-						ui.Text(c, item.Overview).MaxWidth(860).FontSize(15).TextColor(ui.Hex("#66716b"))
-					}
-					ui.Row(c).Gap(13).AlignItems(ui.Center).Children(func() {
+				ui.Column(c).Padding(detailContentInset(c), 0, 20, 0).Gap(17).Children(func() {
+					a.detailIntro(c, item)
+					ui.Row(c).Height(36).Gap(13).AlignItems(ui.Center).Children(func() {
 						if a.playbackLoading && a.playbackLoadingID == item.ID {
-							btn := actionButton(c, "").Padding(9, 16).Radius(8).BorderWidth(0).
+							btn := actionButton(c, "").Width(168).Padding(9, 16).Radius(8).BorderWidth(0).
 								Background(t.Accent).TextColor(t.AccentText).Disabled(true)
 							btn.Children(func() {
 								ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -786,14 +786,14 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 								})
 							})
 						} else {
-							if primaryActionButton(c, "▶  立即播放").Clicked() {
+							if primaryActionButton(c, "▶  立即播放").Width(168).Clicked() {
 								a.startPlayback(item)
 							}
 						}
-						a.playbackCancelButton(c)
 						a.favoriteButton(c, item)
+						a.playbackCancelButton(c)
 					})
-					a.castSection(c, item)
+					ui.Column(c).Height(200).Children(func() { a.castSection(c, item) })
 					if len(item.Sources) > 0 {
 						ui.Text(c, "可播放版本").FontSize(15).Bold().TextColor(t.TextMuted)
 						for _, source := range item.Sources {
@@ -820,7 +820,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 	posterWidth, posterHeight := detailPosterSize(c)
 	ui.Column(c).Grow(1).FillHeight().Gap(8).Children(func() {
 		a.detailBackButton(c)
-		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Start).Gap(32).Padding(12, 0).Children(func() {
+		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Center).Gap(32).Children(func() {
 			if poster := a.imageFor(item, posterWidth, posterHeight); poster != nil {
 				ui.Image(c, poster).Size(float32(posterWidth), float32(posterHeight)).Fit(ui.Cover).Radius(13)
 			} else {
@@ -845,17 +845,13 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 			list := ui.List(c, &a.detailList, rows, func(i int) {
 				switch i {
 				case 0:
-					ui.Column(c).Gap(14).Padding(0, 0, 12, 0).Children(func() {
-						ui.Text(c, item.Title).FontSize(28).Bold()
-						ui.Text(c, item.Subtitle()).FontSize(15).TextColor(t.TextMuted)
-						if item.Overview != "" {
-							ui.Text(c, item.Overview).MaxWidth(860).FontSize(15).TextColor(t.TextMuted).MaxLines(5)
-						}
-						ui.Row(c).Gap(13).AlignItems(ui.Center).Children(func() {
+					ui.Column(c).Gap(17).Padding(0, 0, 15, 0).Children(func() {
+						a.detailIntro(c, item)
+						ui.Row(c).Height(36).Gap(13).AlignItems(ui.Center).Children(func() {
 							if len(a.seriesEpisodes) > 0 {
 								firstEp := a.seriesEpisodes[0]
 								if a.playbackLoading && a.playbackLoadingID == firstEp.ID {
-									btn := actionButton(c, "").Padding(9, 16).Radius(8).BorderWidth(0).
+									btn := actionButton(c, "").Width(168).Padding(9, 16).Radius(8).BorderWidth(0).
 										Background(t.Accent).TextColor(t.AccentText).Disabled(true)
 									btn.Children(func() {
 										ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
@@ -863,16 +859,18 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 											ui.Text(c, "正在准备首集…").FontSize(13).Bold()
 										})
 									})
-								} else if primaryActionButton(c, "▶  播放本季首集").Clicked() {
+								} else if primaryActionButton(c, "▶  播放本季首集").Width(168).Clicked() {
 									a.startPlayback(firstEp)
 								}
+							} else {
+								primaryActionButton(c, "▶  播放本季首集").Width(168).Disabled(true)
 							}
-							a.playbackCancelButton(c)
 							a.favoriteButton(c, item)
+							a.playbackCancelButton(c)
 						})
 					})
 				case 1:
-					ui.Column(c).Padding(0, 0, 12, 0).Children(func() { a.castSection(c, item) })
+					ui.Column(c).Height(200).Children(func() { a.castSection(c, item) })
 				case 2:
 					ui.Column(c).Gap(14).Padding(0, 0, 12, 0).Children(func() {
 						if a.seriesLoading {
@@ -960,7 +958,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 						a.startPlayback(episode)
 					}
 				}
-			}).Grow(1).AlignSelf(ui.Stretch).FillHeight().Gap(2).Padding(8, 0)
+			}).Grow(1).AlignSelf(ui.Stretch).FillHeight().Gap(2).Padding(detailContentInset(c), 0, 20, 0)
 			bindSmoothScroll(c, list, &a.detailScroll, &a.detailScrollAnimation)
 		})
 	})
@@ -976,6 +974,27 @@ func detailViewportHeight(c *ui.Context) float32 {
 	_, height := c.Size()
 	// Global header, outer padding, navigation gap and detail back action.
 	return max(float32(240), height-128)
+}
+
+func detailContentInset(c *ui.Context) float32 {
+	return max(float32(12), (detailViewportHeight(c)-640)/2)
+}
+
+// Shared fixed slots keep playback and credits anchored as metadata arrives.
+func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
+	ui.Column(c).Gap(12).Children(func() {
+		ui.Text(c, item.Title).Height(72).FontSize(28).Bold().MaxLines(2)
+		ui.Text(c, item.Subtitle()).Height(20).FontSize(14).TextColor(c.Theme().TextMuted).SingleLine()
+		advanceSmoothScroll(c, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
+		synopsis := ui.Scroll(c).Key("detail-synopsis:" + item.ID).Height(84).FillWidth().Children(func() {
+			text := item.Overview
+			if strings.TrimSpace(text) == "" {
+				text = "暂无简介"
+			}
+			ui.Text(c, text).MaxWidth(860).FontSize(15).TextColor(c.Theme().TextMuted)
+		})
+		bindSmoothScroll(c, synopsis, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
+	})
 }
 
 func episodeOverview(episode MediaItem) string {
