@@ -132,6 +132,14 @@ try {
         throw "Remote tag '$nextTag' already exists."
     }
 
+    $versionPattern = '(?m)^(\s*"version"\s*:\s*")[^"]+("\s*,?\s*)$'
+    $versionMatches = [regex]::Matches($configText, $versionPattern)
+    if ($versionMatches.Count -ne 1) {
+        throw 'Expected exactly one top-level version field in mygo.json.'
+    }
+    $updatedConfig = [regex]::Replace($configText, $versionPattern, ('${1}' + $nextVersion + '${2}'), 1)
+    $null = $updatedConfig | ConvertFrom-Json
+
     if ($WhatIf) {
         Write-Host "Would bump $currentVersion -> $nextVersion ($Level), commit mygo.json, create tag $nextTag, then push '$branch' and the tag."
         if ($ahead -gt 0) {
@@ -140,13 +148,6 @@ try {
         return
     }
 
-    $versionPattern = '(?m)^(\s*"version"\s*:\s*")[^"]+("\s*,?\s*)$'
-    $versionMatches = [regex]::Matches($configText, $versionPattern)
-    if ($versionMatches.Count -ne 1) {
-        throw 'Expected exactly one top-level version field in mygo.json.'
-    }
-    $updatedConfig = [regex]::Replace($configText, $versionPattern, ('$1' + $nextVersion + '$2'), 1)
-    $null = $updatedConfig | ConvertFrom-Json
     [System.IO.File]::WriteAllText($configPath, $updatedConfig, [System.Text.UTF8Encoding]::new($false))
 
     Invoke-Git -GitArgs @('add', '--', 'mygo.json') | Out-Host
