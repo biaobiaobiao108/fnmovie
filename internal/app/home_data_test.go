@@ -230,7 +230,7 @@ func TestHomeSamplingLibraryIsolationStableAndBounded(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Error(err)
 		}
-		if body.Library == "" || !reflect.DeepEqual(body.Tags.Types, []string{"Movie", "TV"}) {
+		if body.Library == "" || !reflect.DeepEqual(body.Tags.Types, []string{"Movie", "TV", "Video"}) {
 			t.Errorf("unscoped/wrong filter %+v", body)
 		}
 		mu.Lock()
@@ -290,6 +290,91 @@ func TestHomeSamplingInsufficientAndDuplicateLibraries(t *testing.T) {
 	items, err := NewServer(server.URL, "").HomeHighlightsContext(context.Background(), []MediaLibrary{{ID: "library"}, {ID: "library"}}, 1)
 	if err != nil || len(items) != 2 || pages.Load() != 1 {
 		t.Fatalf("items=%+v err=%v pages=%d", items, err, pages.Load())
+	}
+}
+
+func TestHomeCandidatesIncludePersonalVideoAndExcludeNavigationNodes(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Library string `json:"ancestor_guid"`
+			Tags    struct {
+				Types []string `json:"type"`
+			} `json:"tags"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Library != "personal" || !reflect.DeepEqual(body.Tags.Types, []string{"Movie", "TV", "Video"}) {
+			t.Errorf("personal video query lost library scope or type: %+v", body)
+		}
+		// Even a server that returns extra nodes must not turn folders, live
+		// channels or TV children into playable carousel entries.
+		writeJSON(t, w, `{"code":0,"data":{"total":7,"list":[{"guid":"video","title":"Family trip","type":"Video","ancestor_guid":"personal","posters":"trip.jpg"},{"guid":"video","title":"Duplicate","type":"Video","ancestor_guid":"personal"},{"guid":"folder","title":"Trips","type":"Directory","ancestor_guid":"personal"},{"guid":"channel","title":"Live","type":"LiveChannel","ancestor_guid":"personal"},{"guid":"season","title":"Season","type":"Season","ancestor_guid":"personal"},{"guid":"episode","title":"Episode","type":"Episode","ancestor_guid":"personal"},{"guid":"other","title":"Other library","type":"Video","ancestor_guid":"other-library"}]}}`)
+	}))
+	defer server.Close()
+	items, _, err := NewServer(server.URL, "token").HomeCandidatesPageContext(context.Background(), "personal", 1, 60)
+	if err != nil || len(items) != 1 || items[0].ID != "video" || items[0].Kind != "movie" || items[0].Poster != "trip.jpg" {
+		t.Fatalf("personal video candidates=%+v error=%v", items, err)
+	}
+}
+
+func TestHomeSamplingIncludesPersonalLibraryAndKeepsVideoIdentity(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/item/")
+			if id == "personal-video" {
+				writeJSON(t, w, `{"code":0,"data":{"guid":"personal-video","title":"Family trip","type":"Video","posters":"trip.jpg"}}`)
+			} else {
+				writeJSON(t, w, `{"code":0,"data":{}}`)
+			}
+			return
+		}
+		requests.Add(1)
+		var body struct {
+			Library string `json:"ancestor_guid"`
+			Page    int    `json:"page"`
+			Tags    struct {
+				Types []string `json:"type"`
+			} `json:"tags"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Page != 1 || !reflect.DeepEqual(body.Tags.Types, []string{"Movie", "TV", "Video"}) {
+			t.Errorf("unexpected sampling query: %+v", body)
+		}
+		switch body.Library {
+		case "personal":
+			writeJSON(t, w, `{"code":0,"data":{"total":1,"list":[{"guid":"personal-video","title":"Family trip","type":"Video","ancestor_guid":"personal"}]}}`)
+		case "movies":
+			writeJSON(t, w, `{"code":0,"data":{"total":1,"list":[{"guid":"movie","title":"Movie","type":"Movie","ancestor_guid":"movies"}]}}`)
+		default:
+			t.Errorf("unexpected library %q", body.Library)
+		}
+	}))
+	defer server.Close()
+	client := NewServer(server.URL, "token")
+	libraries := []MediaLibrary{{ID: "personal", Kind: "Other"}, {ID: "movies", Kind: "Movie"}}
+	first, err := client.HomeHighlightsContext(context.Background(), libraries, 42)
+	if err != nil || len(first) != 2 {
+		t.Fatalf("highlights=%+v error=%v", first, err)
+	}
+	second, err := client.HomeHighlightsContext(context.Background(), libraries, 42)
+	if err != nil || !reflect.DeepEqual(first, second) || requests.Load() != 4 {
+		t.Fatalf("unstable or unbounded personal sampling: %+v, %+v, %d requests, %v", first, second, requests.Load(), err)
+	}
+	found := false
+	for _, item := range first {
+		if item.ID == "personal-video" {
+			found = true
+			if firstString(item.Raw, "type") != "Video" || item.Poster != "trip.jpg" || item.IsSeries {
+				t.Fatalf("personal video metadata/identity lost: %+v", item)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("personal library excluded from highlights")
 	}
 }
 

@@ -44,9 +44,10 @@ type blend struct{ Operation, Flags, Alpha, Format byte }
 
 type presenter struct {
 	platform.Surface
-	hwnd, dc, bitmap, previous, bits uintptr
-	width, height                    int
-	alpha                            byte
+	hwnd, dc, bitmap, previous uintptr
+	bits                       unsafe.Pointer
+	width, height              int
+	alpha                      byte
 }
 
 func attach(conn *surface.Conn) *presenter {
@@ -91,7 +92,7 @@ func (p *presenter) PresentPixels(pix []byte, stride, width, height int) {
 	if !p.allocate(width, height) {
 		return
 	}
-	dest := unsafe.Slice((*byte)(unsafe.Pointer(p.bits)), width*height*4)
+	dest := unsafe.Slice((*byte)(p.bits), width*height*4)
 	for y := 0; y < height; y++ {
 		copy(dest[y*width*4:(y+1)*width*4], pix[y*stride:y*stride+width*4])
 	}
@@ -152,6 +153,7 @@ func (p *presenter) freeBitmap() {
 	if p.dc != 0 {
 		deleteDC.Call(p.dc)
 	}
-	p.dc, p.bitmap, p.previous, p.bits = 0, 0, 0, 0
+	p.dc, p.bitmap, p.previous = 0, 0, 0
+	p.bits = nil
 }
 func (p *presenter) close() { p.freeBitmap(); p.hwnd = 0 }

@@ -136,6 +136,10 @@ func runNativeHomeVerification() error {
 				ID string `json:"item_guid"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.ID == "resume" {
+				fmt.Fprint(w, `{"code":0,"data":{"ts":125,"duration":7200}}`)
+				return
+			}
 			resumeRequest <- body.ID
 			// Stop before libmpv loading; the API position behavior is checked
 			// separately above and native decode is covered by the player suite.

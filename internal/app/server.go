@@ -653,7 +653,9 @@ func (s *Server) HomeCandidatesPageContext(ctx context.Context, libraryID string
 	if pageSize < 1 || pageSize > 200 {
 		pageSize = 60
 	}
-	body := map[string]any{"ancestor_guid": libraryID, "page": page, "page_size": pageSize, "tags": map[string]any{"type": []string{"Movie", "TV"}}}
+	// fnOS personal libraries expose playable files as Video, rather than Movie.
+	// Query leaf videos directly; Directory is a navigation node, not a highlight.
+	body := map[string]any{"ancestor_guid": libraryID, "page": page, "page_size": pageSize, "tags": map[string]any{"type": []string{"Movie", "TV", "Video"}}}
 	var response any
 	if err := s.requestContext(ctx, "POST", "v1", "item/list", body, &response, s.tokenValue()); err != nil {
 		return nil, 0, err
@@ -662,6 +664,10 @@ func (s *Server) HomeCandidatesPageContext(ctx context.Context, libraryID string
 	items := filterLibraryItems(normalizeItems(findItemsList(data)), libraryID)
 	out := make([]MediaItem, 0, len(items))
 	for _, item := range items {
+		switch strings.ToLower(firstString(item.Raw, "type")) {
+		case "directory", "livechannel":
+			continue
+		}
 		if item.Kind == "movie" || item.Kind == "tv" {
 			out = append(out, item)
 		}
