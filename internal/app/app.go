@@ -915,7 +915,7 @@ func detailPlayButton(c *ui.Context, label string) ui.Element {
 
 func detailViewportHeight(c *ui.Context) float32 {
 	_, height := c.Size()
-	// Global header, outer padding, navigation gap and single-line detail title.
+	// Global header, outer padding and back navigation row.
 	return max(float32(240), height-146)
 }
 
@@ -926,19 +926,19 @@ func detailContentInset(c *ui.Context) float32 {
 
 func detailSynopsisLines(c *ui.Context) int {
 	_, height := detailPosterSize(c)
-	return max(1, min(8, (height-330)/22))
+	return max(1, min(8, (height-366)/22))
 }
 
 func detailCastGap(c *ui.Context) float32 {
 	_, height := detailPosterSize(c)
-	return max(float32(16), float32(height)-114-float32(detailSynopsisLines(c)*22)-200)
+	return max(float32(0), float32(height)-150-float32(detailSynopsisLines(c)*22)-200)
 }
 
 // Shared fixed slots keep playback and credits anchored as metadata arrives.
 func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
 	lines := detailSynopsisLines(c)
 	ui.Column(c).Children(func() {
-		ui.Text(c, item.Title).FillWidth().Height(36).FixedLineHeight(36).FontSize(26).Bold().SingleLine()
+		ui.Text(c, item.Title).FillWidth().Height(72).FixedLineHeight(36).FontSize(26).Bold().MaxLines(2)
 		ui.Box(c).Height(24)
 		ui.Text(c, item.Subtitle()).Height(20).FontSize(14).TextColor(c.Theme().TextMuted).SingleLine()
 		ui.Box(c).Height(12)

@@ -111,15 +111,15 @@ func TestMovieDetailKeepsSlotsStableForLongSynopsis(t *testing.T) {
 			t.Fatal("detail title missing")
 		}
 		poster, _ := tester.Find("影片海报")
-		if math.Abs(float64(title.Y-poster.Y)) > 3 || title.X <= poster.X+poster.W {
+		if math.Abs(float64(title.Y-poster.Y)) > 3 || title.X <= poster.X+poster.W || title.H != 72 {
 			t.Fatalf("title must align with poster top in the information column: title=%+v poster=%+v", title, poster)
 		}
-		if synopsis, ok := tester.Find("影片简介"); !ok || synopsis.H < 176 {
+		if synopsis, ok := tester.Find("影片简介"); !ok || synopsis.H < 154 {
 			t.Fatalf("synopsis must reserve more complete lines: %+v, found=%v", synopsis, ok)
 		}
 		if long {
 			preview, ok := tester.Find(item.Overview)
-			if title.Y != titleY || !ok || preview.H < 154 || math.Mod(float64(preview.H), 22) != 0 {
+			if title.Y != titleY || !ok || preview.H < 132 || math.Mod(float64(preview.H), 22) != 0 {
 				t.Fatalf("preview must show whole lines without moving slots: title=%+v preview=%+v", title, preview)
 			}
 			tester.Click("展开简介")
