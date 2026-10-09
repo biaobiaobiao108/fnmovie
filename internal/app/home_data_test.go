@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -52,6 +53,7 @@ func TestLiveNASHomeReadOnly(t *testing.T) {
 
 func TestContinueWatchingRecordsAndDetailHierarchy(t *testing.T) {
 	var infoRequests []string
+	var infoMu sync.Mutex
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/play/list":
@@ -63,7 +65,9 @@ func TestContinueWatchingRecordsAndDetailHierarchy(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 				t.Errorf("decode play info request: %v", err)
 			}
+			infoMu.Lock()
 			infoRequests = append(infoRequests, body.ItemGUID)
+			infoMu.Unlock()
 			switch body.ItemGUID {
 			case "episode":
 				writeJSON(t, w, `{"code":0,"data":{"ts":125}}`)
@@ -92,6 +96,7 @@ func TestContinueWatchingRecordsAndDetailHierarchy(t *testing.T) {
 	if records[0].RecordGUID != "episode" || records[0].Media.ID != "episode" || records[0].Position != 100 || records[1].RecordGUID != "movie" || records[1].Position != 42 || records[1].Duration != 0 {
 		t.Fatalf("normalization=%+v", records)
 	}
+	sort.Strings(infoRequests)
 	if !reflect.DeepEqual(infoRequests, []string{"episode", "movie"}) {
 		t.Fatalf("play info requests=%v", infoRequests)
 	}

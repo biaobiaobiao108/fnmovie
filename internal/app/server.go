@@ -469,13 +469,17 @@ func itemLibrary(raw map[string]any) (string, bool) {
 }
 
 func (s *Server) Detail(item MediaItem) (MediaItem, error) {
+	return s.DetailContext(context.Background(), item)
+}
+
+func (s *Server) DetailContext(ctx context.Context, item MediaItem) (MediaItem, error) {
 	resource := "movie"
 	if item.Kind == "tv" || item.IsSeries {
 		resource = "tv"
 	}
 	apiRoute := resource + "/" + url.PathEscape(item.ID)
 	var response any
-	if err := s.request("GET", "v1", apiRoute, nil, &response, s.tokenValue()); err != nil {
+	if err := s.requestContext(ctx, "GET", "v1", apiRoute, nil, &response, s.tokenValue()); err != nil {
 		if strings.Contains(err.Error(), "501") || strings.Contains(err.Error(), "404") {
 			return item, nil
 		}
@@ -512,17 +516,22 @@ type ContinueWatchingItem struct {
 }
 
 func (s *Server) ContinueWatchingContext(ctx context.Context) ([]ContinueWatchingItem, error) {
+	return s.ContinueWatchingProgressContext(ctx, nil)
+}
+
+// ContinueWatchingProgressContext publishes only confirmed positions, in server order.
+func (s *Server) ContinueWatchingProgressContext(ctx context.Context, onProgress func([]ContinueWatchingItem)) ([]ContinueWatchingItem, error) {
 	release, err := s.acquireHomeRequest(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer release()
 	var response any
-	if err := s.requestContext(ctx, "GET", "v1", "play/list", nil, &response, s.tokenValue()); err != nil {
+	err = s.requestContext(ctx, "GET", "v1", "play/list", nil, &response, s.tokenValue())
+	release()
+	if err != nil {
 		return nil, err
 	}
-	out := make([]ContinueWatchingItem, 0)
-	var infoErrors []error
+	records := make([]ContinueWatchingItem, 0)
 	for _, object := range mapsFromList(unwrapData(response)) {
 		mediaObject := object
 		if nested, ok := object["item"].(map[string]any); ok {
@@ -543,21 +552,6 @@ func (s *Server) ContinueWatchingContext(ctx context.Context) ([]ContinueWatchin
 		if parent == "" {
 			parent = media.SeriesParentID
 		}
-		// /play/list supplies the ordered record set and its item GUIDs, but its
-		// progress can be stale. Resolve the current playback position from the
-		// authoritative /play/info endpoint for each record.
-		infoBody := struct {
-			ItemGuid string `json:"item_guid"`
-		}{guid}
-		var infoResponse any
-		if err := s.requestContext(ctx, "POST", "v1", "play/info", infoBody, &infoResponse, s.tokenValue()); err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			infoErrors = append(infoErrors, fmt.Errorf("读取续播位置失败（%s）：%w", guid, err))
-			continue
-		}
-		position := nonnegativeNumber(firstObject(unwrapData(infoResponse)), "ts", "position", "playback_position")
 		duration := nonnegativeNumber(object, "duration", "total_duration")
 		if duration == 0 {
 			duration = nonnegativeNumber(mediaObject, "duration")
@@ -565,12 +559,96 @@ func (s *Server) ContinueWatchingContext(ctx context.Context) ([]ContinueWatchin
 		if video, ok := object["video_stream"].(map[string]any); ok && duration == 0 {
 			duration = nonnegativeNumber(video, "duration")
 		}
-		if duration > 0 && position > duration {
-			position = duration
-		}
-		out = append(out, ContinueWatchingItem{Media: media, RecordGUID: guid, ParentGUID: parent, Position: position, Duration: duration})
+		records = append(records, ContinueWatchingItem{Media: media, RecordGUID: guid, ParentGUID: parent, Duration: duration})
 	}
-	return out, errors.Join(infoErrors...)
+	resolved := make([]bool, len(records))
+	snapshot := func() []ContinueWatchingItem {
+		out := make([]ContinueWatchingItem, 0, len(records))
+		for i, record := range records {
+			if resolved[i] {
+				record.Media = homeCacheMedia(record.Media)
+				out = append(out, record)
+			}
+		}
+		return out
+	}
+	var infoErrors []error
+	// Complete the visible ten before fetching the full-history tail.
+	for first := 0; first < len(records); {
+		last := len(records)
+		if first == 0 && last > 10 {
+			last = 10
+		}
+		type result struct {
+			index    int
+			position float64
+			err      error
+		}
+		jobs := make(chan int, last-first)
+		results := make(chan result, 2)
+		for i := first; i < last; i++ {
+			jobs <- i
+		}
+		close(jobs)
+		var workers sync.WaitGroup
+		for worker := 0; worker < 2; worker++ {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				for index := range jobs {
+					if ctx.Err() != nil {
+						return
+					}
+					release, err := s.acquireHomeRequest(ctx)
+					var infoResponse any
+					if err == nil {
+						body := struct {
+							ItemGuid string `json:"item_guid"`
+						}{records[index].RecordGUID}
+						err = s.requestContext(ctx, "POST", "v1", "play/info", body, &infoResponse, s.tokenValue())
+						release()
+					}
+					position := nonnegativeNumber(firstObject(unwrapData(infoResponse)), "ts", "position", "playback_position")
+					select {
+					case results <- result{index, position, err}:
+					case <-ctx.Done():
+						return
+					}
+				}
+			}()
+		}
+		go func() { workers.Wait(); close(results) }()
+		completed := 0
+		for result := range results {
+			completed++
+			if ctx.Err() != nil {
+				continue
+			}
+			if result.err != nil {
+				infoErrors = append(infoErrors, fmt.Errorf("读取续播位置失败（%s）：%w", records[result.index].RecordGUID, result.err))
+				continue
+			}
+			record := &records[result.index]
+			record.Position = result.position
+			if record.Duration > 0 && record.Position > record.Duration {
+				record.Position = record.Duration
+			}
+			resolved[result.index] = true
+			// Publish every visible record, but batch the full-history tail to
+			// avoid rebuilding a large virtualized grid for every response.
+			if onProgress != nil && ctx.Err() == nil && (first == 0 || completed%10 == 0 || completed == last-first) {
+				onProgress(snapshot())
+			}
+		}
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		first = last
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	return snapshot(), errors.Join(infoErrors...)
 }
 
 func nonnegativeNumber(object map[string]any, keys ...string) float64 {
@@ -789,12 +867,16 @@ func mergeMediaDetail(base, detail MediaItem) MediaItem {
 // People returns the people credited on a movie or series. fnOS exposes the
 // list separately from item detail; an empty response is a normal case.
 func (s *Server) People(itemID string) ([]CastMember, error) {
+	return s.PeopleContext(context.Background(), itemID)
+}
+
+func (s *Server) PeopleContext(ctx context.Context, itemID string) ([]CastMember, error) {
 	if strings.TrimSpace(itemID) == "" {
 		return nil, fmt.Errorf("媒体缺少标识，无法读取演职员")
 	}
 	body := map[string]any{"guid": itemID, "page": 1, "page_size": 200}
 	var response any
-	if err := s.request("POST", "v1", "person/list/"+url.PathEscape(itemID), body, &response, s.tokenValue()); err != nil {
+	if err := s.requestContext(ctx, "POST", "v1", "person/list/"+url.PathEscape(itemID), body, &response, s.tokenValue()); err != nil {
 		return nil, err
 	}
 	data := unwrapData(response)
@@ -820,12 +902,16 @@ func (s *Server) People(itemID string) ([]CastMember, error) {
 
 // PersonItems returns the media items credited to a specific person/actor.
 func (s *Server) PersonItems(personGUID string) ([]MediaItem, error) {
+	return s.PersonItemsContext(context.Background(), personGUID)
+}
+
+func (s *Server) PersonItemsContext(ctx context.Context, personGUID string) ([]MediaItem, error) {
 	if strings.TrimSpace(personGUID) == "" {
 		return nil, fmt.Errorf("缺少人物标识，无法读取作品列表")
 	}
 	body := map[string]any{"person_guid": personGUID, "page": 1, "page_size": 200, "sort_column": "update_time", "sort_type": "desc"}
 	var response any
-	if err := s.request("POST", "v1", "person/item/list", body, &response, s.tokenValue()); err != nil {
+	if err := s.requestContext(ctx, "POST", "v1", "person/item/list", body, &response, s.tokenValue()); err != nil {
 		return nil, err
 	}
 	return normalizeItems(findItemsList(unwrapData(response))), nil
@@ -856,11 +942,15 @@ func mapsFromList(value any) []map[string]any {
 // SeriesSeasons requests the season nodes under a TV root. Episode data is
 // requested separately when the user selects a season.
 func (s *Server) SeriesSeasons(series MediaItem) ([]MediaSeason, error) {
+	return s.SeriesSeasonsContext(context.Background(), series)
+}
+
+func (s *Server) SeriesSeasonsContext(ctx context.Context, series MediaItem) ([]MediaSeason, error) {
 	if strings.TrimSpace(series.ID) == "" {
 		return nil, fmt.Errorf("剧集缺少服务器标识")
 	}
 	var response any
-	if err := s.request("GET", "v1", "season/list/"+url.PathEscape(series.ID), nil, &response, s.tokenValue()); err != nil {
+	if err := s.requestContext(ctx, "GET", "v1", "season/list/"+url.PathEscape(series.ID), nil, &response, s.tokenValue()); err != nil {
 		return nil, err
 	}
 	seasonItems := normalizeItems(unwrapData(response))
@@ -880,11 +970,15 @@ func (s *Server) SeriesSeasons(series MediaItem) ([]MediaSeason, error) {
 }
 
 func (s *Server) SeasonEpisodes(seasonID string) ([]MediaItem, error) {
+	return s.SeasonEpisodesContext(context.Background(), seasonID)
+}
+
+func (s *Server) SeasonEpisodesContext(ctx context.Context, seasonID string) ([]MediaItem, error) {
 	if strings.TrimSpace(seasonID) == "" {
 		return nil, fmt.Errorf("季度缺少服务器标识")
 	}
 	var response any
-	if err := s.request("GET", "v1", "episode/list/"+url.PathEscape(seasonID), nil, &response, s.tokenValue()); err != nil {
+	if err := s.requestContext(ctx, "GET", "v1", "episode/list/"+url.PathEscape(seasonID), nil, &response, s.tokenValue()); err != nil {
 		return nil, err
 	}
 	items := normalizeItems(findItemsList(unwrapData(response)))
@@ -898,11 +992,15 @@ func (s *Server) SeasonEpisodes(seasonID string) ([]MediaItem, error) {
 }
 
 func (s *Server) Playback(item MediaItem) (PlaybackResult, error) {
+	return s.PlaybackContext(context.Background(), item)
+}
+
+func (s *Server) PlaybackContext(ctx context.Context, item MediaItem) (PlaybackResult, error) {
 	var infoResponse any
 	infoBody := struct {
 		ItemGuid string `json:"item_guid"`
 	}{item.ID}
-	if err := s.request("POST", "v1", "play/info", infoBody, &infoResponse, s.tokenValue()); err != nil {
+	if err := s.requestContext(ctx, "POST", "v1", "play/info", infoBody, &infoResponse, s.tokenValue()); err != nil {
 		return PlaybackResult{}, err
 	}
 	info := firstObject(unwrapData(infoResponse))
@@ -916,7 +1014,7 @@ func (s *Server) Playback(item MediaItem) (PlaybackResult, error) {
 		Header    map[string][]string `json:"header"`
 	}{mediaGuid, "fnmovie-windows", map[string][]string{"User-Agent": {"FnMovie/0.1"}}}
 	var playResponse any
-	if err := s.request("POST", "v1", "stream", requestBody, &playResponse, s.tokenValue()); err != nil {
+	if err := s.requestContext(ctx, "POST", "v1", "stream", requestBody, &playResponse, s.tokenValue()); err != nil {
 		return PlaybackResult{}, err
 	}
 	playData := firstObject(unwrapData(playResponse))

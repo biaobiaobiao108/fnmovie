@@ -28,12 +28,14 @@ func (a *appState) trimCatalogStates(active string) {
 }
 
 func (a *appState) closeDetail() {
+	a.cancelDetailRequests()
 	a.detailRequest++
 	a.selected = nil
 	a.seriesEpisodes, a.seriesEpisodeCache, a.seriesRootCast = nil, nil, nil
 	a.seriesEpisodeRequest++
 	a.seriesCastRequest++
 	a.seriesLoading, a.seriesEpisodeLoading, a.castLoading = false, false, false
+	a.seriesRootCastLoading = false
 	a.seriesError, a.seriesEpisodeError, a.castError, a.selectedSeasonID = "", "", "", ""
 }
 

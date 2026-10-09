@@ -32,6 +32,7 @@ type homeState struct {
 }
 
 func (a *appState) resetHome() {
+	a.personCache.Clear()
 	a.pauseHomeCarousel()
 	for _, cancel := range []context.CancelFunc{a.home.HeroCancel, a.home.ContinueCancel, a.home.DetailCancel} {
 		if cancel != nil {
@@ -148,9 +149,31 @@ func (a *appState) loadContinueWatching(force bool) {
 	a.home.ContinueCancel = cancel
 	a.home.ContinueRequest++
 	a.home.ContinueLoading, a.home.ContinueErr = true, ""
+	a.home.ContinueUpdatedAt = time.Time{}
+	warm := len(a.home.Continue) > 0
 	server, generation, request := a.server, a.home.Generation, a.home.ContinueRequest
 	go func() {
-		items, err := server.ContinueWatchingContext(ctx)
+		items, err := server.ContinueWatchingProgressContext(ctx, func(partial []ContinueWatchingItem) {
+			a.window.Update(func() {
+				if ctx.Err() != nil || a.server != server || a.home.Generation != generation || a.home.ContinueRequest != request || a.home.Closed {
+					return
+				}
+				if warm {
+					// Refresh confirmed positions without shrinking a warm carousel.
+					updates := make(map[string]ContinueWatchingItem, len(partial))
+					for _, updated := range partial {
+						updates[updated.RecordGUID] = updated
+					}
+					for i := range a.home.Continue {
+						if updated, ok := updates[a.home.Continue[i].RecordGUID]; ok {
+							a.home.Continue[i] = updated
+						}
+					}
+				} else {
+					a.home.Continue = partial
+				}
+			})
+		})
 		a.window.Update(func() {
 			defer cancel()
 			if ctx.Err() != nil || a.server != server || a.home.Generation != generation || a.home.ContinueRequest != request || a.home.Closed {
@@ -160,7 +183,7 @@ func (a *appState) loadContinueWatching(force bool) {
 			if err != nil {
 				a.home.ContinueErr = err.Error()
 				if len(a.home.Continue) == 0 && len(items) > 0 {
-					a.home.Continue, a.home.ContinueUpdatedAt = items, time.Now()
+					a.home.Continue = items
 				}
 				return
 			}
@@ -179,6 +202,11 @@ func (a *appState) syncHomeLifecycle() {
 	if !visible && a.home.DetailCancel != nil {
 		a.home.DetailCancel()
 		a.home.DetailCancel = nil
+	}
+	if a.home.Visible && !visible && a.home.ContinueCancel != nil {
+		a.home.ContinueCancel()
+		a.home.ContinueCancel = nil
+		a.home.ContinueLoading = false
 	}
 	if visible && !a.home.Visible {
 		a.loadHomeHeroes(false)

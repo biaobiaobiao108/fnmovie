@@ -65,6 +65,10 @@ type appState struct {
 	posters                      *PosterLoader
 	selected                     *MediaItem
 	detailRequest                uint64
+	detailCancel                 context.CancelFunc
+	seriesEpisodeCancel          context.CancelFunc
+	seriesCastCancel             context.CancelFunc
+	seriesRootCastLoading        bool
 	seriesLoading                bool
 	seriesError                  string
 	castLoading                  bool
@@ -120,8 +124,11 @@ type appState struct {
 	selectedPerson               *CastMember
 	personItems                  []MediaItem
 	personLoading                bool
+	personCached                 bool
 	personError                  string
 	personRequest                uint64
+	personCancel                 context.CancelFunc
+	personCache                  *personItemsCache
 	personGrid                   ui.GridState
 }
 
@@ -170,7 +177,13 @@ func Run() {
 			app.loadLibraries()
 		}
 	})
-	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) { app.resetHome(); app.home.Closed = true; app.stopPlaybackAndWait() })
+	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+		app.resetHome()
+		app.home.Closed = true
+		app.closeDetail()
+		app.closePerson()
+		app.stopPlaybackAndWait()
+	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
 	}
@@ -650,6 +663,7 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 }
 
 func (a *appState) openDetail(item MediaItem) {
+	a.cancelDetailRequests()
 	a.detailRequest++
 	detailRequest := a.detailRequest
 	a.catalogScrollAnimation.Stop(a.catalogScroll.Y)
@@ -672,11 +686,12 @@ func (a *appState) openDetail(item MediaItem) {
 	a.detailSynopsisAnimation.Stop(0)
 	a.detailSynopsisOpen = false
 	a.seriesLoading, a.seriesError, a.selectedSeasonID = false, "", ""
-	a.castLoading, a.castError = true, ""
+	a.castLoading, a.castError = len(item.Cast) == 0, ""
 	a.seriesEpisodes, a.seriesEpisodeCache = nil, nil
 	a.seriesEpisodeLoading, a.seriesEpisodeError = false, ""
 	a.seriesEpisodeRequest++
-	a.seriesRootCast = nil
+	a.seriesRootCast = append([]CastMember(nil), item.Cast...)
+	a.seriesRootCastLoading = item.IsSeries
 	a.seriesCastRequest++
 	if item.IsSeries && cachedDetail && len(item.Seasons) > 0 {
 		a.selectedSeasonID = item.Seasons[0].ID
@@ -686,90 +701,7 @@ func (a *appState) openDetail(item MediaItem) {
 		a.castLoading = false
 		return
 	}
-	server := a.server
-	cache := a.catalogCache
-	if item.IsSeries {
-		a.seriesLoading = true
-		go func() {
-			detail, detailErr := server.Detail(item)
-			seasons, seasonErr := server.SeriesSeasons(item)
-			people, peopleErr := server.People(item.ID)
-			if detailErr != nil {
-				detail = item
-			}
-			if peopleErr == nil {
-				detail.Cast = people
-			} else {
-				detail.Cast = item.Cast
-			}
-			if detailErr == nil {
-				detail.Seasons = seasons
-			}
-			a.window.Update(func() {
-				if !a.isCurrentDetailRequest(server, item.ID, detailRequest) {
-					return
-				}
-				if detailErr == nil {
-					go cache.SetDetail(serverURL, detail, username)
-				}
-				a.seriesLoading = false
-				a.seriesRootCast = append([]CastMember(nil), people...)
-				a.castLoading = len(people) == 0
-				updated := detail
-				updated.Seasons = seasons
-				a.selected = &updated
-				if seasonErr != nil {
-					a.seriesError = "季度列表读取失败：" + seasonErr.Error()
-				}
-				if peopleErr != nil {
-					a.castError = "演职员读取失败：" + peopleErr.Error()
-				}
-				if detailErr != nil {
-					a.status = "详情读取失败：" + detailErr.Error()
-				}
-				if len(seasons) > 0 && a.selectedSeasonID == "" {
-					a.selectSeriesSeason(seasons[0].ID)
-				} else if a.selectedSeasonID != "" {
-					a.loadSeriesCast(a.selectedSeasonID, a.seriesEpisodes)
-				} else {
-					a.castLoading = false
-				}
-			})
-		}()
-		return
-	}
-	go func() {
-		detail, err := server.Detail(item)
-		people, peopleErr := server.People(item.ID)
-		if err == nil {
-			if peopleErr == nil {
-				detail.Cast = people
-			} else {
-				detail.Cast = item.Cast
-			}
-		}
-		a.window.Update(func() {
-			if !a.isCurrentDetailRequest(server, item.ID, detailRequest) {
-				return
-			}
-			if err == nil {
-				go cache.SetDetail(serverURL, detail, username)
-			}
-			a.castLoading = false
-			if err != nil {
-				a.status = "详情读取失败：" + err.Error()
-				if peopleErr == nil && len(people) > 0 {
-					item.Cast = people
-					a.selected = &item
-				}
-			} else {
-				a.selected = &detail
-			}
-			if peopleErr != nil {
-				a.castError = "演职员读取失败：" + peopleErr.Error()
-			}
-		})
-	}()
+	a.loadDetailParts(item, detailRequest, serverURL, username)
 }
 
 func (a *appState) detailView(c *ui.Context, item MediaItem) {
@@ -1082,6 +1014,14 @@ func (a *appState) favoriteButton(c *ui.Context, item MediaItem) {
 }
 
 func (a *appState) selectSeriesSeason(seasonID string) {
+	if a.seriesEpisodeCancel != nil {
+		a.seriesEpisodeCancel()
+		a.seriesEpisodeCancel = nil
+	}
+	if a.seriesCastCancel != nil {
+		a.seriesCastCancel()
+		a.seriesCastCancel = nil
+	}
 	a.selectedSeasonID = seasonID
 	a.seriesEpisodes = nil
 	a.seriesEpisodeError = ""
@@ -1112,6 +1052,11 @@ func (a *appState) loadSeriesSeason(seasonID string, force bool) {
 		}
 	}
 	server := a.server
+	if a.seriesEpisodeCancel != nil {
+		a.seriesEpisodeCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.seriesEpisodeCancel = cancel
 	a.seriesEpisodeRequest++
 	requestID := a.seriesEpisodeRequest
 	selectedID := ""
@@ -1121,11 +1066,13 @@ func (a *appState) loadSeriesSeason(seasonID string, force bool) {
 	a.seriesEpisodeLoading = true
 	a.seriesEpisodeError = ""
 	go func() {
-		items, err := server.SeasonEpisodes(seasonID)
+		items, err := server.SeasonEpisodesContext(ctx, seasonID)
 		a.window.Update(func() {
-			if a.server != server || a.selected == nil || a.selected.ID != selectedID || a.selectedSeasonID != seasonID || requestID != a.seriesEpisodeRequest {
+			defer cancel()
+			if ctx.Err() != nil || a.server != server || a.selected == nil || a.selected.ID != selectedID || a.selectedSeasonID != seasonID || requestID != a.seriesEpisodeRequest {
 				return
 			}
+			a.seriesEpisodeCancel = nil
 			a.seriesEpisodeLoading = false
 			if err != nil {
 				a.seriesEpisodeError = "集数读取失败：" + err.Error()
@@ -1150,6 +1097,13 @@ func (a *appState) loadSeriesCast(seasonID string, episodes []MediaItem) {
 		return
 	}
 	a.seriesCastRequest++
+	if a.seriesCastCancel != nil {
+		a.seriesCastCancel()
+		a.seriesCastCancel = nil
+	}
+	if a.seriesRootCastLoading {
+		return
+	}
 	if len(a.seriesRootCast) > 0 {
 		a.selected.Cast = append([]CastMember(nil), a.seriesRootCast...)
 		a.castLoading, a.castError = false, ""
@@ -1165,15 +1119,19 @@ func (a *appState) loadSeriesCast(seasonID string, episodes []MediaItem) {
 		episodeID = episodes[0].ID
 	}
 	a.castLoading = true
+	ctx, cancel := context.WithCancel(context.Background())
+	a.seriesCastCancel = cancel
 	go func() {
-		people, err := server.People(seasonID)
+		people, err := server.PeopleContext(ctx, seasonID)
 		if len(people) == 0 && episodeID != "" {
-			people, err = server.People(episodeID)
+			people, err = server.PeopleContext(ctx, episodeID)
 		}
 		a.window.Update(func() {
-			if a.server != server || a.selected == nil || a.selected.ID != selectedID || a.selectedSeasonID != seasonID || a.seriesCastRequest != requestID {
+			defer cancel()
+			if ctx.Err() != nil || a.server != server || a.selected == nil || a.selected.ID != selectedID || a.selectedSeasonID != seasonID || a.seriesCastRequest != requestID {
 				return
 			}
+			a.seriesCastCancel = nil
 			a.castLoading = false
 			if len(people) > 0 {
 				a.selected.Cast = people
@@ -1182,6 +1140,7 @@ func (a *appState) loadSeriesCast(seasonID string, episodes []MediaItem) {
 				a.castError = "演职人员读取失败：" + err.Error()
 			} else {
 				a.castError = ""
+				a.selected.Cast = nil
 			}
 		})
 	}()
@@ -1400,10 +1359,16 @@ func (a *appState) castSection(c *ui.Context, item MediaItem) {
 }
 
 func (a *appState) openPerson(person CastMember) {
+	a.cancelDetailRequests()
+	if a.personCancel != nil {
+		a.personCancel()
+		a.personCancel = nil
+	}
 	a.catalogScrollAnimation.Stop(a.catalogScroll.Y)
 	a.detailScrollAnimation.Stop(a.detailScroll.Y)
 	a.selectedPerson = &person
 	a.personItems = nil
+	a.personCached = false
 	a.personLoading = true
 	a.personError = ""
 	a.personGrid = ui.GridState{}
@@ -1422,18 +1387,32 @@ func (a *appState) openPerson(person CastMember) {
 		a.personError = "该演职人员缺少服务器标识"
 		return
 	}
+	if a.personCache == nil {
+		a.personCache = newPersonItemsCache()
+	}
+	serverURL, username := a.settings.ServerURL, a.settings.Username
+	if cached, ok := a.personCache.Get(serverURL, username, personID); ok {
+		a.personItems = cached
+		a.personCached = true
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	a.personCancel = cancel
 	go func() {
-		items, err := server.PersonItems(personID)
+		items, err := server.PersonItemsContext(ctx, personID)
 		a.window.Update(func() {
-			if a.server != server || a.selectedPerson == nil || a.selectedPerson.ID != personID || a.personRequest != reqID {
+			defer cancel()
+			if ctx.Err() != nil || a.server != server || a.selectedPerson == nil || a.selectedPerson.ID != personID || a.personRequest != reqID {
 				return
 			}
+			a.personCancel = nil
 			a.personLoading = false
 			if err != nil {
 				a.personError = "作品读取失败：" + err.Error()
 				return
 			}
 			a.personItems = items
+			a.personCached = false
+			a.personCache.Put(serverURL, username, personID, items)
 		})
 	}()
 	if a.window != nil {
@@ -1442,10 +1421,15 @@ func (a *appState) openPerson(person CastMember) {
 }
 
 func (a *appState) closePerson() {
+	if a.personCancel != nil {
+		a.personCancel()
+		a.personCancel = nil
+	}
 	a.personRequest++
 	a.selectedPerson = nil
 	a.personItems = nil
 	a.personLoading = false
+	a.personCached = false
 	a.personError = ""
 	if a.window != nil {
 		a.window.Invalidate()
@@ -1465,6 +1449,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 			backBtn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(18, 18) })
 			if backBtn.Clicked() {
 				a.closePerson()
+				a.resumeDetailLoading()
 			}
 			ui.Text(c, "演职人员").FontSize(13).TextColor(t.TextMuted)
 			ui.Text(c, "/").FontSize(12).TextColor(t.TextMuted)
@@ -1496,7 +1481,12 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 					ui.Text(c, roleDesc).FontSize(13).TextColor(t.TextMuted)
 				}
 				countText := ""
-				if len(a.personItems) > 0 {
+				if len(a.personItems) > 0 && a.personCached {
+					countText = fmt.Sprintf("已缓存 %d 部作品", len(a.personItems))
+					if a.personLoading {
+						countText += "，正在刷新…"
+					}
+				} else if len(a.personItems) > 0 {
 					countText = fmt.Sprintf("影视库中共有 %d 部参演与相关作品", len(a.personItems))
 				} else if a.personLoading {
 					countText = "正在读取作品列表…"
@@ -1510,12 +1500,15 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 		// 作品网格展示
 		ui.Column(c).Grow(1).FillHeight().Gap(10).Children(func() {
 			ui.Text(c, "参演与相关作品").FontSize(15).Bold()
-			if a.personLoading {
+			if a.personError != "" && len(a.personItems) > 0 {
+				ui.Text(c, a.personError).FontSize(12).TextColor(ui.Hex("#ad5148"))
+			}
+			if a.personLoading && len(a.personItems) == 0 {
 				ui.Row(c).Gap(10).AlignItems(ui.Center).Padding(24, 0).Children(func() {
 					ui.Spinner(c).FontSize(16)
 					ui.Text(c, "正在读取作品列表…").FontSize(13).TextColor(t.TextMuted)
 				})
-			} else if a.personError != "" {
+			} else if a.personError != "" && len(a.personItems) == 0 {
 				ui.Row(c).Gap(10).Padding(16, 0).Children(func() {
 					ui.Text(c, a.personError).FontSize(12).TextColor(ui.Hex("#ad5148"))
 					if actionButton(c, "重试").Clicked() {
@@ -2067,7 +2060,7 @@ func (a *appState) startPlayback(item MediaItem) {
 		a.window.Update(func() { requestPlayer.ReleaseSurface() })
 	}
 	go func() {
-		stream, err := server.Playback(item)
+		stream, err := server.PlaybackContext(ctx, item)
 		if ctx.Err() != nil {
 			cleanup()
 			return
@@ -2143,6 +2136,11 @@ func (a *appState) startPlayback(item MediaItem) {
 			}
 			a.player = requestPlayer
 			a.posters.SetPlayback(true)
+			a.cancelDetailRequests()
+			if a.personCancel != nil {
+				a.personCancel()
+				a.personCancel = nil
+			}
 			requestPlayer.ShowSurface()
 			a.playerProxy = proxy
 			a.playingItem = &item
@@ -2263,6 +2261,9 @@ func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Se
 
 func (a *appState) stopPlayback() {
 	server, item, position, duration := a.closePlayer()
+	if server != nil && item != nil && !a.home.Closed && a.selectedPerson == nil {
+		a.resumeDetailLoading()
+	}
 	if server != nil && item != nil {
 		go func() {
 			if err := server.UpdateProgress(item.ID, item.MediaID, position, duration); err != nil {
