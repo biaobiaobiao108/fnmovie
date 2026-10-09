@@ -237,8 +237,7 @@ func movieTheme() *ui.Theme {
 	t.AccentPressed = ui.Hex("#244639")
 	t.AccentText = ui.Hex("#ffffff")
 	t.Radius = 11
-	// Keep native scrollbars hidden. The catalog draws its own very subtle
-	// thumb; the library sidebar intentionally has no visible scrollbar.
+	// Scrollable regions indicate overflow with shared edge fades.
 	t.Scrollbar = ui.Transparent
 	return t
 }
@@ -292,19 +291,7 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 		}).Grow(1)
 		bindSmoothScroll(c, list, &a.sidebarScroll, &a.sidebarScrollAnimation)
-		list.DrawOver(func(p *ui.Painter, rect ui.Rect) {
-			fadeHeight := min(float32(24), rect.H/2)
-			if a.sidebarScroll.Y > 1 {
-				p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: fadeHeight}, ui.LinearGradient{
-					From: background, To: background.Alpha(0), Angle: 180,
-				}, 0)
-			}
-			if a.sidebarScroll.MaxY-a.sidebarScroll.Y > 1 {
-				p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y + rect.H - fadeHeight, W: rect.W, H: fadeHeight}, ui.LinearGradient{
-					From: background.Alpha(0), To: background, Angle: 180,
-				}, 0)
-			}
-		})
+		bindScrollEdgeFades(list, &a.sidebarScroll, background)
 		if a.loggedIn {
 			exitBtn := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
 				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
@@ -542,9 +529,8 @@ func (a *appState) libraryView(c *ui.Context) {
 	if state != nil && !state.Exhausted {
 		gridCount++
 	}
-	const scrollbarGutter float32 = 14
 	windowWidth, _ := c.Size()
-	gridColumns := max(1, int((windowWidth-273-scrollbarGutter)/152))
+	gridColumns := max(1, int((windowWidth-273)/152))
 	grid := ui.GridView(c, &a.grid, gridCount, 150, 286, func(i int) {
 		if i >= len(items) {
 			if state != nil && !state.Loading && !state.Exhausted && !state.PageAutoRequested && state.Err == "" {
@@ -601,24 +587,24 @@ func (a *appState) libraryView(c *ui.Context) {
 				a.openDetail(item)
 			}
 		}
-	}).Grow(1).Padding(0, scrollbarGutter, 0, 0)
+	}).Grow(1)
 	bindSmoothScroll(c, grid, &a.catalogScroll, &a.catalogScrollAnimation)
-	background := t.Background
-	grid.DrawOver(func(p *ui.Painter, rect ui.Rect) {
-		const fadeHeight = 28
-		if a.catalogScroll.Y > 1 {
+	bindScrollEdgeFades(grid, &a.catalogScroll, t.Background)
+}
+
+// Draw after the scroll content without adding an input-catching overlay.
+func bindScrollEdgeFades(element ui.Element, state *ui.ScrollState, background ui.Color) {
+	element.DrawOver(func(p *ui.Painter, rect ui.Rect) {
+		fadeHeight := min(float32(24), rect.H/2)
+		if state.Y > 1 {
 			p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: fadeHeight}, ui.LinearGradient{
 				From: background, To: background.Alpha(0), Angle: 180,
 			}, 0)
 		}
-		p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y + rect.H - fadeHeight, W: rect.W, H: fadeHeight}, ui.LinearGradient{
-			From: background.Alpha(0), To: background, Angle: 180,
-		}, 0)
-		if a.catalogScroll.MaxY > 0 && rect.H > 40 {
-			track := ui.Rect{X: rect.X + rect.W - 3, Y: rect.Y + 12, W: 3, H: rect.H - 24}
-			thumbHeight := max(float32(26), track.H*track.H/(track.H+a.catalogScroll.MaxY))
-			thumbY := track.Y + (track.H-thumbHeight)*float32(a.catalogScroll.Y/max(float32(1), a.catalogScroll.MaxY))
-			p.Fill(ui.Rect{X: track.X, Y: thumbY, W: track.W, H: min(thumbHeight, track.H)}, ui.RGBA(92, 104, 96, 0.24), 1.5)
+		if state.MaxY-state.Y > 1 {
+			p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y + rect.H - fadeHeight, W: rect.W, H: fadeHeight}, ui.LinearGradient{
+				From: background.Alpha(0), To: background, Angle: 180,
+			}, 0)
 		}
 	})
 }
@@ -753,6 +739,7 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 				})
 			})
 			bindSmoothScroll(c, scroll, &a.detailScroll, &a.detailScrollAnimation)
+			bindScrollEdgeFades(scroll, &a.detailScroll, t.Background)
 		})
 	})
 }
@@ -875,6 +862,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 				}
 			}).Grow(1).AlignSelf(ui.Stretch).FillHeight().Gap(2).Padding(detailContentInset(c), 0, 20, 0)
 			bindSmoothScroll(c, list, &a.detailScroll, &a.detailScrollAnimation)
+			bindScrollEdgeFades(list, &a.detailScroll, t.Background)
 		})
 	})
 }
@@ -1589,6 +1577,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 					}
 				}).Grow(1)
 				bindSmoothScroll(c, grid, &a.personScroll, &a.personScrollAnimation)
+				bindScrollEdgeFades(grid, &a.personScroll, c.Theme().Background)
 			}
 		})
 	})

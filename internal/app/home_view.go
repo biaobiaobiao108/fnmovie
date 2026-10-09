@@ -317,5 +317,6 @@ func (a *appState) homeContinueGrid(c *ui.Context) {
 			}
 		}).Grow(1).FillHeight().FillWidth()
 		bindSmoothScroll(c, grid, &a.home.GridScroll, &a.home.GridAnimation)
+		bindScrollEdgeFades(grid, &a.home.GridScroll, c.Theme().Background)
 	})
 }
