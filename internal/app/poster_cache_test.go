@@ -81,6 +81,32 @@ func TestPlaybackDropsPostersAndRejectsObsoleteDecode(t *testing.T) {
 	}
 }
 
+func TestHomeKeepsDecodedPreviewWhileBackdropLoads(t *testing.T) {
+	server := NewServer("http://example.test", "")
+	loader := &PosterLoader{
+		queue: make(chan posterRequest, posterQueueLimit), pending: map[posterKey]uint64{},
+		failed: map[posterKey]time.Time{}, entries: map[posterKey]*list.Element{},
+		lru: list.New(), maxBytes: posterCacheBudget,
+	}
+	a := &appState{server: server, posters: loader, displayScale: 1}
+	item := MediaItem{Poster: "/preview.jpg", Backdrop: "/backdrop.jpg"}
+	w, h := homeHeroPixelSize(800, 450, 1)
+	preview := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1, 1)))
+	loader.putLocked(posterKey{URL: server.imageURL(item.Poster), Width: w, Height: h}, preview, 4)
+	if got := a.homeHeroImage(item, 800, 450); got != preview || len(loader.queue) != 1 {
+		t.Fatal("loading backdrop removed preview or scheduled extra preview work")
+	}
+	backdrop := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 2, 1)))
+	loader.putLocked(posterKey{URL: server.imageURL(item.Backdrop), Width: w, Height: h}, backdrop, 8)
+	if got := a.homeHeroImage(item, 800, 450); got != backdrop {
+		t.Fatal("loaded backdrop did not replace preview")
+	}
+	loader.SetPlayback(true)
+	if loader.Cached(server.imageURL(item.Poster), w, h) != nil {
+		t.Fatal("preview survived playback cache release")
+	}
+}
+
 // Synthetic artwork isolates CPU cache retention, not whole-process/video memory.
 func BenchmarkPosterRetention(b *testing.B) {
 	for _, budget := range []struct {

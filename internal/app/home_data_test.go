@@ -403,3 +403,182 @@ func TestHomeMetadataDoesNotDisplayNumericGenreIDs(t *testing.T) {
 		t.Fatalf("invalid home hero metadata: %s", metadata)
 	}
 }
+
+func TestHomeHighlightsProgressShowsCandidatesBeforeSlowDetails(t *testing.T) {
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	defer unblock()
+	var active, maxActive atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			writeJSON(t, w, `{"code":0,"data":{"total":2,"list":[{"guid":"a","title":"A","type":"Movie","posters":"a.jpg","genres":["Drama"]},{"guid":"b","title":"B","type":"Video","posters":"b.jpg"}]}}`)
+			return
+		}
+		n := active.Add(1)
+		defer active.Add(-1)
+		for old := maxActive.Load(); n > old && !maxActive.CompareAndSwap(old, n); old = maxActive.Load() {
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		id := strings.TrimPrefix(r.URL.Path, "/api/v1/item/")
+		writeJSON(t, w, fmt.Sprintf(`{"code":0,"data":{"guid":%q,"type":"Movie","backdrops":["wide.jpg"]}}`, id))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	progress := make(chan []MediaItem, 8)
+	done := make(chan error, 1)
+	go func() {
+		items, err := NewServer(server.URL, "token").HomeHighlightsProgressContext(ctx, []MediaLibrary{{ID: "library"}}, 1, func(items []MediaItem) { progress <- items })
+		if err == nil && (len(items) != 2 || items[0].Backdrop != "wide.jpg" || items[1].Backdrop != "wide.jpg") {
+			err = fmt.Errorf("details not completed: %+v", items)
+		}
+		done <- err
+	}()
+	var early []MediaItem
+	select {
+	case early = <-progress:
+	case <-time.After(time.Second):
+		t.Fatal("candidate waited for blocked metadata")
+	}
+	if len(early) != 1 || early[0].Poster == "" || early[0].Backdrop != "" {
+		t.Fatalf("first candidate not usable: %+v", early)
+	}
+	second := <-progress
+	if len(second) != 2 {
+		t.Fatalf("second candidate snapshot=%+v", second)
+	}
+	// A receiver may retain or edit its snapshot while later details publish.
+	originalID := early[0].ID
+	early[0].Title = "edited"
+	early[0].Raw["title"] = "edited"
+	if len(early[0].Genres) > 0 {
+		early[0].Genres[0] = "edited"
+	}
+	if second[0].ID != originalID || second[0].Title == "edited" || firstString(second[0].Raw, "title") == "edited" || len(second[0].Genres) > 0 && second[0].Genres[0] == "edited" {
+		t.Fatal("progress snapshots share mutable metadata")
+	}
+	unblock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("details did not finish")
+	}
+	if maxActive.Load() > 2 {
+		t.Fatalf("detail concurrency=%d", maxActive.Load())
+	}
+	if early[0].Backdrop != "" {
+		t.Fatal("retained first snapshot changed after detail completion")
+	}
+}
+
+func TestHomeHighlightsProgressCancellationStopsPublishing(t *testing.T) {
+	var detailRequests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			writeJSON(t, w, `{"code":0,"data":{"total":2,"list":[{"guid":"a","title":"A","type":"Movie"},{"guid":"b","title":"B","type":"Movie"}]}}`)
+			return
+		}
+		detailRequests.Add(1)
+		writeJSON(t, w, `{"code":0,"data":{}}`)
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	calls := 0
+	_, err := NewServer(server.URL, "token").HomeHighlightsProgressContext(ctx, []MediaLibrary{{ID: "library"}}, 1, func(items []MediaItem) {
+		calls++
+		cancel()
+	})
+	if !errors.Is(err, context.Canceled) || calls != 1 || detailRequests.Load() != 0 {
+		t.Fatalf("cancel error=%v callbacks=%d details=%d", err, calls, detailRequests.Load())
+	}
+}
+
+func TestHomeHighlightsInitialLibrariesLoadConcurrently(t *testing.T) {
+	entered := make(chan string, 3)
+	release := make(chan struct{})
+	firstRelease := make(chan struct{})
+	var active, maxActive atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			writeJSON(t, w, `{"code":0,"data":{}}`)
+			return
+		}
+		var body struct {
+			Library string `json:"ancestor_guid"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		n := active.Add(1)
+		defer active.Add(-1)
+		for old := maxActive.Load(); n > old && !maxActive.CompareAndSwap(old, n); old = maxActive.Load() {
+		}
+		entered <- body.Library
+		wait := release
+		if body.Library == "first" {
+			wait = firstRelease
+		}
+		select {
+		case <-wait:
+		case <-r.Context().Done():
+			return
+		}
+		writeJSON(t, w, fmt.Sprintf(`{"code":0,"data":{"total":1,"list":[{"guid":%q,"title":%q,"type":"Movie"}]}}`, body.Library, body.Library))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	client := NewServer(server.URL, "token")
+	libraries := []MediaLibrary{{ID: "first"}, {ID: "second"}, {ID: "third"}}
+	var first []MediaItem
+	go func() {
+		var err error
+		first, err = client.HomeHighlightsContext(ctx, libraries, 1)
+		done <- err
+	}()
+	for range 2 {
+		select {
+		case <-entered:
+		case <-time.After(time.Second):
+			cancel()
+			close(release)
+			t.Fatal("initial library requests did not overlap")
+		}
+	}
+	select {
+	case <-entered:
+		t.Error("more than two initial requests entered")
+	default:
+	}
+	close(release)
+	// Let the second request complete and admit the third while the first
+	// library is still blocked. Response ordering must not affect the seed.
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		cancel()
+		close(firstRelease)
+		t.Fatal("third library did not start after second completed")
+	}
+	close(firstRelease)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if maxActive.Load() != 2 {
+		t.Fatalf("initial request concurrency=%d", maxActive.Load())
+	}
+	second, err := client.HomeHighlightsContext(ctx, libraries, 1)
+	if err != nil || !reflect.DeepEqual(first, second) {
+		t.Fatalf("response ordering changed seeded selection: first=%+v second=%+v error=%v", first, second, err)
+	}
+}

@@ -116,6 +116,24 @@ func (p *PosterLoader) GetOrRequest(server *Server, remoteURL string, width, hei
 	return nil
 }
 
+// Cached returns an already decoded image without scheduling extra work.
+// It lets a preview remain visible while its full backdrop is loading.
+func (p *PosterLoader) Cached(remoteURL string, width, height int) *ui.Bitmap {
+	if p == nil {
+		return nil
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.paused {
+		return nil
+	}
+	if element := p.entries[posterKey{URL: remoteURL, Width: width, Height: height}]; element != nil {
+		p.lru.MoveToFront(element)
+		return element.Value.(*posterEntry).bitmap
+	}
+	return nil
+}
+
 func (p *PosterLoader) worker() {
 	for request := range p.queue {
 		p.mu.Lock()

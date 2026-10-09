@@ -83,9 +83,23 @@ func (a *appState) loadHomeHeroes(retry bool) {
 	server, generation := a.server, a.home.Generation
 	libraries := append([]MediaLibrary(nil), a.libraries...)
 	seed := time.Now().UnixNano()
+	window := a.window
 	go func() {
-		items, err := server.HomeHighlightsContext(ctx, libraries, seed)
-		a.window.Update(func() {
+		items, err := server.HomeHighlightsProgressContext(ctx, libraries, seed, func(partial []MediaItem) {
+			window.Update(func() {
+				if ctx.Err() != nil || a.server != server || a.home.Generation != generation || a.home.Closed {
+					return
+				}
+				// A warm start keeps its complete cached carousel while refreshing.
+				// Cold starts can display and fetch the first selected image without
+				// waiting for all sample pages and eight metadata requests.
+				if !a.home.HeroFromCache {
+					a.home.Heroes = mergeHomeHeroesStable(a.home.Heroes, partial)
+					a.syncHomeCarousel()
+				}
+			})
+		})
+		window.Update(func() {
 			defer cancel()
 			if ctx.Err() != nil || a.server != server || a.home.Generation != generation || a.home.Closed {
 				return
@@ -282,7 +296,9 @@ func (a *appState) homeHeroImage(item MediaItem, width, height int) *ui.Bitmap {
 			return bitmap
 		}
 		if !a.posters.HasFailed(remote, w, h) {
-			return nil
+			// Keep a decoded preview until the higher quality backdrop arrives;
+			// do not schedule another download just for the preview.
+			return a.posters.Cached(a.server.imageURL(item.Poster), w, h)
 		}
 	}
 	if item.Poster == "" {
