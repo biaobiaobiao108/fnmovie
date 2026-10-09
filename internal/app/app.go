@@ -245,7 +245,8 @@ func movieTheme() *ui.Theme {
 
 func (a *appState) sidebar(c *ui.Context) {
 	t := c.Theme()
-	ui.Column(c).Width(205).FillHeight().Padding(24, 16).Gap(8).Background(ui.Hex("#f4f2ed")).Border(1, t.Border).Children(func() {
+	background := ui.Hex("#f4f2ed")
+	ui.Column(c).Width(205).FillHeight().Padding(24, 16).Gap(8).Background(background).Border(1, t.Border).Children(func() {
 		ui.Row(c).Padding(0, 10).Gap(11).Children(func() {
 			if a.icon != nil {
 				ui.Image(c, a.icon).Size(38, 38).Radius(10).Fit(ui.Cover)
@@ -291,6 +292,19 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 		}).Grow(1)
 		bindSmoothScroll(c, list, &a.sidebarScroll, &a.sidebarScrollAnimation)
+		list.DrawOver(func(p *ui.Painter, rect ui.Rect) {
+			fadeHeight := min(float32(24), rect.H/2)
+			if a.sidebarScroll.Y > 1 {
+				p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: fadeHeight}, ui.LinearGradient{
+					From: background, To: background.Alpha(0), Angle: 180,
+				}, 0)
+			}
+			if a.sidebarScroll.MaxY-a.sidebarScroll.Y > 1 {
+				p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y + rect.H - fadeHeight, W: rect.W, H: fadeHeight}, ui.LinearGradient{
+					From: background.Alpha(0), To: background, Angle: 180,
+				}, 0)
+			}
+		})
 		if a.loggedIn {
 			exitBtn := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
 				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
