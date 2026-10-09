@@ -717,8 +717,11 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 			advanceSmoothScroll(c, &a.detailScroll, &a.detailScrollAnimation)
 			scroll := ui.Scroll(c.Key("movie-detail:" + item.ID)).Grow(1).AlignSelf(ui.Stretch).FillHeight().Children(func() {
 				ui.Column(c).Padding(detailContentInset(c), 0, 20, 0).Gap(17).Children(func() {
-					a.detailIntro(c, item)
-					ui.Column(c).Height(200).Children(func() { a.castSection(c, item) })
+					_, posterHeight := detailPosterSize(c)
+					ui.Column(c).Height(float32(posterHeight)).Gap(detailCastGap(c)).Children(func() {
+						a.detailIntro(c, item)
+						ui.Column(c).Height(200).Label("详情演职人员").Children(func() { a.castSection(c, item) })
+					})
 					if len(item.Sources) > 0 {
 						ui.Text(c, "可播放版本").FontSize(15).Bold().TextColor(t.TextMuted)
 						for _, source := range item.Sources {
@@ -765,14 +768,12 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 			list := ui.List(c, &a.detailList, rows, func(i int) {
 				switch i {
 				case 0:
-					ui.Column(c).Gap(17).Padding(0, 0, 15, 0).Children(func() {
-						a.detailIntro(c, item)
-
-					})
+					a.detailIntro(c, item)
 				case 1:
-					ui.Column(c).Height(200).Children(func() { a.castSection(c, item) })
+					gap := max(float32(0), detailCastGap(c)-2) // List supplies the other 2 DIP.
+					ui.Column(c).Height(200+gap).Padding(gap, 0, 0, 0).Label("详情演职人员").Children(func() { a.castSection(c, item) })
 				case 2:
-					ui.Column(c).Gap(14).Padding(0, 0, 12, 0).Children(func() {
+					ui.Column(c).Gap(14).Padding(16, 0, 12, 0).Children(func() {
 						if a.seriesLoading {
 							ui.Text(c, "正在读取季度与剧集…").FontSize(12).TextColor(t.TextMuted)
 						} else if a.seriesError != "" {
@@ -866,7 +867,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 
 func detailPosterSize(c *ui.Context) (int, int) {
 	width, _ := c.Size()
-	posterWidth := min(max(250, min(360, int(float64(width)*0.23))), int((detailViewportHeight(c)-78)*2/3))
+	posterWidth := min(max(250, min(360, int(float64(width)*0.26))), int((detailViewportHeight(c)-78)*2/3))
 	return posterWidth, posterWidth * 3 / 2
 }
 
@@ -919,19 +920,34 @@ func detailViewportHeight(c *ui.Context) float32 {
 }
 
 func detailContentInset(c *ui.Context) float32 {
-	return max(float32(12), (detailViewportHeight(c)-54-381)/2)
+	_, height := detailPosterSize(c)
+	return max(float32(0), (detailViewportHeight(c)-54-float32(height))/2)
+}
+
+func detailSynopsisLines(c *ui.Context) int {
+	_, height := detailPosterSize(c)
+	return max(1, min(8, (height-330)/22))
+}
+
+func detailCastGap(c *ui.Context) float32 {
+	_, height := detailPosterSize(c)
+	return max(float32(16), float32(height)-114-float32(detailSynopsisLines(c)*22)-200)
 }
 
 // Shared fixed slots keep playback and credits anchored as metadata arrives.
 func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
-	ui.Column(c).Gap(12).Children(func() {
+	lines := detailSynopsisLines(c)
+	ui.Column(c).Children(func() {
+		ui.Text(c, item.Title).FillWidth().Height(36).FixedLineHeight(36).FontSize(26).Bold().SingleLine()
+		ui.Box(c).Height(24)
 		ui.Text(c, item.Subtitle()).Height(20).FontSize(14).TextColor(c.Theme().TextMuted).SingleLine()
-		ui.Column(c.Key("detail-synopsis:" + item.ID)).Height(132).FillWidth().Label("影片简介").Children(func() {
+		ui.Box(c).Height(12)
+		ui.Column(c.Key("detail-synopsis:" + item.ID)).Height(float32(lines*22 + 22)).FillWidth().Label("影片简介").Children(func() {
 			text := item.Overview
 			if strings.TrimSpace(text) == "" {
 				text = "暂无简介"
 			}
-			ui.Text(c, text).Height(110).MaxWidth(860).FontSize(15).FixedLineHeight(22).MaxLines(5).TextColor(c.Theme().TextMuted)
+			ui.Text(c, text).Height(float32(lines * 22)).MaxWidth(860).FontSize(15).FixedLineHeight(22).MaxLines(lines).TextColor(c.Theme().TextMuted)
 			if strings.TrimSpace(item.Overview) != "" {
 				if actionButton(c, "展开简介").AlignSelf(ui.Start).Height(22).Padding(0).BorderWidth(0).Background(ui.Transparent).FontSize(12).TextColor(c.Theme().Accent).Clicked() {
 					a.detailSynopsisOpen = true
@@ -970,7 +986,6 @@ func (a *appState) detailSynopsisDialog(c *ui.Context) {
 func (a *appState) detailHeading(c *ui.Context, item MediaItem) {
 	ui.Row(c).FillWidth().MaxWidth(1320).AlignSelf(ui.Center).Height(44).Gap(12).AlignItems(ui.Center).Children(func() {
 		a.detailBackButton(c)
-		ui.Text(c, item.Title).Grow(1).FontSize(26).Bold().SingleLine()
 	})
 }
 

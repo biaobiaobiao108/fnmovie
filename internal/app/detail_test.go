@@ -110,15 +110,16 @@ func TestMovieDetailKeepsSlotsStableForLongSynopsis(t *testing.T) {
 		if !ok {
 			t.Fatal("detail title missing")
 		}
-		if title.Y > 140 || title.X > 350 {
-			t.Fatalf("title must be a separate line at the upper left: %+v", title)
+		poster, _ := tester.Find("影片海报")
+		if math.Abs(float64(title.Y-poster.Y)) > 3 || title.X <= poster.X+poster.W {
+			t.Fatalf("title must align with poster top in the information column: title=%+v poster=%+v", title, poster)
 		}
-		if synopsis, ok := tester.Find("影片简介"); !ok || synopsis.H != 132 {
-			t.Fatalf("synopsis must reserve six lines: %+v, found=%v", synopsis, ok)
+		if synopsis, ok := tester.Find("影片简介"); !ok || synopsis.H < 176 {
+			t.Fatalf("synopsis must reserve more complete lines: %+v, found=%v", synopsis, ok)
 		}
 		if long {
 			preview, ok := tester.Find(item.Overview)
-			if title.Y != titleY || !ok || preview.H != 110 {
+			if title.Y != titleY || !ok || preview.H < 154 || math.Mod(float64(preview.H), 22) != 0 {
 				t.Fatalf("preview must show whole lines without moving slots: title=%+v preview=%+v", title, preview)
 			}
 			tester.Click("展开简介")
@@ -163,16 +164,17 @@ func TestMovieAndSeriesShareDetailAnchors(t *testing.T) {
 				t.Fatal("missing anchored controls")
 			}
 			poster, posterOK := tester.Find("影片海报")
-			meta, metaOK := tester.Find("2024")
-			if !posterOK || !metaOK || play.Y < poster.Y+poster.H {
+			title, titleOK := tester.Find(item.Title)
+			credits, creditsOK := tester.Find("详情演职人员")
+			if !posterOK || !titleOK || play.Y < poster.Y+poster.H {
 				t.Fatalf("actions must be below the poster: poster=%+v play=%+v", poster, play)
 			}
-			if delta := math.Abs(float64(meta.Y + 381/2.0 - (poster.Y + poster.H/2))); delta > 3 {
-				t.Fatalf("information must center against poster: delta=%v, meta=%+v poster=%+v", delta, meta, poster)
+			if !titleOK || !creditsOK || math.Abs(float64(title.Y-poster.Y)) > 3 || math.Abs(float64(credits.Y+credits.H-poster.Y-poster.H)) > 3 {
+				t.Fatalf("information must align to poster edges: title=%+v credits=%+v poster=%+v", title, credits, poster)
 			}
 			if !series {
 				moviePlay, movieCast = play, cast
-			} else if play.X+play.W/2 != moviePlay.X+moviePlay.W/2 || play.Y != moviePlay.Y || cast.X != movieCast.X || cast.Y != movieCast.Y {
+			} else if play.X+play.W/2 != moviePlay.X+moviePlay.W/2 || play.Y != moviePlay.Y || cast.X != movieCast.X || math.Abs(float64(cast.Y-movieCast.Y)) > 3 {
 				t.Fatalf("%v anchors differ: movie=%+v/%+v series=%+v/%+v", size, moviePlay, movieCast, play, cast)
 			}
 		}
@@ -225,14 +227,17 @@ func TestSeriesDetailViewLayout(t *testing.T) {
 		t.Fatalf("Series season button not visible: ok=%v, rect=%+v", okSeason, rectSeason)
 	}
 
-	rectEp1, okEp1 := tester.Find("这是一个美好的日子")
-	if !okEp1 || rectEp1.W <= 0 || rectEp1.H <= 0 {
-		t.Fatalf("Episode 1 not visible: ok=%v, rect=%+v", okEp1, rectEp1)
-	}
-
 	rectCast, okCast := tester.Find("大卫·马丁内斯")
 	if !okCast || rectCast.W <= 0 || rectCast.H <= 0 {
 		t.Fatalf("Cast not visible: ok=%v, rect=%+v", okCast, rectCast)
+	}
+	saveDetailPreview(t, tester, "series")
+	// The poster-aligned information block may put episodes below the fold.
+	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tester.Scroll(800, 600, 0, 180)
+	rectEp1, okEp1 := tester.Find("这是一个美好的日子")
+	if !okEp1 || rectEp1.W <= 0 || rectEp1.H <= 0 {
+		t.Fatalf("Episode 1 not reachable: ok=%v, rect=%+v", okEp1, rectEp1)
 	}
 	if _, ok := tester.Find("夜之城的故事由此展开。"); !ok {
 		t.Fatal("episode overview should be visible")
@@ -245,7 +250,6 @@ func TestSeriesDetailViewLayout(t *testing.T) {
 			t.Fatal("plain episode play cards and English brand subtitle should be removed")
 		}
 	}
-	saveDetailPreview(t, tester, "series")
 }
 
 func TestSeriesDetailViewScroll(t *testing.T) {
@@ -280,7 +284,9 @@ func TestSeriesDetailViewScroll(t *testing.T) {
 		app.view(c)
 	}, 1280, 800)
 
-	// Episode 1 should be visible
+	// The shared information header remains in the same virtualized scroller.
+	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tester.Scroll(800, 600, 0, 180)
 	r1, ok1 := tester.Find("第1集")
 	if !ok1 || r1.W <= 0 || r1.H <= 0 {
 		t.Fatalf("Episode 1 should be visible initially, got ok=%v, rect=%+v", ok1, r1)
@@ -291,7 +297,7 @@ func TestSeriesDetailViewScroll(t *testing.T) {
 
 	// Scroll down within the scroll container
 	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
-	tester.Scroll(600, 700, 0, 1200)
+	tester.Scroll(800, 700, 0, 1200)
 
 	// After scrolling, later episodes should become visible
 	r25, ok25 := tester.Find("第25集")
