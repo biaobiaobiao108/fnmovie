@@ -117,23 +117,24 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 		})
 		body := actionButton(c.Key("home-hero-detail"), "").Absolute().Top(0).Left(0).Fill().Padding(0).BorderWidth(0).Background(ui.Transparent).Label("查看 " + item.Title + " 详情")
 		body.Children(func() {
-			fontSize, logoHeight, titleLines, overviewLines := float32(34), float32(88), 2, 3
+			fontSize, logoHeight := float32(34), float32(88)
 			if height < 340 {
-				fontSize, logoHeight, titleLines, overviewLines = 26, 56, 1, 2
+				fontSize, logoHeight = 26, 56
 			}
 			if height < 240 {
-				fontSize, logoHeight, overviewLines = 24, 40, 1
+				fontSize, logoHeight = 24, 40
 			}
-			ui.Column(c).Absolute().Bottom(42).Left(28).Right(28).Gap(8).Children(func() {
-				if logo := a.imageForURL(item.Logo, 240, int(logoHeight)); logo != nil {
-					ui.Image(c, logo).Size(240, logoHeight).Fit(ui.Contain)
-				} else {
-					ui.Text(c, item.Title).FontSize(fontSize).Bold().TextColor(ui.Hex("#ffffff")).MaxLines(titleLines)
-				}
-				ui.Text(c, homeHeroMetadata(item)).FontSize(14).Bold().TextColor(ui.RGBA(255, 255, 255, 0.92)).MaxLines(1)
-				if item.Overview != "" {
-					ui.Text(c, item.Overview).MaxWidth(760).FontSize(14).TextColor(ui.RGBA(255, 255, 255, 0.86)).MaxLines(overviewLines)
-				}
+			infoWidth := min(float32(760), max(float32(1), contentWidth-56))
+			ui.Column(c).Absolute().Bottom(42).Left(28).Width(infoWidth).Gap(8).Children(func() {
+				ui.Column(c).FillWidth().Height(logoHeight).Justify(ui.End).Children(func() {
+					if logo := a.imageForURL(item.Logo, 240, int(logoHeight)); logo != nil {
+						ui.Image(c, logo).Size(min(float32(240), infoWidth), logoHeight).Fit(ui.Contain)
+					} else {
+						ui.Text(c, item.Title).FillWidth().Height(fontSize + 8).FixedLineHeight(fontSize + 8).FontSize(fontSize).Bold().TextColor(ui.Hex("#ffffff")).SingleLine()
+					}
+				})
+				ui.Text(c, homeHeroMetadata(item)).FillWidth().Height(20).FixedLineHeight(20).FontSize(14).Bold().TextColor(ui.RGBA(255, 255, 255, 0.92)).SingleLine()
+				ui.Text(c, item.Overview).FillWidth().Height(66).FontSize(14).FixedLineHeight(22).TextColor(ui.RGBA(255, 255, 255, 0.86)).MaxLines(3)
 			})
 		})
 		if body.Clicked() {
