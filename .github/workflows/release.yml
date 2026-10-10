@@ -44,7 +44,7 @@ jobs:
           }
 
           $releaseDir = Join-Path $PWD 'out\fnmovie-20261007\windows-amd64'
-          $installer = Join-Path $releaseDir "哞哩影院 Setup $($config.version).exe"
+          $installer = Join-Path $releaseDir "哞哩影院 Setup $($config.version) amd64.exe"
           if (-not (Test-Path -LiteralPath $installer)) {
             throw "MyGo did not produce the expected Windows installer: $installer"
           }
