@@ -13,7 +13,12 @@ const homeSamplePageSize = 60
 type homeSampleLibrary struct {
 	id    string
 	total int
-	pages map[int][]MediaItem
+	pages map[int][]homeSampleCandidate
+}
+
+type homeSampleCandidate struct {
+	item MediaItem
+	row  int
 }
 
 // HomeHighlightsContext samples global positions, so each title has the same
@@ -39,7 +44,7 @@ func (s *Server) HomeHighlightsProgressContext(ctx context.Context, libraries []
 		unique = append(unique, library)
 	}
 	type libraryResult struct {
-		items []MediaItem
+		items []homeSampleCandidate
 		count int
 		err   error
 	}
@@ -54,7 +59,7 @@ func (s *Server) HomeHighlightsProgressContext(ctx context.Context, libraries []
 				if ctx.Err() != nil {
 					continue
 				}
-				items, count, err := s.HomeCandidatesPageContext(ctx, unique[index].ID, 1, homeSamplePageSize)
+				items, count, err := s.homeCandidatesPageContext(ctx, unique[index].ID, 1, homeSamplePageSize)
 				results[index] = libraryResult{items: items, count: count, err: err}
 			}
 		}()
@@ -83,13 +88,19 @@ libraryDispatch:
 		if result.count < 1 {
 			continue
 		}
-		available = append(available, homeSampleLibrary{id: unique[index].ID, total: result.count, pages: map[int][]MediaItem{1: result.items}})
+		available = append(available, homeSampleLibrary{id: unique[index].ID, total: result.count, pages: map[int][]homeSampleCandidate{1: result.items}})
 		total += result.count
 	}
 	if total == 0 {
 		return []MediaItem{}, errors.Join(failures...)
 	}
 	positions := make(map[int]bool)
+	var positionOrder []int
+	if total <= 128 {
+		// Exhaust small candidate ranges without wasting the bounded attempt
+		// budget on duplicate random positions.
+		positionOrder = rng.Perm(total)
+	}
 	seenItems := make(map[string]bool)
 	items := make([]MediaItem, 0, homeHighlightLimit)
 	publish := func() {
@@ -104,7 +115,12 @@ libraryDispatch:
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		position := rng.Intn(total)
+		position := 0
+		if positionOrder != nil {
+			position = positionOrder[attempts]
+		} else {
+			position = rng.Intn(total)
+		}
 		if positions[position] {
 			continue
 		}
@@ -125,7 +141,7 @@ libraryDispatch:
 			}
 			fetches++
 			var err error
-			batch, _, err = s.HomeCandidatesPageContext(ctx, library.id, page, homeSamplePageSize)
+			batch, _, err = s.homeCandidatesPageContext(ctx, library.id, page, homeSamplePageSize)
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
@@ -135,12 +151,18 @@ libraryDispatch:
 				continue
 			}
 		}
-		offset := position % homeSamplePageSize
-		if offset >= len(batch) {
-			continue
+		// Keep the server row index beside each filtered candidate. The total
+		// and sampled position describe raw rows, not this compacted slice.
+		var item MediaItem
+		found := false
+		for _, candidate := range batch {
+			if candidate.row == position%homeSamplePageSize {
+				item = candidate.item
+				found = true
+				break
+			}
 		}
-		item := batch[offset]
-		if seenItems[item.ID] {
+		if !found || item.ID == "" || seenItems[item.ID] {
 			continue
 		}
 		seenItems[item.ID] = true

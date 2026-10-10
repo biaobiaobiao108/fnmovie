@@ -296,6 +296,150 @@ func TestPeopleParsesSupportedListEnvelopesForHierarchyNodes(t *testing.T) {
 	}
 }
 
+func TestPersonItemsFetchesEveryPage(t *testing.T) {
+	var requestedPages []int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/person/item/list" {
+			t.Errorf("unexpected person works request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			PersonGUID string `json:"person_guid"`
+			Page       int    `json:"page"`
+			PageSize   int    `json:"page_size"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode person works request: %v", err)
+		}
+		if body.PersonGUID != "person" || body.PageSize != 200 {
+			t.Errorf("unexpected person works scope/paging: %+v", body)
+		}
+		requestedPages = append(requestedPages, body.Page)
+		const total = 450
+		start := (body.Page - 1) * body.PageSize
+		end := start + body.PageSize
+		if end > total {
+			end = total
+		}
+		list := make([]map[string]any, 0, end-start)
+		for index := start; index < end; index++ {
+			id := fmt.Sprintf("movie-%d", index)
+			list = append(list, map[string]any{"guid": id, "title": id, "type": "Movie"})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"total": total, "list": list}})
+	}))
+	defer server.Close()
+
+	items, err := NewServer(server.URL, "token").PersonItemsContext(t.Context(), "person")
+	if err != nil || len(items) != 450 {
+		t.Fatalf("person works count=%d error=%v", len(items), err)
+	}
+	if items[0].ID != "movie-0" || items[len(items)-1].ID != "movie-449" || len(requestedPages) != 3 || requestedPages[0] != 1 || requestedPages[1] != 2 || requestedPages[2] != 3 {
+		t.Fatalf("person works pagination/order: first=%q last=%q pages=%v", items[0].ID, items[len(items)-1].ID, requestedPages)
+	}
+}
+
+func TestPersonItemsStopsOnShortOrRepeatedPagesWithoutTotal(t *testing.T) {
+	for _, scenario := range []struct {
+		name       string
+		pageSize   int
+		totalItems int
+		repeatPage bool
+		wantPages  int
+		wantItems  int
+	}{
+		{name: "short page", pageSize: 3, wantPages: 1, wantItems: 3},
+		{name: "multiple pages without total", pageSize: 200, totalItems: 450, wantPages: 3, wantItems: 450},
+		{name: "repeated full page", pageSize: 200, repeatPage: true, wantPages: 2, wantItems: 200},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			var requests atomic.Int32
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body struct {
+					Page int `json:"page"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+					t.Errorf("decode page request: %v", err)
+				}
+				requests.Add(1)
+				count := scenario.pageSize
+				if scenario.totalItems > 0 {
+					remaining := scenario.totalItems - (body.Page-1)*scenario.pageSize
+					if remaining < count {
+						count = remaining
+					}
+				}
+				list := make([]map[string]any, 0, count)
+				for index := 0; index < count; index++ {
+					id := fmt.Sprintf("movie-%d", index)
+					if !scenario.repeatPage {
+						id = fmt.Sprintf("movie-%d", (body.Page-1)*scenario.pageSize+index)
+					}
+					list = append(list, map[string]any{"guid": id, "title": id, "type": "Movie"})
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"list": list}})
+			}))
+			defer server.Close()
+
+			items, err := NewServer(server.URL, "token").PersonItemsContext(t.Context(), "person")
+			if err != nil || len(items) != scenario.wantItems || int(requests.Load()) != scenario.wantPages {
+				t.Fatalf("items=%d requests=%d error=%v", len(items), requests.Load(), err)
+			}
+		})
+	}
+}
+
+func TestAPIErrorExposesStructuredAuthenticationCode(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, `{"code":401,"msg":"会话已失效"}`)
+	}))
+	defer server.Close()
+
+	_, err := NewServer(server.URL, "expired-token").Libraries()
+	var apiError *APIError
+	if !errors.As(err, &apiError) || apiError.Code != http.StatusUnauthorized || !apiError.IsAuthenticationError() {
+		t.Fatalf("structured authentication error was lost: %#v (%v)", apiError, err)
+	}
+}
+
+func TestFetchImageContextHonorsCancellation(t *testing.T) {
+	started := make(chan struct{})
+	requestCanceled := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		close(requestCanceled)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, err := NewServer(server.URL, "token").FetchImageContext(ctx, "/poster")
+		done <- err
+	}()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("image request did not start")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("image request error=%v, want context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("canceled image request did not return")
+	}
+	select {
+	case <-requestCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("server did not observe image request cancellation")
+	}
+}
+
 func TestSystemCollectionsUseFnOSFiltersAndFavoriteEndpoint(t *testing.T) {
 	var favoriteCalled, watchedCalled bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

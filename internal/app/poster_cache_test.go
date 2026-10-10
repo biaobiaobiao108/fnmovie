@@ -25,13 +25,19 @@ func TestPlaybackDropsPostersAndRejectsObsoleteDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 	started, release := make(chan struct{}), make(chan struct{})
+	requestCanceled := make(chan struct{})
 	var calls atomic.Int32
 	var releaseOnce sync.Once
 	unblock := func() { releaseOnce.Do(func() { close(release) }) }
 	serverHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if calls.Add(1) == 1 {
 			close(started)
-			<-release
+			select {
+			case <-release:
+			case <-r.Context().Done():
+				close(requestCanceled)
+				return
+			}
 		}
 		_, _ = w.Write(data.Bytes())
 	}))
@@ -57,6 +63,11 @@ func TestPlaybackDropsPostersAndRejectsObsoleteDecode(t *testing.T) {
 	}
 	loader.GetOrRequest(server, serverHTTP.URL+"/queued", 20, 30, nil)
 	loader.SetPlayback(true)
+	select {
+	case <-requestCanceled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("playback did not cancel the active image request")
+	}
 	if items, size, pending := loader.Stats(); items != 0 || size != 0 || pending != 0 || len(loader.queue) != 0 {
 		t.Fatalf("playback retained work: items=%d bytes=%d pending=%d", items, size, pending)
 	}
@@ -78,6 +89,114 @@ func TestPlaybackDropsPostersAndRejectsObsoleteDecode(t *testing.T) {
 	}
 	if items, size, pending := loader.Stats(); items != 1 || size <= 0 || pending != 0 {
 		t.Fatalf("resumed cache invalid: items=%d bytes=%d pending=%d", items, size, pending)
+	}
+}
+
+func TestPosterLoaderCloseCancelsRequestsAndCannotResume(t *testing.T) {
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 20, 30))); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	requestCanceled := make(chan struct{})
+	var calls atomic.Int32
+	serverHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		close(started)
+		<-r.Context().Done()
+		close(requestCanceled)
+	}))
+	defer serverHTTP.Close()
+	server := NewServer(serverHTTP.URL, "")
+	server.client = serverHTTP.Client()
+	loader := &PosterLoader{
+		queue: make(chan posterRequest, posterQueueLimit), pending: map[posterKey]uint64{},
+		failed: map[posterKey]time.Time{}, entries: map[posterKey]*list.Element{},
+		lru: list.New(), maxBytes: posterCacheBudget,
+	}
+	workerDone := make(chan struct{})
+	go func() { loader.worker(); close(workerDone) }()
+	loader.GetOrRequest(server, serverHTTP.URL, 20, 30, nil)
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		loader.Close()
+		t.Fatal("image request did not start")
+	}
+	loader.Close()
+	select {
+	case <-requestCanceled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close did not cancel the active image request")
+	}
+	loader.SetPlayback(false)
+	loader.GetOrRequest(server, serverHTTP.URL+"/after-close", 20, 30, nil)
+	if _, _, pending := loader.Stats(); pending != 0 || calls.Load() != 1 {
+		t.Fatalf("closed loader resumed work: pending=%d requests=%d", pending, calls.Load())
+	}
+	select {
+	case <-workerDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("closed poster worker did not exit")
+	}
+}
+
+func TestPosterLoaderCancelPendingAllowsNewRequests(t *testing.T) {
+	var data bytes.Buffer
+	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 20, 30))); err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	requestCanceled := make(chan struct{})
+	var calls atomic.Int32
+	serverHTTP := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(started)
+			<-r.Context().Done()
+			close(requestCanceled)
+			return
+		}
+		_, _ = w.Write(data.Bytes())
+	}))
+	defer serverHTTP.Close()
+	server := NewServer(serverHTTP.URL, "")
+	server.client = serverHTTP.Client()
+	loader := &PosterLoader{
+		queue: make(chan posterRequest, posterQueueLimit), pending: map[posterKey]uint64{},
+		failed: map[posterKey]time.Time{}, entries: map[posterKey]*list.Element{},
+		lru: list.New(), maxBytes: posterCacheBudget,
+	}
+	workerDone := make(chan struct{})
+	go func() { loader.worker(); close(workerDone) }()
+	defer func() {
+		loader.Close()
+		select {
+		case <-workerDone:
+		case <-time.After(3 * time.Second):
+			t.Error("poster worker did not stop")
+		}
+	}()
+	loader.GetOrRequest(server, serverHTTP.URL, 20, 30, nil)
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		t.Fatal("initial image request did not start")
+	}
+	loader.CancelPending()
+	select {
+	case <-requestCanceled:
+	case <-time.After(3 * time.Second):
+		t.Fatal("CancelPending did not cancel the active request")
+	}
+	loaded := make(chan struct{})
+	loader.GetOrRequest(server, serverHTTP.URL, 20, 30, func() { close(loaded) })
+	select {
+	case <-loaded:
+	case <-time.After(3 * time.Second):
+		t.Fatal("loader did not accept requests after CancelPending")
+	}
+	if calls.Load() != 2 {
+		t.Fatalf("request count=%d, want canceled request and resumed request", calls.Load())
 	}
 }
 

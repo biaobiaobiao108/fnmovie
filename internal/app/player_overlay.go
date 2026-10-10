@@ -150,7 +150,7 @@ func (a *appState) syncPlayerSeekFeedbackVisibility() {
 	if a.playerSeekFeedbackWindow == nil || a.window == nil {
 		return
 	}
-	visible := a.seekFeedback.Pending && !a.window.IsMinimized()
+	visible := playerSeekFeedbackShouldShow(a.seekFeedback, a.window.IsMinimized())
 	if visible == a.playerSeekFeedbackVisible {
 		if visible {
 			a.playerSeekFeedbackWindow.Invalidate()
@@ -167,6 +167,10 @@ func (a *appState) syncPlayerSeekFeedbackVisibility() {
 	} else {
 		a.playerSeekFeedbackWindow.Hide()
 	}
+}
+
+func playerSeekFeedbackShouldShow(feedback seekFeedback, minimized bool) bool {
+	return !minimized && (feedback.Pending || feedback.Error != "")
 }
 
 func (a *appState) playerOverlayContentHeight() int {
@@ -421,6 +425,18 @@ func (a *appState) setPlayerOverlaySeeking(seeking bool) {
 	a.overlayMu.Unlock()
 }
 
+func (a *appState) updatePlayerVolumeDragging(pressed bool) {
+	if a.volumeDragging == pressed {
+		return
+	}
+	wasDragging := a.volumeDragging
+	a.volumeDragging = pressed
+	a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
+	if wasDragging && !pressed {
+		a.markPlayerOverlayActivity()
+	}
+}
+
 func (a *appState) playerOverlayView(c *ui.Context) {
 	a.advancePlayerOverlayAnimation(c)
 	c.Root().Background(ui.Transparent)
@@ -443,6 +459,10 @@ func (a *appState) playerSeekFeedbackView(c *ui.Context) {
 	if a.seekFeedback.Pending {
 		ui.Row(c).Absolute().Fill().Center().Children(func() {
 			ui.Spinner(c).Size(22, 22).Label("正在跳转")
+		})
+	} else if a.seekFeedback.Error != "" {
+		ui.Row(c).Absolute().Fill().Center().Children(func() {
+			ui.Text(c, a.seekFeedback.Error).FontSize(13).Bold().TextColor(ui.RGB(255, 255, 255)).SingleLine()
 		})
 	}
 }
@@ -543,13 +563,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 					a.player.SetVolume(a.playback.Volume)
 					a.markPlayerOverlayActivity()
 				})
-				if volumePressed {
-					a.volumeDragging = true
-					a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
-				} else if a.volumeDragging {
-					a.volumeDragging = false
-					a.setPlayerOverlaySeeking(a.seekDragging || a.volumeDragging)
-				}
+				a.updatePlayerVolumeDragging(volumePressed)
 			})
 
 			// 中央核心：-10s、大号圆形高光播放/暂停键、+10s

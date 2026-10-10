@@ -323,6 +323,43 @@ func TestHomeCandidatesIncludePersonalVideoAndExcludeNavigationNodes(t *testing.
 	}
 }
 
+func TestHomeSamplingKeepsMixedPageRowPositions(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			id := strings.TrimPrefix(r.URL.Path, "/api/v1/item/")
+			writeJSON(t, w, fmt.Sprintf(`{"code":0,"data":{"guid":%q,"title":%q,"type":"Movie"}}`, id, id))
+			return
+		}
+		var body struct {
+			Page int `json:"page"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode home sample page: %v", err)
+		}
+		list := make([]map[string]any, homeSamplePageSize)
+		for row := range homeSamplePageSize {
+			nodeType := []string{"Directory", "Season", "Episode"}[row%3]
+			id := fmt.Sprintf("page-%d-row-%d", body.Page, row)
+			if body.Page == 2 && (row == 10 || row == 40) {
+				nodeType = "Movie"
+			}
+			list[row] = map[string]any{"guid": id, "title": id, "type": nodeType, "ancestor_guid": "library"}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"total": 120, "list": list}})
+	}))
+	defer server.Close()
+	client := NewServer(server.URL, "token")
+
+	page, total, err := client.homeCandidatesPageContext(t.Context(), "library", 2, homeSamplePageSize)
+	if err != nil || total != 120 || len(page) != 2 || page[0].row != 10 || page[1].row != 40 {
+		t.Fatalf("mixed page candidates=%+v total=%d error=%v", page, total, err)
+	}
+	items, err := client.HomeHighlightsContext(t.Context(), []MediaLibrary{{ID: "library"}}, 12)
+	if err != nil || len(items) != 2 || items[0].ID != "page-2-row-10" && items[1].ID != "page-2-row-10" || items[0].ID != "page-2-row-40" && items[1].ID != "page-2-row-40" {
+		t.Fatalf("mixed paginated candidates were omitted or misaligned: items=%+v error=%v", items, err)
+	}
+}
+
 func TestHomeSamplingIncludesPersonalLibraryAndKeepsVideoIdentity(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

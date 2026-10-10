@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"container/list"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"image"
@@ -44,6 +45,8 @@ type posterRequest struct {
 	key        posterKey
 	server     *Server
 	url        string
+	ctx        context.Context
+	cancel     context.CancelFunc
 	onLoaded   func()
 }
 
@@ -51,18 +54,20 @@ type posterRequest struct {
 // memory. Keys include the target pixel size so one poster can be reused at
 // card, hero, and detail sizes without retaining full-resolution artwork.
 type PosterLoader struct {
-	mu         sync.Mutex
-	queue      chan posterRequest
-	pending    map[posterKey]uint64
-	failed     map[posterKey]time.Time
-	entries    map[posterKey]*list.Element
-	lru        *list.List
-	used       int64
-	maxBytes   int64
-	diskDir    string
-	diskMu     sync.Mutex
-	paused     bool
-	generation uint64
+	mu            sync.Mutex
+	queue         chan posterRequest
+	pending       map[posterKey]uint64
+	failed        map[posterKey]time.Time
+	cancellations map[posterKey]context.CancelFunc
+	entries       map[posterKey]*list.Element
+	lru           *list.List
+	used          int64
+	maxBytes      int64
+	diskDir       string
+	diskMu        sync.Mutex
+	paused        bool
+	closed        bool
+	generation    uint64
 }
 
 func NewPosterLoader() *PosterLoader {
@@ -90,7 +95,7 @@ func (p *PosterLoader) GetOrRequest(server *Server, remoteURL string, width, hei
 	}
 	key := posterKey{URL: remoteURL, Width: width, Height: height}
 	p.mu.Lock()
-	if p.paused {
+	if p.paused || p.closed {
 		p.mu.Unlock()
 		return nil
 	}
@@ -105,12 +110,19 @@ func (p *PosterLoader) GetOrRequest(server *Server, remoteURL string, width, hei
 		return nil
 	}
 	p.pending[key] = p.generation
-	request := posterRequest{generation: p.generation, key: key, server: server, url: remoteURL, onLoaded: onLoaded}
+	ctx, cancel := context.WithCancel(context.Background())
+	if p.cancellations == nil {
+		p.cancellations = make(map[posterKey]context.CancelFunc)
+	}
+	p.cancellations[key] = cancel
+	request := posterRequest{generation: p.generation, key: key, server: server, url: remoteURL, ctx: ctx, cancel: cancel, onLoaded: onLoaded}
 	select {
 	case p.queue <- request:
 		p.mu.Unlock()
 	default:
 		delete(p.pending, key)
+		delete(p.cancellations, key)
+		cancel()
 		p.mu.Unlock()
 	}
 	return nil
@@ -137,20 +149,31 @@ func (p *PosterLoader) Cached(remoteURL string, width, height int) *ui.Bitmap {
 func (p *PosterLoader) worker() {
 	for request := range p.queue {
 		p.mu.Lock()
-		obsolete := p.paused || request.generation != p.generation
+		obsolete := p.closed || p.paused || request.generation != p.generation
 		p.mu.Unlock()
 		if obsolete {
+			if request.cancel != nil {
+				request.cancel()
+			}
 			continue
 		}
 		bitmap, size, err := p.loadPoster(request)
+		if request.cancel != nil {
+			request.cancel()
+		}
 		p.mu.Lock()
 		// A decode already in flight may finish after playback starts or after
 		// browsing resumes. It must not refill the cache or erase a new request.
-		if p.paused || request.generation != p.generation {
+		if p.closed || p.paused || request.generation != p.generation {
+			p.mu.Unlock()
+			continue
+		}
+		if p.pending[request.key] != request.generation {
 			p.mu.Unlock()
 			continue
 		}
 		delete(p.pending, request.key)
+		delete(p.cancellations, request.key)
 		if err != nil {
 			p.failed[request.key] = time.Now().Add(5 * time.Second)
 		} else {
@@ -173,31 +196,89 @@ func (p *PosterLoader) SetPlayback(active bool) {
 		return
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.paused == active {
+	if p.closed || p.paused == active {
+		p.mu.Unlock()
 		return
 	}
 	p.paused = active
-	p.generation++
-	clear(p.pending)
-	clear(p.failed)
+	p.cancelRequestsLocked()
 	if active {
 		clear(p.entries)
 		p.lru.Init()
 		p.used = 0
 	}
+	p.mu.Unlock()
+}
+
+// CancelPending invalidates and cancels active and queued requests while
+// leaving the loader available for subsequent browsing requests.
+func (p *PosterLoader) CancelPending() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return
+	}
+	p.cancelRequestsLocked()
+}
+
+func (p *PosterLoader) cancelRequestsLocked() {
+	p.generation++
+	clear(p.pending)
+	clear(p.failed)
+	for _, cancel := range p.cancellations {
+		cancel()
+	}
+	clear(p.cancellations)
 	for {
 		select {
-		case <-p.queue:
+		case request, ok := <-p.queue:
+			if !ok {
+				return
+			}
+			if request.cancel != nil {
+				request.cancel()
+			}
 		default:
 			return
 		}
 	}
 }
 
+// Close cancels active and queued downloads and stops the poster workers.
+func (p *PosterLoader) Close() {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return
+	}
+	p.closed = true
+	p.paused = true
+	p.cancelRequestsLocked()
+	clear(p.entries)
+	p.lru.Init()
+	p.used = 0
+	if p.queue != nil {
+		close(p.queue)
+	}
+	p.mu.Unlock()
+}
+
 func (p *PosterLoader) loadPoster(request posterRequest) (*ui.Bitmap, int64, error) {
+	ctx := request.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, 0, err
+	}
 	if p.diskDir == "" {
-		return loadPoster(request.server, request.url, request.key.Width, request.key.Height)
+		return loadPosterContext(ctx, request.server, request.url, request.key.Width, request.key.Height)
 	}
 	path := posterSourcePath(p.diskDir, request.url)
 	if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) < 30*24*time.Hour {
@@ -208,12 +289,18 @@ func (p *PosterLoader) loadPoster(request posterRequest) (*ui.Bitmap, int64, err
 			}
 		}
 	}
-	data, err := request.server.FetchImage(request.url)
+	data, err := request.server.FetchImageContext(ctx, request.url)
 	if err != nil {
+		return nil, 0, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
 	bitmap, size, err := decodePoster(data, request.key.Width, request.key.Height)
 	if err != nil {
+		return nil, 0, err
+	}
+	if err := ctx.Err(); err != nil {
 		return nil, 0, err
 	}
 	p.cachePosterSource(path, data)
@@ -373,7 +460,11 @@ func (p *PosterLoader) HasFailed(remoteURL string, width, height int) bool {
 }
 
 func loadPoster(server *Server, remoteURL string, maxWidth, maxHeight int) (*ui.Bitmap, int64, error) {
-	data, err := server.FetchImage(remoteURL)
+	return loadPosterContext(context.Background(), server, remoteURL, maxWidth, maxHeight)
+}
+
+func loadPosterContext(ctx context.Context, server *Server, remoteURL string, maxWidth, maxHeight int) (*ui.Bitmap, int64, error) {
+	data, err := server.FetchImageContext(ctx, remoteURL)
 	if err != nil {
 		return nil, 0, err
 	}

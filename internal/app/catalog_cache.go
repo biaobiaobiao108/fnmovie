@@ -4,6 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -283,7 +285,7 @@ func (c *CatalogCache) SetHomeHeroes(serverURL string, libraries []MediaLibrary,
 	c.data.HomeHeroes[key] = HomeHeroesCache{Items: cloneHomeHeroes(items), UpdatedAt: time.Now()}
 	recordCatalogWrite(c.data.Usage, "home-heroes", key)
 	trimCatalogEntries(c.data.HomeHeroes, c.data.Usage, "home-heroes", catalogMaxHomeScopes)
-	c.saveLocked()
+	c.saveAndLogLocked()
 }
 
 func (c *CatalogCache) HomeContinue(serverURL string, username ...string) ([]ContinueWatchingItem, bool) {
@@ -301,7 +303,7 @@ func (c *CatalogCache) SetHomeContinue(serverURL string, items []ContinueWatchin
 	c.data.HomeContinue[key] = HomeContinueCache{Items: cloneHomeContinue(items), UpdatedAt: time.Now()}
 	recordCatalogWrite(c.data.Usage, "home-continue", key)
 	trimCatalogEntries(c.data.HomeContinue, c.data.Usage, "home-continue", catalogMaxHomeScopes)
-	c.saveLocked()
+	c.saveAndLogLocked()
 }
 
 func (c *CatalogCache) Libraries(serverURL string, username ...string) []MediaLibrary {
@@ -318,7 +320,7 @@ func (c *CatalogCache) SetLibraries(serverURL string, libraries []MediaLibrary, 
 	c.data.Libraries[key] = append([]MediaLibrary(nil), libraries...)
 	recordCatalogWrite(c.data.Usage, "libraries", key)
 	trimCatalogEntries(c.data.Libraries, c.data.Usage, "libraries", catalogMaxLibrarySets)
-	c.saveLocked()
+	c.saveAndLogLocked()
 }
 
 func (c *CatalogCache) Page(serverURL, libraryID string, username ...string) (CatalogPage, bool) {
@@ -339,7 +341,7 @@ func (c *CatalogCache) SetPage(serverURL, libraryID string, page CatalogPage, us
 	key := catalogPageKey(serverURL, libraryID, username...)
 	recordCatalogWrite(c.data.Usage, "pages", key)
 	trimCatalogEntries(c.data.Pages, c.data.Usage, "pages", catalogMaxPages)
-	c.saveLocked()
+	c.saveAndLogLocked()
 }
 
 func (c *CatalogCache) Detail(serverURL, itemID string, username ...string) (MediaItem, bool) {
@@ -350,30 +352,120 @@ func (c *CatalogCache) Detail(serverURL, itemID string, username ...string) (Med
 }
 
 func (c *CatalogCache) SetDetail(serverURL string, item MediaItem, username ...string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if item.ID == "" {
 		return
 	}
+	c.setDetailLocked(serverURL, item, username...)
+	c.saveAndLogLocked()
+}
+
+// SetDetailAsync updates the in-memory cache immediately and persists it in a
+// background goroutine. The returned channel receives one save error (or nil)
+// and then closes, so UI callbacks can leave disk I/O to the caller thread.
+func (c *CatalogCache) SetDetailAsync(serverURL string, item MediaItem, username ...string) <-chan error {
+	done := make(chan error, 1)
+	if item.ID == "" {
+		done <- nil
+		close(done)
+		return done
+	}
 	c.mu.Lock()
+	c.setDetailLocked(serverURL, item, username...)
+	c.mu.Unlock()
+	go func() {
+		err := c.save()
+		if err != nil {
+			log.Printf("fnmovie: save catalog cache after detail update: %v", err)
+		}
+		done <- err
+		close(done)
+	}()
+	return done
+}
+
+func (c *CatalogCache) setDetailLocked(serverURL string, item MediaItem, username ...string) {
+	if item.ID == "" {
+		return
+	}
 	c.ensureUsageLocked()
+	if c.data.Details == nil {
+		c.data.Details = map[string]MediaItem{}
+	}
 	key := catalogServerKey(serverURL, username...) + ":" + item.ID
 	c.data.Details[key] = item
 	recordCatalogWrite(c.data.Usage, "details", key)
 	trimCatalogEntries(c.data.Details, c.data.Usage, "details", catalogMaxDetails)
-	c.saveLocked()
-	c.mu.Unlock()
 }
 
-func (c *CatalogCache) saveLocked() {
+func (c *CatalogCache) save() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.saveLocked()
+}
+
+func (c *CatalogCache) saveAndLogLocked() {
+	if err := c.saveLocked(); err != nil {
+		log.Printf("fnmovie: save catalog cache: %v", err)
+	}
+}
+
+func (c *CatalogCache) saveLocked() error {
 	if c.path == "" {
-		return
+		return nil
 	}
 	c.data.Version = catalogCacheVersion
 	data, err := json.Marshal(c.data)
 	if err != nil {
-		return
+		return fmt.Errorf("encode catalog cache: %w", err)
 	}
-	tmp := c.path + ".tmp"
-	if os.WriteFile(tmp, data, 0600) == nil {
-		_ = os.Rename(tmp, c.path)
+	if err := os.MkdirAll(filepath.Dir(c.path), 0700); err != nil {
+		return fmt.Errorf("create catalog cache directory: %w", err)
 	}
+	tmpFile, err := os.CreateTemp(filepath.Dir(c.path), "catalog-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create temporary catalog cache: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("write temporary catalog cache: %w", err)
+	}
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return fmt.Errorf("flush temporary catalog cache: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temporary catalog cache: %w", err)
+	}
+	if err := verifyCatalogReplaceDirectory(tmpPath, c.path); err != nil {
+		return fmt.Errorf("verify temporary catalog cache location: %w", err)
+	}
+	if err := replaceCatalogFile(tmpPath, c.path); err != nil {
+		return fmt.Errorf("replace catalog cache: %w", err)
+	}
+	return nil
+}
+
+func verifyCatalogReplaceDirectory(source, destination string) error {
+	sourceInfo, err := os.Stat(filepath.Dir(source))
+	if err != nil {
+		return fmt.Errorf("stat temporary file directory: %w", err)
+	}
+	if !sourceInfo.IsDir() {
+		return fmt.Errorf("temporary file parent is not a directory")
+	}
+	destinationInfo, err := os.Stat(filepath.Dir(destination))
+	if err != nil {
+		return fmt.Errorf("stat destination directory: %w", err)
+	}
+	if !destinationInfo.IsDir() {
+		return fmt.Errorf("destination parent is not a directory")
+	}
+	if !os.SameFile(sourceInfo, destinationInfo) {
+		return fmt.Errorf("temporary file and destination are in different directories")
+	}
+	return nil
 }

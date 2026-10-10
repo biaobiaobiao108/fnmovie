@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -148,7 +149,7 @@ func Run() {
 		app.server = NewServer(settings.ServerURL, "")
 		if settings.Username != "" {
 			app.username = settings.Username
-			if credentials, err := ReadCredential(settings.ServerURL); err == nil {
+			if credentials, err := ReadCredential(settings.ServerURL); err == nil && credentials.Username == settings.Username {
 				app.password = credentials.Password
 				if credentials.Token != "" {
 					app.server.SetToken(credentials.Token)
@@ -183,6 +184,7 @@ func Run() {
 		app.closeDetail()
 		app.closePerson()
 		app.stopPlaybackAndWait()
+		app.posters.Close()
 	})
 	if err := mygo.App.Run(); err != nil {
 		log.Fatal(err)
@@ -366,7 +368,7 @@ func (a *appState) topbar(c *ui.Context) {
 	t := c.Theme()
 	ui.Row(c).Gap(14).Children(func() {
 		ui.Column(c).Grow(1).Gap(3).Children(func() {
-			label := map[string]string{"home": "首页", "movies": "电影", "tv": "电视节目", "favorites": "我的收藏", "settings": "服务器设置", "library": a.selectedLibraryName()}[a.section]
+			label := map[string]string{"home": "首页", "movies": "电影", "tv": "电视节目", "favorites": "我的收藏", "library": a.selectedLibraryName()}[a.section]
 			if label == "" {
 				label = "影视库"
 			}
@@ -425,7 +427,9 @@ func (a *appState) connectionView(c *ui.Context) {
 			ui.Text(c, "输入飞牛影视服务器地址和账户信息，在哞哩影院浏览与播放你的媒体。").FontSize(12).TextColor(t.TextMuted)
 			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
 			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
-			ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted()
+			if ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted() {
+				a.login()
+			}
 			if a.status != "" {
 				ui.Text(c, a.status).FontSize(11).TextColor(t.TextMuted)
 			}
@@ -444,7 +448,9 @@ func (a *appState) loginModal(c *ui.Context) {
 			ui.Text(c, "使用飞牛影视账户登录，在哞哩影院浏览媒体库并播放影片。").FontSize(12).TextColor(t.TextMuted)
 			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
 			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
-			ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted()
+			if ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted() {
+				a.login()
+			}
 			if a.status != "" && !a.loggedIn {
 				color := t.TextMuted
 				if strings.Contains(a.status, "失败") || strings.Contains(a.status, "无法") {
@@ -475,10 +481,6 @@ func (a *appState) selectedLibraryName() string {
 
 func (a *appState) libraryView(c *ui.Context) {
 	t := c.Theme()
-	if a.section == "settings" && strings.TrimSpace(a.query) == "" {
-		a.settingsView(c)
-		return
-	}
 	items := a.visibleItems()
 	key := a.currentCatalogKey() + "\x00" + a.section
 	if key != a.catalogScrollKey {
@@ -1163,28 +1165,9 @@ func (a *appState) loadSeriesCast(seasonID string, episodes []MediaItem) {
 	}()
 }
 
-func (a *appState) settingsView(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Width(620).Gap(14).Children(func() {
-		ui.Text(c, "服务器连接").FontSize(18).Bold()
-		ui.Text(c, a.settings.ServerURL).FontSize(12).TextColor(t.TextMuted)
-		ui.Row(c).Gap(10).Children(func() {
-			if primaryActionButton(c, "切换账户或服务器").Clicked() {
-				a.loginOpen = true
-			}
-			if actionButton(c, "退出登录").Clicked() {
-				a.logout()
-			}
-		})
-		ui.Text(c, "账户凭据由 Windows 凭据管理器保护；服务器地址与界面偏好保存在本机。").FontSize(11).TextColor(t.TextMuted).MaxLines(2)
-		if a.status != "" {
-			ui.Text(c, a.status).FontSize(11).TextColor(t.TextMuted)
-		}
-	})
-}
-
 func (a *appState) logout() {
 	a.resetHome()
+	a.posters.CancelPending()
 	serverURL := a.settings.ServerURL
 	if a.loginCancel != nil {
 		a.loginCancel()
@@ -1667,6 +1650,7 @@ func (a *appState) login() {
 			}
 			a.server = server
 			a.resetHome()
+			a.posters.CancelPending()
 			a.settings = settings
 			if a.libraryCancel != nil {
 				a.libraryCancel()
@@ -2038,6 +2022,10 @@ func isAuthError(err error) bool {
 	if err == nil {
 		return false
 	}
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && apiErr != nil && apiErr.Code == 401 {
+		return true
+	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "sign") || strings.Contains(message, "401") || strings.Contains(message, "unauthor")
 }
@@ -2373,7 +2361,10 @@ func (a *appState) toggleFavorite(item MediaItem) {
 			if a.selected != nil && a.selected.ID == item.ID {
 				a.selected.Favorite = favorite
 				if a.catalogCache != nil {
-					a.catalogCache.SetDetail(a.settings.ServerURL, *a.selected, a.settings.Username)
+					cache := a.catalogCache
+					serverURL, username := a.settings.ServerURL, a.settings.Username
+					item := cloneHomeProgress([]MediaItem{*a.selected})[0]
+					cache.SetDetailAsync(serverURL, item, username)
 				}
 			}
 			a.status = "收藏状态已更新"

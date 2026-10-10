@@ -100,36 +100,54 @@ try {
         $currentTagRef = "refs/tags/$currentTag"
         $localTag = Invoke-GitResult -GitArgs @('rev-parse', '--verify', '--quiet', "$currentTagRef`^{commit}")
         $remoteTag = Invoke-Git -GitArgs @('ls-remote', '--refs', $remote, "refs/tags/$currentTag")
-        if ([string]::IsNullOrWhiteSpace($remoteTag)) {
-            $head = Invoke-Git -GitArgs @('rev-parse', 'HEAD')
-            if ($localTag.ExitCode -eq 0 -and $localTag.Text -ne $head) {
-                throw "本地标签 '$currentTag' 指向了其他提交，为避免覆盖标签，已停止发版。"
-            }
-            if ($localTag.ExitCode -gt 1) {
-                throw "无法检查本地标签 '$currentTag'：$($localTag.Text)"
-            }
-
-            if ($WhatIf) {
-                Write-ReleaseMessage '' "将继续发布 $currentTag。" Cyan
-                if ($ahead -gt 0) {
-                    Write-ReleaseMessage '' "同时推送分支 '$branch' 上已有的 $ahead 个本地提交。" DarkCyan
-                }
-                Write-ReleaseMessage '' '预览模式结束，未修改文件或推送内容。' DarkGray
-                return
+        $head = Invoke-Git -GitArgs @('rev-parse', 'HEAD')
+        if (-not [string]::IsNullOrWhiteSpace($remoteTag)) {
+            $remoteTagFields = $remoteTag -split '\s+'
+            if ($remoteTagFields.Count -lt 2 -or $remoteTagFields[1] -ne "refs/tags/$currentTag") {
+                throw "无法解析远程标签 '$currentTag'：$remoteTag"
             }
             if ($localTag.ExitCode -ne 0) {
-                Write-ReleaseMessage '' "创建标签 $currentTag…" Magenta
-                Invoke-Git -GitArgs @('tag', '-a', $currentTag, '-m', "$($config.name) $currentTag") | Out-Null
+                throw "远程标签 '$currentTag' 已存在，但本地未找到对应标签；为避免意外增加版本，已停止发版。"
             }
-            if ($ahead -gt 0) {
-                Write-ReleaseMessage '' "推送分支 '$branch'…" Blue
-                Invoke-Git -GitArgs @('push', $remote, "HEAD:refs/heads/$remoteBranch") | Out-Null
+            $localTagObject = Invoke-GitResult -GitArgs @('rev-parse', '--verify', '--quiet', $currentTagRef)
+            if ($localTagObject.ExitCode -ne 0 -or $localTagObject.Text -ne $remoteTagFields[0]) {
+                throw "本地与远程标签 '$currentTag' 不一致；为避免覆盖标签或增加版本，已停止发版。"
             }
-            Write-ReleaseMessage '' "推送标签 $currentTag…" Blue
-            Invoke-Git -GitArgs @('push', $remote, "refs/tags/$currentTag") | Out-Null
-            Write-ReleaseMessage '' "$currentTag 已发布，GitHub Actions 将自动构建 Windows amd64 程序并创建 Release。" Green Green
+            if ($localTag.Text -ne $head) {
+                throw "远程标签 '$currentTag' 指向提交 $($localTag.Text)，当前版本提交为 $head；为避免增加版本，已停止发版。"
+            }
+            Write-ReleaseMessage '' "$currentTag 已指向当前版本提交，远程发布已完成，无需再次增加版本。" Green Green
             return
         }
+        if ($localTag.ExitCode -eq 0 -and $localTag.Text -ne $head) {
+            throw "本地标签 '$currentTag' 指向了其他提交，为避免覆盖标签，已停止发版。"
+        }
+        if ($localTag.ExitCode -gt 1) {
+            throw "无法检查本地标签 '$currentTag'：$($localTag.Text)"
+        }
+
+        if ($WhatIf) {
+            Write-ReleaseMessage '' "将继续发布 $currentTag。" Cyan
+            if ($ahead -gt 0) {
+                Write-ReleaseMessage '' "同时推送分支 '$branch' 上已有的 $ahead 个本地提交。" DarkCyan
+            }
+
+            Write-ReleaseMessage '' '预览模式结束，未修改文件或推送内容。' DarkGray
+            return
+        }
+
+        if ($localTag.ExitCode -ne 0) {
+            Write-ReleaseMessage '' "创建标签 $currentTag…" Magenta
+            Invoke-Git -GitArgs @('tag', '-a', $currentTag, '-m', "$($config.name) $currentTag") | Out-Null
+        }
+        if ($ahead -gt 0) {
+            Write-ReleaseMessage '' "推送分支 '$branch'…" Blue
+            Invoke-Git -GitArgs @('push', $remote, "HEAD:refs/heads/$remoteBranch") | Out-Null
+        }
+        Write-ReleaseMessage '' "推送标签 $currentTag…" Blue
+        Invoke-Git -GitArgs @('push', $remote, "refs/tags/$currentTag") | Out-Null
+        Write-ReleaseMessage '' "$currentTag 已发布，GitHub Actions 将自动构建 Windows amd64 程序并创建 Release。" Green Green
+        return
     }
 
     switch ($Level) {

@@ -9,7 +9,8 @@ menuButton?.addEventListener("click", () => {
 });
 
 siteNav?.addEventListener("click", (event) => {
-  if (event.target instanceof HTMLAnchorElement) {
+  const clickedLink = event.target instanceof Element ? event.target.closest("a") : null;
+  if (clickedLink && siteNav.contains(clickedLink)) {
     menuButton?.setAttribute("aria-expanded", "false");
     menuButton?.setAttribute("aria-label", "打开导航菜单");
     siteNav.classList.remove("is-open");

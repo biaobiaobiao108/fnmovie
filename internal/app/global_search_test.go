@@ -14,7 +14,7 @@ func TestGlobalSearchScopeAndProjectionFromEveryPage(t *testing.T) {
 		{ID: "person", Title: "搜索演员", Kind: "person"},
 		{ID: "episode", Title: "搜索分集", Kind: "episode"},
 	}
-	for _, section := range []string{"home", "movies", "tv", "favorites", "library", "settings"} {
+	for _, section := range []string{"home", "movies", "tv", "favorites", "library"} {
 		t.Run(section, func(t *testing.T) {
 			a := &appState{section: section, libraryID: "selected", query: " keyword ", selectedTab: 2,
 				catalogs: map[string]*CatalogState{catalogStateKey("", "", "keyword"): {Items: items}}}
@@ -58,8 +58,8 @@ func TestGlobalSearchDoesNotShowPreviousCatalogDuringDebounce(t *testing.T) {
 	}
 }
 
-func TestGlobalSearchUIFromHomeAndSettings(t *testing.T) {
-	for _, section := range []string{"home", "settings"} {
+func TestGlobalSearchUIFromHomeAndMovies(t *testing.T) {
+	for _, section := range []string{"home", "movies"} {
 		t.Run(section, func(t *testing.T) {
 			a := &appState{section: section, query: "keyword", loggedIn: true,
 				catalogs: map[string]*CatalogState{catalogStateKey("", "", "keyword"): {
@@ -98,5 +98,14 @@ func TestGlobalSearchInputLeavesDetails(t *testing.T) {
 		if !tester.HasText("正在搜索…") {
 			t.Fatal("search debounce missing visible pending state")
 		}
+	}
+}
+
+func TestIsAuthErrorRecognizesStructuredAPICode(t *testing.T) {
+	if !isAuthError(&APIError{Code: 401, Msg: "会话已失效"}) {
+		t.Fatal("structured API auth error was not recognized")
+	}
+	if isAuthError(&APIError{Code: 403, Msg: "没有权限"}) {
+		t.Fatal("permission error must not be treated as an expired login")
 	}
 }

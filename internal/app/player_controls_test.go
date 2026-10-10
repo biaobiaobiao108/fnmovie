@@ -5,6 +5,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -82,6 +83,31 @@ func TestPlayerSeekFeedbackIsCenteredAndVisible(t *testing.T) {
 	spinner, hasSpinner := tester.Find("正在跳转")
 	if !hasSpinner || spinner.W <= 0 || spinner.H <= 0 || tester.HasText("跳转中") || tester.HasText("跳转失败") {
 		t.Fatalf("seek feedback should contain only its centered spinner: spinner=%+v texts=%v", spinner, tester.Texts())
+	}
+}
+
+func TestPlayerSeekFailureRemainsVisibleAndShowsMessage(t *testing.T) {
+	feedback := seekFeedback{Error: "跳转失败，请重试"}
+	if !playerSeekFeedbackShouldShow(feedback, false) || playerSeekFeedbackShouldShow(feedback, true) {
+		t.Fatal("seek error should remain visible unless the window is minimized")
+	}
+	a := &appState{seekFeedback: feedback}
+	tester := ui.NewTester(a.playerSeekFeedbackView, playerSeekFeedbackWidth, playerSeekFeedbackHeight)
+	tester.Frame()
+	if !tester.HasText(feedback.Error) || tester.HasText("正在跳转") {
+		t.Fatalf("seek error message is not shown: texts=%v", tester.Texts())
+	}
+}
+
+func TestVolumeDragReleaseResetsOverlayIdleTimer(t *testing.T) {
+	previous := time.Now().Add(-time.Hour)
+	a := &appState{volumeDragging: true, playerOverlayLastInput: previous}
+	a.updatePlayerVolumeDragging(false)
+	if a.volumeDragging {
+		t.Fatal("volume drag should end on release")
+	}
+	if !a.playerOverlayLastInput.After(previous) {
+		t.Fatal("volume drag release did not refresh overlay idle timer")
 	}
 }
 

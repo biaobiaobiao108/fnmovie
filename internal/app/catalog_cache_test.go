@@ -33,6 +33,54 @@ func TestCatalogCachePersistsDetailAndCastByServer(t *testing.T) {
 	}
 }
 
+func TestCatalogCacheReplacesExistingFile(t *testing.T) {
+	cache := &CatalogCache{path: filepath.Join(t.TempDir(), "catalog.json"), data: newCatalogDisk()}
+	server := "http://nas.example/v"
+	cache.SetDetail(server, MediaItem{ID: "movie-1", Title: "Original"})
+	cache.SetDetail(server, MediaItem{ID: "movie-1", Title: "Updated"})
+
+	reloaded := &CatalogCache{path: cache.path, data: newCatalogDisk()}
+	raw, err := os.ReadFile(cache.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &reloaded.data); err != nil {
+		t.Fatal(err)
+	}
+	item, ok := reloaded.Detail(server, "movie-1")
+	if !ok || item.Title != "Updated" {
+		t.Fatalf("cached detail = %+v, found=%t; want updated entry", item, ok)
+	}
+}
+
+func TestCatalogCacheWriteReturnsReplacementError(t *testing.T) {
+	dir := t.TempDir()
+	cache := &CatalogCache{path: dir, data: newCatalogDisk()}
+	if err := cache.save(); err == nil {
+		t.Fatal("writing over a directory should report a replacement error")
+	}
+}
+
+func TestCatalogCacheSetDetailAsyncPersistsAndReportsCompletion(t *testing.T) {
+	cache := &CatalogCache{path: filepath.Join(t.TempDir(), "catalog.json"), data: newCatalogDisk()}
+	done := cache.SetDetailAsync("http://nas.example/v", MediaItem{ID: "movie-1", Title: "Async"})
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	reloaded := &CatalogCache{path: cache.path, data: newCatalogDisk()}
+	raw, err := os.ReadFile(cache.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(raw, &reloaded.data); err != nil {
+		t.Fatal(err)
+	}
+	item, ok := reloaded.Detail("http://nas.example/v", "movie-1")
+	if !ok || item.Title != "Async" {
+		t.Fatalf("async cached detail = %+v, found=%t", item, ok)
+	}
+}
+
 func TestCatalogCacheMigrationDropsUnscopedAccountData(t *testing.T) {
 	disk := catalogDisk{
 		Libraries: map[string][]MediaLibrary{"server": {{ID: "library", Name: "剧集"}}},

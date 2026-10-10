@@ -135,6 +135,12 @@ func (e *APIError) Error() string {
 	return fmt.Sprintf("飞牛影视返回错误码 %d", e.Code)
 }
 
+// IsAuthenticationError reports a structured API response that requires the
+// caller to refresh or re-establish the authenticated session.
+func (e *APIError) IsAuthenticationError() bool {
+	return e != nil && e.Code == http.StatusUnauthorized
+}
+
 func NewServer(base, token string) *Server {
 	return &Server{
 		baseURL: normalizeServerURL(base), token: token,
@@ -717,6 +723,18 @@ func (s *Server) ContinueWatchingDetailContext(ctx context.Context, record Conti
 }
 
 func (s *Server) HomeCandidatesPageContext(ctx context.Context, libraryID string, page, pageSize int) ([]MediaItem, int, error) {
+	candidates, total, err := s.homeCandidatesPageContext(ctx, libraryID, page, pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]MediaItem, 0, len(candidates))
+	for _, candidate := range candidates {
+		items = append(items, candidate.item)
+	}
+	return items, total, nil
+}
+
+func (s *Server) homeCandidatesPageContext(ctx context.Context, libraryID string, page, pageSize int) ([]homeSampleCandidate, int, error) {
 	if strings.TrimSpace(libraryID) == "" {
 		return nil, 0, errors.New("首页候选必须指定影视库")
 	}
@@ -739,20 +757,35 @@ func (s *Server) HomeCandidatesPageContext(ctx context.Context, libraryID string
 		return nil, 0, err
 	}
 	data := unwrapData(response)
-	items := filterLibraryItems(normalizeItems(findItemsList(data)), libraryID)
-	out := make([]MediaItem, 0, len(items))
-	for _, item := range items {
+	objects := findObjects(findItemsList(data))
+	out := make([]homeSampleCandidate, 0, len(objects))
+	seen := make(map[string]bool, len(objects))
+	hasLibraryField := false
+	for _, object := range objects {
+		_, hasID := itemLibrary(object)
+		hasLibraryField = hasLibraryField || hasID
+	}
+	for row, object := range objects {
+		item := normalizeItem(object)
+		itemLibraryID, hasID := itemLibrary(object)
+		if item.ID == "" || item.Title == "" || seen[item.ID] || hasLibraryField && (!hasID || itemLibraryID != libraryID) {
+			continue
+		}
 		switch strings.ToLower(firstString(item.Raw, "type")) {
 		case "directory", "livechannel":
 			continue
 		}
 		if item.Kind == "movie" || item.Kind == "tv" {
-			out = append(out, item)
+			seen[item.ID] = true
+			out = append(out, homeSampleCandidate{item: item, row: row})
 		}
 	}
+	// total is the server's raw paginated row count. The returned page above is
+	// filtered to playable roots, so callers must use total only to choose a
+	// page and must not treat it as an index into that filtered slice.
 	total, _ := asInt(valueAt(data, "total"))
-	if total < int64(len(out)) {
-		total = int64(len(out))
+	if total < int64(len(objects)) {
+		total = int64(len(objects))
 	}
 	return out, int(total), nil
 }
@@ -909,12 +942,34 @@ func (s *Server) PersonItemsContext(ctx context.Context, personGUID string) ([]M
 	if strings.TrimSpace(personGUID) == "" {
 		return nil, fmt.Errorf("缺少人物标识，无法读取作品列表")
 	}
-	body := map[string]any{"person_guid": personGUID, "page": 1, "page_size": 200, "sort_column": "update_time", "sort_type": "desc"}
-	var response any
-	if err := s.requestContext(ctx, "POST", "v1", "person/item/list", body, &response, s.tokenValue()); err != nil {
-		return nil, err
+	const pageSize = 200
+	items := make([]MediaItem, 0, pageSize)
+	seen := make(map[string]bool)
+	for page := 1; ; page++ {
+		body := map[string]any{"person_guid": personGUID, "page": page, "page_size": pageSize, "sort_column": "update_time", "sort_type": "desc"}
+		var response any
+		if err := s.requestContext(ctx, "POST", "v1", "person/item/list", body, &response, s.tokenValue()); err != nil {
+			return nil, err
+		}
+		data := unwrapData(response)
+		batch := normalizeItems(findItemsList(data))
+		added := 0
+		for _, item := range batch {
+			if item.ID != "" && seen[item.ID] {
+				continue
+			}
+			if item.ID != "" {
+				seen[item.ID] = true
+			}
+			items = append(items, item)
+			added++
+		}
+		total, _ := asInt(valueAt(data, "total"))
+		if len(batch) == 0 || len(batch) < pageSize || added == 0 || total > 0 && int64(len(items)) >= total {
+			break
+		}
 	}
-	return normalizeItems(findItemsList(unwrapData(response))), nil
+	return items, nil
 }
 
 func mapsFromList(value any) []map[string]any {
@@ -1184,6 +1239,10 @@ func (s *Server) absoluteURL(value string) (string, error) {
 }
 
 func (s *Server) FetchImage(value string) ([]byte, error) {
+	return s.FetchImageContext(context.Background(), value)
+}
+
+func (s *Server) FetchImageContext(ctx context.Context, value string) ([]byte, error) {
 	imageURL, err := s.absoluteURL(value)
 	if err != nil {
 		return nil, err
@@ -1192,7 +1251,7 @@ func (s *Server) FetchImage(value string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(http.MethodGet, imageURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, imageURL, nil)
 	if err != nil {
 		return nil, err
 	}

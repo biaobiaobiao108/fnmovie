@@ -42,20 +42,21 @@ var (
 )
 
 type mpvAPI struct {
-	dll            *syscall.DLL
-	create         func() uintptr
-	setOption      func(uintptr, uintptr, uintptr) int32
-	initialize     func(uintptr) int32
-	command        func(uintptr, uintptr) int32
-	commandAsync   func(uintptr, uint64, uintptr) int32
-	waitEvent      func(uintptr, float64) uintptr
-	getProperty    func(uintptr, uintptr, int32, uintptr) int32
-	getPropertyStr func(uintptr, uintptr) uintptr
-	free           func(uintptr)
-	freeNode       func(uintptr)
-	wakeup         func(uintptr)
-	terminate      func(uintptr)
-	errorString    func(int32) uintptr
+	dll             *syscall.DLL
+	create          func() uintptr
+	setOption       func(uintptr, uintptr, uintptr) int32
+	initialize      func(uintptr) int32
+	command         func(uintptr, uintptr) int32
+	commandAsync    func(uintptr, uint64, uintptr) int32
+	observeProperty func(uintptr, uint64, uintptr, int32) int32
+	waitEvent       func(uintptr, float64) uintptr
+	getProperty     func(uintptr, uintptr, int32, uintptr) int32
+	getPropertyStr  func(uintptr, uintptr) uintptr
+	free            func(uintptr)
+	freeNode        func(uintptr)
+	wakeup          func(uintptr)
+	terminate       func(uintptr)
+	errorString     func(int32) uintptr
 }
 
 var mpvLoadOnce sync.Once
@@ -84,7 +85,7 @@ func loadMpvAPI(path string) (*mpvAPI, error) {
 		}{
 			{"mpv_create", &api.create}, {"mpv_set_option_string", &api.setOption}, {"mpv_initialize", &api.initialize},
 			{"mpv_command", &api.command}, {"mpv_wait_event", &api.waitEvent}, {"mpv_get_property", &api.getProperty},
-			{"mpv_command_async", &api.commandAsync},
+			{"mpv_command_async", &api.commandAsync}, {"mpv_observe_property", &api.observeProperty},
 			{"mpv_get_property_string", &api.getPropertyStr}, {"mpv_free", &api.free}, {"mpv_free_node_contents", &api.freeNode},
 			{"mpv_wakeup", &api.wakeup}, {"mpv_terminate_destroy", &api.terminate}, {"mpv_error_string", &api.errorString},
 		}
@@ -109,11 +110,35 @@ type mpvNode struct {
 const (
 	mpvFormatFlag  = 3
 	mpvFormatInt64 = 4
+
+	mpvFormatNode               = 6
+	mpvEventFileLoaded          = 8
+	mpvEventPropertyChange      = 22
+	mpvTrackListObserveUserdata = 1
 )
 
 func mpvNodeFlag(node mpvNode) bool {
 	return node.format == mpvFormatFlag && uint32(node.value) != 0
 }
+
+type playerTrackRefreshState struct {
+	dirty bool
+}
+
+func (s *playerTrackRefreshState) observe(eventID int32, userdata uint64) {
+	switch eventID {
+	case mpvEventFileLoaded:
+		s.dirty = true
+	case mpvEventPropertyChange:
+		if userdata == mpvTrackListObserveUserdata {
+			s.dirty = true
+		}
+	}
+}
+
+func (s playerTrackRefreshState) due() bool { return s.dirty }
+
+func (s *playerTrackRefreshState) refreshed() { s.dirty = false }
 
 type mpvNodeList struct {
 	num    int32
@@ -130,25 +155,27 @@ type mpvEvent struct {
 }
 
 type playerProcess struct {
-	commandMu     sync.Mutex
-	api           *mpvAPI
-	ctx           uintptr
-	host          uintptr
-	done          chan struct{}
-	loaded        chan struct{}
-	loadOnce      sync.Once
-	events        chan struct{}
-	pointerEvents chan struct{}
-	pointerDone   chan struct{}
-	stateMu       sync.RWMutex
-	state         PlayerSnapshot
-	exitStatus    string
-	positionBits  uint64
-	durationBits  uint64
-	positionSeen  bool
-	stopOnce      sync.Once
-	viewport      ui.Rect
-	resumeAt      float64
+	commandMu         sync.Mutex
+	api               *mpvAPI
+	ctx               uintptr
+	host              uintptr
+	done              chan struct{}
+	loaded            chan struct{}
+	loadOnce          sync.Once
+	events            chan struct{}
+	pointerEvents     chan struct{}
+	pointerDone       chan struct{}
+	stateMu           sync.RWMutex
+	state             PlayerSnapshot
+	exitStatus        string
+	positionBits      uint64
+	durationBits      uint64
+	positionSeen      bool
+	trackRefresh      playerTrackRefreshState
+	trackListObserved bool
+	stopOnce          sync.Once
+	viewport          ui.Rect
+	resumeAt          float64
 }
 
 func (p *playerProcess) start(dllPath, streamURL string, parent uintptr, resumeAt float64) error {
@@ -197,6 +224,7 @@ func (p *playerProcess) startContext(playbackCtx context.Context, dllPath, strea
 		return fmt.Errorf("初始化 libmpv 失败：%s", mpvError(api, code))
 	}
 	p.resetSession(api, ctx, host, resumeAt)
+	p.trackListObserved = p.observeTrackList()
 	go p.eventLoop()
 	if code := p.command("loadfile", streamURL, "replace"); code < 0 {
 		p.stop()
@@ -218,6 +246,17 @@ func (p *playerProcess) startContext(playbackCtx context.Context, dllPath, strea
 	}
 }
 
+func (p *playerProcess) observeTrackList() bool {
+	name, _ := syscall.BytePtrFromString("track-list")
+	code := p.api.observeProperty(p.ctx, mpvTrackListObserveUserdata, uintptr(unsafe.Pointer(name)), mpvFormatNode)
+	runtime.KeepAlive(name)
+	if code < 0 {
+		log.Printf("监听 libmpv track-list 变化失败，将使用定时刷新：%s", mpvError(p.api, code))
+		return false
+	}
+	return true
+}
+
 func (p *playerProcess) resetSession(api *mpvAPI, ctx, host uintptr, resumeAt float64) {
 	p.api, p.ctx, p.host = api, ctx, host
 	p.done, p.loaded, p.events = make(chan struct{}), make(chan struct{}), make(chan struct{}, 1)
@@ -226,6 +265,8 @@ func (p *playerProcess) resetSession(api *mpvAPI, ctx, host uintptr, resumeAt fl
 	p.stateMu.Lock()
 	p.exitStatus = ""
 	p.positionBits, p.durationBits, p.positionSeen = 0, 0, false
+	p.trackRefresh = playerTrackRefreshState{}
+	p.trackListObserved = false
 	p.state = PlayerSnapshot{Volume: 100, Speed: 1}
 	p.stateMu.Unlock()
 }
@@ -360,6 +401,7 @@ func (p *playerProcess) eventLoop() {
 			if event.id == 0 {
 				break
 			}
+			p.trackRefresh.observe(event.id, event.userdata)
 			switch event.id {
 			case 5: // MPV_EVENT_COMMAND_REPLY, only the newest user seek can fail its UI request.
 				p.stateMu.Lock()
@@ -383,7 +425,7 @@ func (p *playerProcess) eventLoop() {
 						return
 					}
 				}
-			case 8:
+			case mpvEventFileLoaded:
 				if p.resumeAt > 0 {
 					if code := p.command("seek", strconv.FormatFloat(p.resumeAt, 'f', 2, 64), "absolute", "exact"); code < 0 {
 						log.Printf("libmpv resume seek failed: %s", mpvError(p.api, code))
@@ -438,7 +480,12 @@ func (p *playerProcess) refreshState() {
 	p.state.Speed = p.getFloat("speed", 1)
 	p.state.AudioOutput = p.getString("current-ao")
 	p.state.AudioParams = p.getString("audio-params")
-	p.state.AudioTracks, p.state.SubtitleTracks = p.getTracks()
+	if p.trackRefresh.due() || !p.trackListObserved {
+		if audio, subtitles, ok := p.getTracks(); ok {
+			p.state.AudioTracks, p.state.SubtitleTracks = audio, subtitles
+			p.trackRefresh.refreshed()
+		}
+	}
 	p.stateMu.Unlock()
 	if duration > 0 {
 		p.loadOnce.Do(func() { close(p.loaded) })
@@ -481,10 +528,10 @@ func (p *playerProcess) getRaw(name string, format int32, data unsafe.Pointer) i
 	return code
 }
 
-func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack) {
+func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack, bool) {
 	var node mpvNode
 	if p.getRaw("track-list", 6, unsafe.Pointer(&node)) < 0 || node.format != 7 || node.value == 0 {
-		return nil, nil
+		return nil, nil, false
 	}
 	defer func() {
 		p.api.freeNode(uintptr(unsafe.Pointer(&node)))
@@ -492,17 +539,20 @@ func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack) {
 	}()
 	listBytes, ok := readCBytes(node.value, 24)
 	if !ok {
-		return nil, nil
+		return nil, nil, false
 	}
 	list := *(*mpvNodeList)(unsafe.Pointer(&listBytes[0]))
-	if list.num <= 0 || list.num > 1024 {
-		return nil, nil
+	if list.num < 0 || list.num > 1024 {
+		return nil, nil, false
+	}
+	audio, subtitles := make([]PlayerTrack, 0), make([]PlayerTrack, 0)
+	if list.num == 0 {
+		return audio, subtitles, true
 	}
 	valueBytes, ok := readCBytes(list.values, int(list.num)*16)
 	if !ok {
-		return nil, nil
+		return nil, nil, false
 	}
-	audio, subtitles := make([]PlayerTrack, 0), make([]PlayerTrack, 0)
 	values := unsafe.Slice((*mpvNode)(unsafe.Pointer(&valueBytes[0])), int(list.num))
 	for _, value := range values {
 		if value.format != 8 || value.value == 0 {
@@ -563,7 +613,7 @@ func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack) {
 	}
 	normalizeSelectedTracks(audio, false)
 	normalizeSelectedTracks(subtitles, true)
-	return audio, subtitles
+	return audio, subtitles, true
 }
 
 func (p *playerProcess) running() bool {
