@@ -486,17 +486,14 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	playerOverlayTheme.SurfaceHover = ui.RGBA(255, 255, 255, 0.12)
 	playerOverlayTheme.SurfacePressed = ui.RGBA(255, 255, 255, 0.20)
 	c.SetTheme(playerOverlayTheme)
-	ui.Row(c).Absolute().Top(10).Left(20).AlignItems(ui.Center).Padding(5, 6).Radius(22).
-		Background(ui.RGBA(18, 20, 24, 0.52)).Border(1, ui.RGBA(255, 255, 255, 0.18)).Children(func() {
-		backBtn := ui.Button(c, "").Size(32, 32).Padding(0).Radius(16).BorderWidth(0).
-			Background(ui.RGBA(255, 255, 255, 0.12)).TextColor(ui.RGB(255, 255, 255)).Label("返回影片库").
-			Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
-		if backBtn.Hovered() {
-			backBtn.Background(ui.RGBA(255, 255, 255, 0.22))
-		}
-		backBtn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(16, 16) })
-		backBtn.OnClick(a.stopPlayback)
-	})
+	backBtn := ui.Button(c, "").Absolute().Top(10).Left(20).Size(32, 32).Padding(0).Radius(16).BorderWidth(0).
+		Background(ui.RGBA(255, 255, 255, 0.12)).TextColor(ui.RGB(255, 255, 255)).Label("返回影片库").
+		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+	if backBtn.Hovered() {
+		backBtn.Background(ui.RGBA(255, 255, 255, 0.22))
+	}
+	backBtn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(16, 16) })
+	backBtn.OnClick(a.stopPlayback)
 }
 
 // MyGo applies input after construction. Preserve the model edit until its
