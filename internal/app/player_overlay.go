@@ -486,7 +486,7 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	playerOverlayTheme.SurfaceHover = ui.RGBA(255, 255, 255, 0.12)
 	playerOverlayTheme.SurfacePressed = ui.RGBA(255, 255, 255, 0.20)
 	c.SetTheme(playerOverlayTheme)
-	ui.Row(c).Absolute().Top(10).Left(20).Gap(12).AlignItems(ui.Center).Padding(5, 14, 5, 6).Radius(22).
+	ui.Row(c).Absolute().Top(10).Left(20).AlignItems(ui.Center).Padding(5, 6).Radius(22).
 		Background(ui.RGBA(18, 20, 24, 0.52)).Border(1, ui.RGBA(255, 255, 255, 0.18)).Children(func() {
 		backBtn := ui.Button(c, "").Size(32, 32).Padding(0).Radius(16).BorderWidth(0).
 			Background(ui.RGBA(255, 255, 255, 0.12)).TextColor(ui.RGB(255, 255, 255)).Label("返回影片库").
@@ -496,16 +496,6 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 		}
 		backBtn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(16, 16) })
 		backBtn.OnClick(a.stopPlayback)
-		ui.Row(c).Gap(8).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, a.playback.Title).FontSize(13).Bold().TextColor(ui.RGB(255, 255, 255)).SingleLine()
-			quality := strings.TrimSpace(a.playback.Quality)
-			if quality == "" {
-				quality = "飞牛影视"
-			}
-			ui.Box(c).Padding(2, 6).Radius(4).Background(ui.RGBA(255, 255, 255, 0.14)).Children(func() {
-				ui.Text(c, quality).FontSize(9).Bold().TextColor(ui.RGBA(255, 255, 255, 0.85)).SingleLine()
-			})
-		})
 	})
 }
 

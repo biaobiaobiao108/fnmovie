@@ -390,11 +390,13 @@ func TestPlayerOverlayViews(t *testing.T) {
 		app.playerHeaderView(c)
 	}, 1280, 64)
 
-	if _, ok := headerTester.Find("流浪地球 2"); !ok {
-		t.Fatalf("player header title missing")
+	if _, ok := headerTester.Find("返回影片库"); !ok {
+		t.Fatalf("player header back button missing")
 	}
-	if _, ok := headerTester.Find("4K HDR"); !ok {
-		t.Fatalf("player header quality badge missing")
+	for _, hidden := range []string{"流浪地球 2", "4K HDR"} {
+		if _, ok := headerTester.Find(hidden); ok {
+			t.Fatalf("player header should not show %q", hidden)
+		}
 	}
 
 	transportTester := ui.NewTester(func(c *ui.Context) {

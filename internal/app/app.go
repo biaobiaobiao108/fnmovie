@@ -19,6 +19,29 @@ import (
 //go:embed assets/icon.png
 var appIconPNG []byte
 
+const applicationWindowTitle = "哞哩影院"
+
+func windowTitleForPlayback(playback PlaybackState) string {
+	if playback.Active {
+		if title := strings.Join(strings.Fields(playback.Title), " "); title != "" {
+			return title
+		}
+	}
+	return applicationWindowTitle
+}
+
+func (a *appState) syncWindowTitle() {
+	if a.window == nil {
+		return
+	}
+	title := windowTitleForPlayback(a.playback)
+	if a.window.Title() != title {
+		// Windows renders the native caption and adds an ellipsis when the
+		// current window width leaves insufficient room for the full title.
+		a.window.SetTitle(title)
+	}
+}
+
 type appState struct {
 	home                         homeState
 	window                       *mygo.Window
@@ -161,7 +184,7 @@ func Run() {
 
 	mygo.App.WhenReady(func() {
 		app.window = mygo.NewWindow(mygo.WindowOptions{
-			Title: "哞哩影院", Width: 1280, Height: 800, MinWidth: 960, MinHeight: 640,
+			Title: applicationWindowTitle, Width: 1280, Height: 800, MinWidth: 960, MinHeight: 640,
 			BackgroundColor: "#f7f6f2", StateKey: "main", Content: ui.View(app.view),
 		})
 		setWindowTheme(app.window)
@@ -2151,6 +2174,7 @@ func (a *appState) startPlayback(item MediaItem) {
 			a.playerProxy = proxy
 			a.playingItem = &item
 			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
+			a.syncWindowTitle()
 			a.playbackLoading = false
 			a.playbackLoadingID = ""
 			a.playbackLoadingTitle = ""
@@ -2255,6 +2279,7 @@ func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Se
 			if snapshot.Error != "" {
 				a.stopPlayback()
 				a.playback = PlaybackState{Active: true, Title: item.Title, Error: snapshot.Error}
+				a.syncWindowTitle()
 				a.window.Invalidate()
 			} else {
 				// A clean mpv exit (including natural completion) returns to the
@@ -2324,6 +2349,7 @@ func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64) {
 	a.playerProxy = nil
 	a.playingItem = nil
 	a.playback = PlaybackState{}
+	a.syncWindowTitle()
 	a.posters.SetPlayback(false)
 	return server, item, position, duration
 }
