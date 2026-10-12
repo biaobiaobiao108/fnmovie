@@ -146,6 +146,7 @@ type appState struct {
 	playbackRequest              uint64
 	playbackTrackCancel          context.CancelFunc
 	selectedPerson               *CastMember
+	personFavoriteLoading        bool
 	personItems                  []MediaItem
 	personLoading                bool
 	personCached                 bool
@@ -604,9 +605,10 @@ func (a *appState) libraryView(c *ui.Context) {
 		if card.Clicked() {
 			if item.Kind == "person" || strings.EqualFold(firstString(item.Raw, "type"), "Person") {
 				a.openPerson(CastMember{
-					ID:      item.ID,
-					Name:    item.Title,
-					Profile: item.Poster,
+					ID:       item.ID,
+					Favorite: item.Favorite,
+					Name:     item.Title,
+					Profile:  item.Poster,
 				})
 			} else {
 				a.openDetail(item)
@@ -1042,6 +1044,9 @@ func (a *appState) detailBackButton(c *ui.Context) {
 
 func (a *appState) favoriteButton(c *ui.Context, item MediaItem) {
 	pending := a.favoritePending[item.ID]
+	if a.selectedPerson != nil && a.selectedPerson.ID == item.ID && a.personFavoriteLoading {
+		pending = true
+	}
 	icon := "♡"
 	color := ui.Hex("#59645e")
 	if item.Favorite {
@@ -1390,6 +1395,7 @@ func (a *appState) openPerson(person CastMember) {
 	a.catalogScrollAnimation.Stop(a.catalogScroll.Y)
 	a.detailScrollAnimation.Stop(a.detailScroll.Y)
 	a.selectedPerson = &person
+	a.personFavoriteLoading = false
 	a.personItems = nil
 	a.personCached = false
 	a.personLoading = true
@@ -1420,14 +1426,27 @@ func (a *appState) openPerson(person CastMember) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	a.personCancel = cancel
+	a.personFavoriteLoading = true
 	go func() {
-		items, err := server.PersonItemsContext(ctx, personID)
+		item, err := server.ItemDetailContext(ctx, MediaItem{ID: personID})
 		a.window.Update(func() {
-			defer cancel()
 			if ctx.Err() != nil || a.server != server || a.selectedPerson == nil || a.selectedPerson.ID != personID || a.personRequest != reqID {
 				return
 			}
-			a.personCancel = nil
+			a.personFavoriteLoading = false
+			if err == nil {
+				a.updateFavoriteProjection(personID, item.Favorite)
+			} else {
+				a.status = "演员收藏状态读取失败：" + err.Error()
+			}
+		})
+	}()
+	go func() {
+		items, err := server.PersonItemsContext(ctx, personID)
+		a.window.Update(func() {
+			if ctx.Err() != nil || a.server != server || a.selectedPerson == nil || a.selectedPerson.ID != personID || a.personRequest != reqID {
+				return
+			}
 			a.personLoading = false
 			if err != nil {
 				a.personError = "作品读取失败：" + err.Error()
@@ -1450,6 +1469,7 @@ func (a *appState) closePerson() {
 	}
 	a.personRequest++
 	a.selectedPerson = nil
+	a.personFavoriteLoading = false
 	a.personItems = nil
 	a.personLoading = false
 	a.personCached = false
@@ -1493,7 +1513,10 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 				})
 			}
 			ui.Column(c).Gap(6).Children(func() {
-				ui.Text(c, person.Name).FontSize(22).Bold()
+				ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+					a.favoriteButton(c, MediaItem{ID: person.ID, Title: person.Name, Kind: "person", Favorite: person.Favorite})
+					ui.Text(c, person.Name).FontSize(22).Bold()
+				})
 				roleDesc := person.Role
 				if roleDesc != "" {
 					roleDesc = "代表角色：" + roleDesc
@@ -2403,6 +2426,16 @@ func (a *appState) toggleFavorite(item MediaItem) {
 }
 
 func (a *appState) updateFavoriteProjection(itemID string, favorite bool) {
+	if a.selectedPerson != nil && a.selectedPerson.ID == itemID {
+		a.selectedPerson.Favorite = favorite
+	}
+	if a.selected != nil {
+		for i := range a.selected.Cast {
+			if a.selected.Cast[i].ID == itemID {
+				a.selected.Cast[i].Favorite = favorite
+			}
+		}
+	}
 	for _, state := range a.catalogs {
 		for i := range state.Items {
 			if state.Items[i].ID == itemID {

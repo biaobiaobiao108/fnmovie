@@ -66,6 +66,7 @@ type MediaItem struct {
 
 type CastMember struct {
 	ID         string
+	Favorite   bool
 	Name       string
 	Role       string
 	Job        string
@@ -917,6 +918,7 @@ func (s *Server) PeopleContext(ctx context.Context, itemID string) ([]CastMember
 	people := make([]CastMember, 0, len(objects))
 	for _, object := range objects {
 		person := CastMember{
+			Favorite:   anyBool(object["favorite"]) || anyBool(object["is_favorite"]) || anyBool(object["isFavorite"]),
 			ID:         firstString(object, "person_guid", "guid", "item_guid"),
 			Name:       firstString(object, "name", "person_name", "original_name"),
 			Role:       firstString(object, "role", "character", "character_name", "characterName"),

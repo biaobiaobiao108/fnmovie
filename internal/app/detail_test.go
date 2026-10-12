@@ -500,9 +500,23 @@ func TestFavoritePersonNavigationAndSectionSwitch(t *testing.T) {
 	}
 
 	// Click person card to open person view
-	app.openPerson(CastMember{ID: personItem.ID, Name: personItem.Title})
+	app.openPerson(CastMember{ID: personItem.ID, Name: personItem.Title, Favorite: personItem.Favorite})
 	if app.selectedPerson == nil || app.selectedPerson.Name != "新垣结衣" {
 		t.Fatalf("expected selectedPerson to be set")
+	}
+	tester.Frame()
+	button, ok := tester.Find("取消收藏")
+	if !ok {
+		t.Fatal("favorite actor must expose an unfavorite button")
+	}
+	name, ok := tester.Find("新垣结衣")
+	if !ok || button.X >= name.X {
+		t.Fatalf("favorite button should sit left of the actor name: button=%+v name=%+v", button, name)
+	}
+	app.updateFavoriteProjection(personItem.ID, false)
+	tester.Frame()
+	if app.selectedPerson.Favorite || app.items[0].Favorite || !tester.HasText("收藏") {
+		t.Fatal("actor and favorites list must reflect the updated favorite state")
 	}
 
 	// Switch section to movies
