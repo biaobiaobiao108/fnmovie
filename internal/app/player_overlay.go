@@ -496,8 +496,8 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	backBtn.OnClick(a.stopPlayback)
 }
 
-// MyGo applies input after construction. Preserve the model edit until its
-// change notice is observed, rather than restoring an old snapshot.
+// Keep the constructor-applied edit until its change notice is handled,
+// rather than restoring an old playback snapshot.
 func (a *appState) playerSeekSlider(c *ui.Context, maxPosition float64, commit func(float64)) {
 	slider := ui.Slider(c.Key("player-seek"), &a.seekSliderPosition, 0, maxPosition).Grow(1).Label("播放进度")
 	pressed, changed := slider.Pressed(), slider.Changed()

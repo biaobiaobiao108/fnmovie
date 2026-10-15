@@ -7,7 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-func TestMyGoPlayerSeekPreservesDeferredInputAndCommitsOnRelease(t *testing.T) {
+func TestMyGoPlayerSeekTakesInputDuringBuildAndCommitsOnRelease(t *testing.T) {
 	a := &appState{playback: PlaybackState{Position: 12, Duration: 100}, seekSliderPosition: 12}
 	var commits []float64
 	commit := func(target float64) {
@@ -30,7 +30,7 @@ func TestMyGoPlayerSeekPreservesDeferredInputAndCommitsOnRelease(t *testing.T) {
 	}
 	tt.Frame()
 	if a.seekSliderPosition < 70 {
-		t.Fatal("old player snapshot overwrote deferred input")
+		t.Fatal("old playback snapshot overwrote the active seek target")
 	}
 	tt.Release(r.X+r.W*0.8, y)
 	if len(commits) != 1 || commits[0] < 70 || a.seekDragging {
@@ -47,7 +47,7 @@ func TestMyGoPlayerSeekPreservesDeferredInputAndCommitsOnRelease(t *testing.T) {
 	}
 }
 
-func TestMyGoPlayerSeekKeyboardEditNotOverwrittenBySnapshot(t *testing.T) {
+func TestMyGoPlayerSeekKeyboardEditCommitsOnceAndIsNotOverwritten(t *testing.T) {
 	a := &appState{playback: PlaybackState{Position: 12, Duration: 100}, seekSliderPosition: 12}
 	var commits []float64
 	tt := ui.NewTester(func(c *ui.Context) {
