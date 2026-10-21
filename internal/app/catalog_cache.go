@@ -70,6 +70,7 @@ const (
 	catalogMaxDetails      = 512
 	catalogMaxHomeScopes   = 16
 	homeContinueCacheLimit = 200
+	catalogCacheMaxBytes   = int64(64 << 20)
 )
 
 type CatalogCache struct {
@@ -102,7 +103,12 @@ func NewCatalogCache() *CatalogCache {
 	dir = filepath.Join(dir, "FnMovie")
 	_ = os.MkdirAll(dir, 0700)
 	c := &CatalogCache{path: filepath.Join(dir, "catalog.json"), data: newCatalogDisk()}
-	if raw, err := os.ReadFile(c.path); err == nil {
+	removeStaleCacheTemps(dir, "catalog-", time.Hour, time.Now())
+	if info, err := os.Stat(c.path); err == nil && info.Size() > catalogCacheMaxBytes {
+		log.Printf("fnmovie: discard oversized catalog cache (%d bytes)", info.Size())
+		_ = os.Remove(c.path)
+	}
+	if raw, err := os.ReadFile(c.path); err == nil && int64(len(raw)) <= catalogCacheMaxBytes {
 		_ = json.Unmarshal(raw, &c.data)
 	}
 	migrateCatalogDisk(&c.data)
@@ -416,7 +422,7 @@ func (c *CatalogCache) saveLocked() error {
 		return nil
 	}
 	c.data.Version = catalogCacheVersion
-	data, err := json.Marshal(c.data)
+	data, err := catalogDiskWithinByteBudget(&c.data, catalogCacheMaxBytes)
 	if err != nil {
 		return fmt.Errorf("encode catalog cache: %w", err)
 	}
@@ -447,6 +453,127 @@ func (c *CatalogCache) saveLocked() error {
 		return fmt.Errorf("replace catalog cache: %w", err)
 	}
 	return nil
+}
+
+type catalogCacheEntryRef struct {
+	kind string
+	key  string
+	at   time.Time
+	size int64
+}
+
+func catalogDiskWithinByteBudget(disk *catalogDisk, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("catalog cache byte budget must be positive")
+	}
+	entries := catalogCacheEntries(disk)
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].at.Equal(entries[j].at) {
+			if entries[i].kind == entries[j].kind {
+				return entries[i].key < entries[j].key
+			}
+			return entries[i].kind < entries[j].kind
+		}
+		return entries[i].at.Before(entries[j].at)
+	})
+
+	// Leave room for map separators and differences between estimated and final
+	// JSON sizes. The exact serialized file is checked again after pruning.
+	target := maxBytes - min(int64(64<<10), maxBytes/100)
+	base := catalogDisk{
+		Version: disk.Version, Libraries: map[string][]MediaLibrary{}, Pages: map[string]CatalogPage{},
+		Details: map[string]MediaItem{}, HomeHeroes: map[string]HomeHeroesCache{},
+		HomeContinue: map[string]HomeContinueCache{}, Usage: map[string]time.Time{},
+	}
+	baseJSON, err := json.Marshal(base)
+	if err != nil {
+		return nil, err
+	}
+	estimated := int64(len(baseJSON))
+	for _, entry := range entries {
+		estimated += entry.size
+	}
+	removed := 0
+	for i, entry := range entries {
+		if estimated <= target {
+			break
+		}
+		removeCatalogCacheEntry(disk, entry)
+		estimated -= entry.size
+		if estimated < 0 {
+			estimated = 0
+		}
+		removed = i + 1
+	}
+	encoded, err := json.Marshal(disk)
+	if err != nil {
+		return nil, err
+	}
+	for i := removed; int64(len(encoded)) > maxBytes && i < len(entries); i++ {
+		removeCatalogCacheEntry(disk, entries[i])
+		encoded, err = json.Marshal(disk)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if int64(len(encoded)) > maxBytes {
+		return nil, fmt.Errorf("catalog metadata exceeds the %d byte cache budget", maxBytes)
+	}
+	return encoded, nil
+}
+
+func catalogCacheEntries(disk *catalogDisk) []catalogCacheEntryRef {
+	entries := make([]catalogCacheEntryRef, 0, len(disk.Libraries)+len(disk.Pages)+len(disk.Details)+len(disk.HomeHeroes)+len(disk.HomeContinue))
+	add := func(kind, key string, value any) {
+		keyJSON, keyErr := json.Marshal(key)
+		valueJSON, valueErr := json.Marshal(value)
+		if keyErr != nil || valueErr != nil {
+			return
+		}
+		// Include a separator byte for each containing map and the matching
+		// usage record so the estimate is conservative when entries are pruned.
+		size := int64(len(keyJSON) + 1 + len(valueJSON) + 1)
+		usageKey := catalogUsageKey(kind, key)
+		at := disk.Usage[usageKey]
+		if at, ok := disk.Usage[usageKey]; ok {
+			usageKeyJSON, _ := json.Marshal(usageKey)
+			usageValueJSON, _ := json.Marshal(at)
+			size += int64(len(usageKeyJSON) + 1 + len(usageValueJSON) + 1)
+		}
+		entries = append(entries, catalogCacheEntryRef{kind: kind, key: key, at: at, size: size})
+	}
+	for key, value := range disk.Libraries {
+		add("libraries", key, value)
+	}
+	for key, value := range disk.Pages {
+		add("pages", key, value)
+	}
+	for key, value := range disk.Details {
+		add("details", key, value)
+	}
+	for key, value := range disk.HomeHeroes {
+		add("home-heroes", key, value)
+	}
+	for key, value := range disk.HomeContinue {
+		add("home-continue", key, value)
+	}
+	return entries
+}
+
+func removeCatalogCacheEntry(disk *catalogDisk, entry catalogCacheEntryRef) {
+	switch entry.kind {
+	case "libraries":
+		delete(disk.Libraries, entry.key)
+	case "pages":
+		delete(disk.Pages, entry.key)
+	case "details":
+		delete(disk.Details, entry.key)
+	case "home-heroes":
+		delete(disk.HomeHeroes, entry.key)
+	case "home-continue":
+		delete(disk.HomeContinue, entry.key)
+	}
+	delete(disk.Usage, catalogUsageKey(entry.kind, entry.key))
 }
 
 func verifyCatalogReplaceDirectory(source, destination string) error {

@@ -43,7 +43,7 @@ func deriveVisibleItems(source []MediaItem, key mediaViewKey) []MediaItem {
 		// Movie and TV nodes belong on the library's first level; Season and
 		// Episode nodes are loaded after opening their parent show. Person
 		// nodes are visible when starred in favorites.
-		if item.Kind == "season" {
+		if item.Kind == "season" || item.Kind == "directory" || item.Kind == "livechannel" {
 			continue
 		}
 		if key.Query != "" {

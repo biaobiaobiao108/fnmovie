@@ -24,8 +24,8 @@ try {
     }
     $shimDir = Join-Path $projectRoot 'build\nsis-utf8'
     New-Item -ItemType Directory -Force -Path $shimDir | Out-Null
-    # MyGo 0.2.18 writes UTF-8 NSIS source without a BOM, while makensis defaults
-    # to the Windows ANSI code page. Scope the explicit encoding to this build.
+    # Keep UTF-8 explicit for installed NSIS distributions as well as the
+    # bundled compiler. Scope the encoding override to this build only.
     $shimSource = @'
 package main
 import (

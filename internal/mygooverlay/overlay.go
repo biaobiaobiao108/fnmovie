@@ -16,6 +16,8 @@ type Content struct {
 	presenter *presenter
 }
 
+var _ mygo.Content = (*Content)(nil)
+
 func View(view func(*ui.Context)) *Content { return &Content{view: ui.View(view)} }
 
 func (c *Content) AttachContent(conn *surface.Conn) {

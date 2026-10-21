@@ -114,6 +114,31 @@ func TestNormalizeItemRecognizesTVCategoryWhenTypeIsGeneric(t *testing.T) {
 	if item.Kind != "tv" || !item.IsSeries {
 		t.Fatalf("normalized show = %+v", item)
 	}
+	item = normalizeItem(map[string]any{"guid": "show-video", "title": "剧集", "type": "Video", "category": "TV"})
+	if item.Kind != "tv" || !item.IsSeries {
+		t.Fatalf("generic video type should defer to the TV category: %+v", item)
+	}
+}
+
+func TestDirectoryAndLiveChannelNodesNeverBecomeMediaCards(t *testing.T) {
+	items := []MediaItem{
+		normalizeItem(map[string]any{"guid": "folder", "title": "电影文件夹", "type": "Directory"}),
+		normalizeItem(map[string]any{"guid": "channel", "title": "直播频道", "type": "LiveChannel"}),
+		normalizeItem(map[string]any{"guid": "movie", "title": "电影", "type": "Movie", "favorite": true}),
+	}
+	if items[0].Kind != "directory" || items[1].Kind != "livechannel" {
+		t.Fatalf("non-media kinds = %q, %q; want directory and livechannel", items[0].Kind, items[1].Kind)
+	}
+	for _, key := range []mediaViewKey{
+		{Section: "library"},
+		{Section: "library", Query: "电影"},
+		{Section: "favorites"},
+	} {
+		got := deriveVisibleItems(items, key)
+		if len(got) != 1 || got[0].ID != "movie" {
+			t.Errorf("projection %+v = %#v, want only the movie", key, got)
+		}
+	}
 }
 
 func TestNormalizeItemInfersSeasonAndEpisodeFromParentIDs(t *testing.T) {

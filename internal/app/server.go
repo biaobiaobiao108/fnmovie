@@ -1476,6 +1476,10 @@ func normalizeMediaKind(object map[string]any) string {
 	for _, value := range types {
 		kind := strings.ToLower(strings.TrimSpace(value))
 		switch {
+		case strings.Contains(kind, "directory"):
+			return "directory"
+		case strings.Contains(kind, "livechannel") || strings.Contains(kind, "live channel"):
+			return "livechannel"
 		case strings.Contains(kind, "person") || strings.Contains(kind, "actor") || strings.Contains(kind, "cast"):
 			return "person"
 		case strings.Contains(kind, "episode"):
@@ -1484,8 +1488,10 @@ func normalizeMediaKind(object map[string]any) string {
 			return "season"
 		case strings.Contains(kind, "tv") || strings.Contains(kind, "series") || strings.Contains(kind, "show"):
 			return "tv"
-		case strings.Contains(kind, "movie") || kind == "film" || kind == "video":
+		case strings.Contains(kind, "movie") || kind == "film":
 			return "movie"
+		case kind == "video":
+			// Video is a generic file type; later fields may identify a TV root.
 		}
 	}
 	seasonNum := parseMediaNumber(firstString(object, "season_number", "seasonNumber"))
@@ -1497,12 +1503,6 @@ func normalizeMediaKind(object map[string]any) string {
 	if firstString(object, "tv_guid", "tvGuid", "series_guid", "seriesGuid", "tv_id", "tvId", "series_id", "seriesId",
 		"tv_title", "series_title", "show_title") != "" || episodeNum > 0 {
 		return "episode"
-	}
-	for _, value := range types {
-		kind := strings.ToLower(strings.TrimSpace(value))
-		if kind == "video" || kind == "movie" || kind == "film" {
-			return "movie"
-		}
 	}
 	return "movie"
 }

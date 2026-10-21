@@ -362,6 +362,7 @@ func (p *PosterLoader) prunePosterDisk() {
 
 func (p *PosterLoader) prunePosterDiskLocked(reserved int64) bool {
 	dir := p.diskDir
+	removeStaleCacheTemps(dir, "poster-", time.Hour, time.Now())
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return false

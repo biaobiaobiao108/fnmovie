@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -275,5 +276,54 @@ func TestCatalogCacheEvictsOldestEntriesWithinEachBound(t *testing.T) {
 	}
 	if len(usage) != catalogMaxLibrarySets+catalogMaxPages+catalogMaxDetails {
 		t.Fatalf("eviction left stale usage records: %d", len(usage))
+	}
+}
+
+func TestCatalogCachePrunesOldestEntriesToByteBudget(t *testing.T) {
+	disk := newCatalogDisk()
+	disk.Details["server:old"] = MediaItem{ID: "old", Title: "Old", Raw: map[string]any{"description": strings.Repeat("o", 1800)}}
+	disk.Details["server:new"] = MediaItem{ID: "new", Title: "New", Raw: map[string]any{"description": strings.Repeat("n", 1800)}}
+	disk.Usage[catalogUsageKey("details", "server:old")] = time.Unix(1, 0)
+	disk.Usage[catalogUsageKey("details", "server:new")] = time.Unix(2, 0)
+
+	newestOnly := newCatalogDisk()
+	newestOnly.Details["server:new"] = disk.Details["server:new"]
+	newestOnly.Usage[catalogUsageKey("details", "server:new")] = disk.Usage[catalogUsageKey("details", "server:new")]
+	newestOnlyJSON, err := json.Marshal(newestOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget := int64(len(newestOnlyJSON) + 1024)
+
+	encoded, err := catalogDiskWithinByteBudget(&disk, budget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int64(len(encoded)) > budget {
+		t.Fatalf("encoded cache size=%d, want <= %d", len(encoded), budget)
+	}
+	if _, ok := disk.Details["server:old"]; ok {
+		t.Fatal("byte budget should evict the oldest detail first")
+	}
+	if _, ok := disk.Details["server:new"]; !ok {
+		t.Fatal("byte budget evicted the newest detail even though it fits")
+	}
+}
+
+func TestCatalogCacheDropsAnEntryThatCannotFitTheByteBudget(t *testing.T) {
+	disk := newCatalogDisk()
+	disk.Details["server:oversized"] = MediaItem{ID: "oversized", Raw: map[string]any{"description": strings.Repeat("x", 4096)}}
+	disk.Usage[catalogUsageKey("details", "server:oversized")] = time.Now()
+	emptyJSON, err := json.Marshal(newCatalogDisk())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	encoded, err := catalogDiskWithinByteBudget(&disk, int64(len(emptyJSON)+8))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int64(len(encoded)) > int64(len(emptyJSON)+8) || len(disk.Details) != 0 {
+		t.Fatalf("oversized detail was not discarded: bytes=%d entries=%d", len(encoded), len(disk.Details))
 	}
 }
