@@ -74,18 +74,16 @@ type appState struct {
 	grid                         ui.GridState
 	catalogScroll                ui.ScrollState
 	catalogScrollKey             string
-	catalogScrollAnimation       smoothScroll
 	sidebarList                  ui.ListState
 	sidebarScroll                ui.ScrollState
-	sidebarScrollAnimation       smoothScroll
 	detailList                   ui.ListState
 	detailScroll                 ui.ScrollState
-	detailScrollAnimation        smoothScroll
 	detailSynopsisScroll         ui.ScrollState
-	detailSynopsisAnimation      smoothScroll
 	detailSynopsisOpen           bool
 	personScroll                 ui.ScrollState
-	personScrollAnimation        smoothScroll
+	taskbarProgress              float64
+	taskbarProgressUpdatedAt     time.Time
+	taskbarProgressSet           bool
 	posters                      *PosterLoader
 	selected                     *MediaItem
 	detailRequest                uint64
@@ -288,7 +286,6 @@ func (a *appState) sidebar(c *ui.Context) {
 		ui.Text(c, "影视库").Padding(6, 14).FontSize(11).Bold().TextColor(t.TextMuted)
 		libraries := a.libraries
 		a.sidebarList.Key = func(i int) any { return libraries[i].ID }
-		advanceSmoothScroll(c, &a.sidebarScroll, &a.sidebarScrollAnimation)
 		list := ui.List(c, &a.sidebarList, len(libraries), func(i int) {
 			library := libraries[i]
 			selected := a.section == "library" && a.libraryID == library.ID
@@ -316,7 +313,7 @@ func (a *appState) sidebar(c *ui.Context) {
 				a.loadLibrary()
 			}
 		}).Grow(1)
-		bindSmoothScroll(c, list, &a.sidebarScroll, &a.sidebarScrollAnimation)
+		bindSmoothScroll(list, &a.sidebarScroll)
 		bindScrollEdgeFades(list, &a.sidebarScroll, background)
 		if a.loggedIn {
 			exitBtn := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
@@ -510,10 +507,8 @@ func (a *appState) libraryView(c *ui.Context) {
 	if key != a.catalogScrollKey {
 		a.catalogScrollKey = key
 		a.catalogScroll = ui.ScrollState{}
-		a.catalogScrollAnimation.Stop(0)
 		a.grid = ui.GridState{}
 	}
-	advanceSmoothScroll(c, &a.catalogScroll, &a.catalogScrollAnimation)
 	state := a.catalogs[a.currentCatalogKey()]
 	if len(items) == 0 {
 		if catalogNeedsMoreVisibleItems(len(items), state) {
@@ -615,7 +610,7 @@ func (a *appState) libraryView(c *ui.Context) {
 			}
 		}
 	}).Grow(1)
-	bindSmoothScroll(c, grid, &a.catalogScroll, &a.catalogScrollAnimation)
+	bindSmoothScroll(grid, &a.catalogScroll)
 	bindScrollEdgeFades(grid, &a.catalogScroll, t.Background)
 }
 
@@ -693,8 +688,6 @@ func (a *appState) openDetail(item MediaItem) {
 	a.cancelDetailRequests()
 	a.detailRequest++
 	detailRequest := a.detailRequest
-	a.catalogScrollAnimation.Stop(a.catalogScroll.Y)
-	a.personScrollAnimation.Stop(a.personScroll.Y)
 	a.closePerson()
 	serverURL := a.settings.ServerURL
 	username := a.settings.Username
@@ -708,9 +701,7 @@ func (a *appState) openDetail(item MediaItem) {
 	a.selected = &item
 	a.detailList = ui.ListState{}
 	a.detailScroll = ui.ScrollState{}
-	a.detailScrollAnimation.Stop(0)
 	a.detailSynopsisScroll = ui.ScrollState{}
-	a.detailSynopsisAnimation.Stop(0)
 	a.detailSynopsisOpen = false
 	a.seriesLoading, a.seriesError, a.selectedSeasonID = false, "", ""
 	a.castLoading, a.castError = len(item.Cast) == 0, ""
@@ -741,7 +732,6 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 		a.detailHeading(c, item)
 		ui.Row(c).Grow(1).FillHeight().FillWidth().MaxWidth(1320).AlignSelf(ui.Center).AlignItems(ui.Center).Gap(32).Children(func() {
 			a.detailPosterActions(c, item)
-			advanceSmoothScroll(c, &a.detailScroll, &a.detailScrollAnimation)
 			scroll := ui.Scroll(c.Key("movie-detail:" + item.ID)).Grow(1).AlignSelf(ui.Stretch).FillHeight().Children(func() {
 				ui.Column(c).Padding(detailContentInset(c), 0, 20, 0).Gap(17).Children(func() {
 					_, posterHeight := detailPosterSize(c)
@@ -765,7 +755,7 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 					}
 				})
 			})
-			bindSmoothScroll(c, scroll, &a.detailScroll, &a.detailScrollAnimation)
+			bindSmoothScroll(scroll, &a.detailScroll)
 			bindScrollEdgeFades(scroll, &a.detailScroll, t.Background)
 		})
 	})
@@ -792,7 +782,6 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 				}
 				return "episode-status"
 			}
-			advanceSmoothScroll(c, &a.detailScroll, &a.detailScrollAnimation)
 			list := ui.List(c, &a.detailList, rows, func(i int) {
 				switch i {
 				case 0:
@@ -888,7 +877,7 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 					}
 				}
 			}).Grow(1).AlignSelf(ui.Stretch).FillHeight().Gap(2).Padding(detailContentInset(c), 0, 20, 0)
-			bindSmoothScroll(c, list, &a.detailScroll, &a.detailScrollAnimation)
+			bindSmoothScroll(list, &a.detailScroll)
 			bindScrollEdgeFades(list, &a.detailScroll, t.Background)
 		})
 	})
@@ -981,7 +970,6 @@ func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
 				if actionButton(c, "展开简介").AlignSelf(ui.Start).Height(22).Padding(0).BorderWidth(0).Background(ui.Transparent).FontSize(12).TextColor(c.Theme().Accent).Clicked() {
 					a.detailSynopsisOpen = true
 					a.detailSynopsisScroll = ui.ScrollState{}
-					a.detailSynopsisAnimation.Stop(0)
 				}
 			}
 		})
@@ -1003,11 +991,10 @@ func (a *appState) detailSynopsisDialog(c *ui.Context) {
 					a.detailSynopsisOpen = false
 				}
 			})
-			advanceSmoothScroll(c, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
 			scroll := ui.Scroll(c).Height(min(float32(440), height-180)).FillWidth().Children(func() {
 				ui.Text(c, item.Overview).FontSize(15).FixedLineHeight(22).TextColor(c.Theme().TextMuted)
 			})
-			bindSmoothScroll(c, scroll, &a.detailSynopsisScroll, &a.detailSynopsisAnimation)
+			bindSmoothScroll(scroll, &a.detailSynopsisScroll)
 		})
 	})
 }
@@ -1392,8 +1379,6 @@ func (a *appState) openPerson(person CastMember) {
 		a.personCancel()
 		a.personCancel = nil
 	}
-	a.catalogScrollAnimation.Stop(a.catalogScroll.Y)
-	a.detailScrollAnimation.Stop(a.detailScroll.Y)
 	a.selectedPerson = &person
 	a.personFavoriteLoading = false
 	a.personItems = nil
@@ -1402,7 +1387,6 @@ func (a *appState) openPerson(person CastMember) {
 	a.personError = ""
 	a.personGrid = ui.GridState{}
 	a.personScroll = ui.ScrollState{}
-	a.personScrollAnimation.Stop(0)
 	a.personRequest++
 	reqID := a.personRequest
 	if a.server == nil {
@@ -1565,7 +1549,6 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 				ui.Text(c, "在当前影视库中没有找到该演职人员的作品。").FontSize(13).TextColor(t.TextMuted).Padding(24, 0)
 			} else {
 				items := a.personItems
-				advanceSmoothScroll(c, &a.personScroll, &a.personScrollAnimation)
 				grid := ui.GridView(c, &a.personGrid, len(items), 150, 286, func(i int) {
 					if i >= len(items) {
 						return
@@ -1605,7 +1588,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 						a.openDetail(item)
 					}
 				}).Grow(1)
-				bindSmoothScroll(c, grid, &a.personScroll, &a.personScrollAnimation)
+				bindSmoothScroll(grid, &a.personScroll)
 				bindScrollEdgeFades(grid, &a.personScroll, c.Theme().Background)
 			}
 		})
@@ -2198,6 +2181,7 @@ func (a *appState) startPlayback(item MediaItem) {
 			a.playingItem = &item
 			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
 			a.syncWindowTitle()
+			a.syncPlaybackTaskbarProgress()
 			a.playbackLoading = false
 			a.playbackLoadingID = ""
 			a.playbackLoadingTitle = ""
@@ -2276,6 +2260,7 @@ func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Se
 			if duration > 0 {
 				a.playback.Duration = duration
 			}
+			a.syncPlaybackTaskbarProgress()
 			if a.playerOverlayWindow != nil {
 				a.playerOverlayWindow.Invalidate()
 			}
@@ -2365,6 +2350,7 @@ func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64) {
 		item = &copy
 		position, duration = a.player.Position()
 	}
+	a.clearPlaybackTaskbarProgress()
 	a.closePlayerOverlay()
 	a.player.Stop()
 	a.player.ReleaseSurface()

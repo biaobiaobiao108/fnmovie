@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -15,11 +16,11 @@ func TestSidebarVirtualizesAndKeepsItsPlaceAcrossPageChanges(t *testing.T) {
 	}
 	tester := ui.NewTester(a.view, 1280, 800)
 	assertBoundedRows(t, tester, "库条目-")
-	tester.Scroll(80, 400, 0, 100)
-	if !a.sidebarScrollAnimation.Active || a.sidebarScrollAnimation.Target <= 0 {
-		t.Fatal("sidebar wheel was not connected to smooth scrolling")
+	tester.Wheel(80, 400, 0, 100)
+	tester.Advance(200 * time.Millisecond)
+	if a.sidebarScroll.Y <= 0 {
+		t.Fatal("sidebar mouse wheel did not glide through its tracked position")
 	}
-	a.sidebarScrollAnimation.Stop(a.sidebarScroll.Y)
 	a.sidebarList.ScrollTo(700, ui.Start)
 	tester.Frame()
 	if !tester.HasText("库条目-700") {
@@ -41,11 +42,11 @@ func TestSeriesVirtualizesEpisodesAndPreservesAnchorDuringMetadataUpdates(t *tes
 	}
 	tester := ui.NewTester(a.view, 1280, 800)
 	assertBoundedRows(t, tester, "分集条目-")
-	tester.Scroll(650, 500, 0, 100)
-	if !a.detailScrollAnimation.Active || a.detailScrollAnimation.Target <= 0 {
-		t.Fatal("series wheel was not connected to smooth scrolling")
+	tester.Wheel(650, 500, 0, 100)
+	tester.Advance(200 * time.Millisecond)
+	if a.detailScroll.Y <= 0 {
+		t.Fatal("episode list mouse wheel did not glide through its tracked position")
 	}
-	a.detailScrollAnimation.Stop(a.detailScroll.Y)
 	a.detailList.ScrollTo(703, ui.Start)
 	tester.Frame()
 	if !tester.HasText("分集条目-700") {
@@ -59,16 +60,17 @@ func TestSeriesVirtualizesEpisodesAndPreservesAnchorDuringMetadataUpdates(t *tes
 	assertBoundedRows(t, tester, "分集条目-")
 }
 
-func TestMovieDetailUsesSmoothWheelInput(t *testing.T) {
+func TestMovieDetailUsesNativeWheelGlide(t *testing.T) {
 	movie := MediaItem{ID: "movie", Title: "电影"}
 	for i := range 40 {
 		movie.Sources = append(movie.Sources, StreamSource{Name: fmt.Sprintf("版本-%d", i)})
 	}
 	a := &appState{selected: &movie, catalogs: map[string]*CatalogState{}}
 	tester := ui.NewTester(a.view, 1280, 800)
-	tester.Scroll(650, 600, 0, 100)
-	if !a.detailScrollAnimation.Active || a.detailScrollAnimation.Target <= a.detailScroll.Y {
-		t.Fatalf("movie detail wheel should advance over frames: %+v", a.detailScrollAnimation)
+	tester.Wheel(650, 600, 0, 100)
+	tester.Advance(75 * time.Millisecond)
+	if a.detailScroll.Y <= 0 || a.detailScroll.Y >= 100 {
+		t.Fatalf("movie detail mouse wheel should glide over frames, got %v", a.detailScroll.Y)
 	}
 }
 

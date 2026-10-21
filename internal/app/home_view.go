@@ -310,13 +310,12 @@ func (a *appState) homeContinueGrid(c *ui.Context) {
 				}
 			}
 		})
-		advanceSmoothScroll(c, &a.home.GridScroll, &a.home.GridAnimation)
 		grid := ui.GridView(c, &a.home.Grid, len(a.home.Continue), 240, 198, func(i int) {
 			if i < len(a.home.Continue) {
 				a.homeContinueCard(c, a.home.Continue[i], 240)
 			}
 		}).Grow(1).FillHeight().FillWidth()
-		bindSmoothScroll(c, grid, &a.home.GridScroll, &a.home.GridAnimation)
+		bindSmoothScroll(grid, &a.home.GridScroll)
 		bindScrollEdgeFades(grid, &a.home.GridScroll, c.Theme().Background)
 	})
 }

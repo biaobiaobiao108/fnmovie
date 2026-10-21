@@ -48,8 +48,7 @@ func TestContinueLoadingSpinnerVisibleOverArtwork(t *testing.T) {
 		t.Fatalf("white spinner is hidden behind artwork or too dark: %d bright pixels", bright)
 	}
 	// Check the rendered spokes advance while the remote request is pending.
-	time.Sleep(90 * time.Millisecond)
-	tester.Frame()
+	tester.Advance(90 * time.Millisecond)
 	second := tester.Image()
 	changed := false
 	for y := int(spinner.Y); y < int(spinner.Y+spinner.H); y++ {

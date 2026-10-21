@@ -8,6 +8,7 @@ func setWindowTheme(*mygo.Window) {}
 
 func restoreWindowFocus(window *mygo.Window) {
 	if window != nil {
+		mygo.App.Focus()
 		window.Focus()
 	}
 }

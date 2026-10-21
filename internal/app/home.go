@@ -23,7 +23,6 @@ type homeState struct {
 	ContinueUpdatedAt                                           time.Time
 	AllContinue                                                 bool
 	Scroll, GridScroll, RowScroll                               ui.ScrollState
-	ScrollAnimation, GridAnimation                              smoothScroll
 	Grid                                                        ui.GridState
 	Generation, ContinueRequest, DetailRequest, TimerGeneration uint64
 	HeroCancel, ContinueCancel, DetailCancel                    context.CancelFunc
