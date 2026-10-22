@@ -36,6 +36,7 @@ func (a *appState) closeDetail() {
 	a.seriesCastRequest++
 	a.seriesLoading, a.seriesEpisodeLoading, a.castLoading = false, false, false
 	a.seriesRootCastLoading = false
+	a.seriesRootCastError = ""
 	a.seriesError, a.seriesEpisodeError, a.castError, a.selectedSeasonID = "", "", "", ""
 }
 

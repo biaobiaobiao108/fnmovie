@@ -120,9 +120,14 @@ func (a *appState) loadDetailParts(item MediaItem, request uint64, serverURL, us
 				a.seriesRootCastLoading = false
 				if item.IsSeries {
 					a.seriesRootCast = append([]CastMember(nil), part.people...)
+					a.seriesRootCastError = ""
+					if part.err != nil {
+						a.seriesRootCastError = part.err.Error()
+					}
 					if len(part.people) > 0 {
 						a.selected.Cast = part.people
 						a.castLoading, a.castError = false, ""
+						a.seriesRootCastError = ""
 						if a.seriesCastCancel != nil {
 							a.seriesCastCancel()
 							a.seriesCastCancel = nil
@@ -131,6 +136,9 @@ func (a *appState) loadDetailParts(item MediaItem, request uint64, serverURL, us
 						a.loadSeriesCast(a.selectedSeasonID, a.seriesEpisodes)
 					} else {
 						a.castLoading = a.seriesLoading || a.seriesEpisodeLoading
+						if a.selectedSeasonID == "" && part.err != nil {
+							a.castError = "演职人员读取失败：" + part.err.Error()
+						}
 					}
 				} else {
 					a.castLoading = false
@@ -138,7 +146,7 @@ func (a *appState) loadDetailParts(item MediaItem, request uint64, serverURL, us
 						a.selected.Cast = part.people
 					}
 				}
-				if part.err != nil {
+				if part.err != nil && !item.IsSeries {
 					a.castError = "演职员读取失败：" + part.err.Error()
 				}
 			}

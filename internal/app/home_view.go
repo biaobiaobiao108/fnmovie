@@ -42,25 +42,68 @@ func (a *appState) homeView(c *ui.Context) {
 	page.Children(func() {
 		a.homeCarouselSized(c, heroHeight)
 		ui.Column(c).FillWidth().Gap(10).Children(func() {
-			ui.Row(c).Height(38).FillWidth().AlignItems(ui.Center).Children(func() {
-				ui.Text(c, "继续观看").FontSize(22).Bold().Grow(1)
-				if a.home.ContinueErr != "" {
-					if actionButton(c.Key("home-continue-retry"), "重试").Clicked() {
-						a.loadContinueWatching(true)
-					}
-				}
-				if len(a.home.Continue) > 0 {
-					if actionButton(c.Key("home-continue-all"), fmt.Sprintf("全部 · %d ›", len(a.home.Continue))).BorderWidth(0).Background(ui.Transparent).TextColor(c.Theme().TextMuted).Clicked() {
-						a.home.AllContinue = true
-					}
-				}
-			})
+			a.homeContinueHeader(c, true)
 			if len(a.home.Continue) > 0 {
 				ui.ScrollHorizontal(c.Key("home-continue-row")).Height(rowHeight).TrackScroll(&a.home.RowScroll).Gap(18).Children(func() {
 					for _, item := range a.home.Continue[:min(10, len(a.home.Continue))] {
 						a.homeContinueCard(c, item, cardWidth)
 					}
 				})
+			} else {
+				a.homeContinueEmpty(c, rowHeight)
+			}
+		})
+	})
+}
+
+func (a *appState) homeContinueHeader(c *ui.Context, showAll bool) {
+	ui.Row(c).Height(38).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+		ui.Text(c, "继续观看").FontSize(22).Bold().Grow(1)
+		if a.home.ContinueDetailLoading {
+			ui.Text(c, "正在读取详情…").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
+		} else if a.home.ContinueDetailErr != "" {
+			ui.Text(c, "详情读取失败").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
+			if actionButton(c.Key("home-continue-detail-retry"), "重试详情").Clicked() {
+				a.openContinueDetail(a.home.ContinueDetailRecord)
+			}
+		}
+		if a.home.ContinueErr != "" && len(a.home.Continue) > 0 {
+			if actionButton(c.Key("home-continue-retry"), "重试").Clicked() {
+				a.loadContinueWatching(true)
+			}
+		}
+		if showAll && len(a.home.Continue) > 0 {
+			if actionButton(c.Key("home-continue-all"), fmt.Sprintf("全部 · %d ›", len(a.home.Continue))).BorderWidth(0).Background(ui.Transparent).TextColor(c.Theme().TextMuted).Clicked() {
+				a.home.AllContinue = true
+			}
+		}
+	})
+}
+
+func (a *appState) homeContinueEmpty(c *ui.Context, height float32) {
+	box := ui.Box(c.Key("home-continue-empty")).FillWidth().Center()
+	if height > 0 {
+		box = box.Height(height)
+	} else {
+		box = box.Grow(1).FillHeight()
+	}
+	box.Children(func() {
+		ui.Column(c).Center().Gap(8).Children(func() {
+			switch {
+			case !a.loggedIn:
+				ui.Text(c, "登录后可查看观看记录").FontSize(13).TextColor(c.Theme().TextMuted)
+			case a.server == nil:
+				ui.Text(c, "影视服务器暂不可用").FontSize(13).TextColor(c.Theme().TextMuted)
+			case a.home.ContinueLoading || a.home.ContinueUpdatedAt.IsZero() && a.home.ContinueErr == "":
+				ui.Spinner(c).FontSize(18)
+				ui.Text(c, "正在读取观看记录…").FontSize(13).TextColor(c.Theme().TextMuted)
+			case a.home.ContinueErr != "":
+				ui.Text(c, "观看记录读取失败："+a.home.ContinueErr).FontSize(13).TextColor(c.Theme().TextMuted).MaxLines(2).TextAlign(ui.Center)
+				if actionButton(c.Key("home-continue-retry-empty"), "重试").Clicked() {
+					a.loadContinueWatching(true)
+				}
+			default:
+				ui.Text(c, "暂无继续观看的内容").FontSize(13).TextColor(c.Theme().TextMuted)
 			}
 		})
 	})
@@ -303,19 +346,31 @@ func (a *appState) homeContinueGrid(c *ui.Context) {
 			if back.Clicked() {
 				a.home.AllContinue = false
 			}
-			ui.Text(c, fmt.Sprintf("继续观看 · %d", len(a.home.Continue))).FontSize(22).Bold()
-			if a.home.ContinueErr != "" {
+			ui.Text(c, fmt.Sprintf("继续观看 · %d", len(a.home.Continue))).FontSize(22).Bold().Grow(1)
+			if a.home.ContinueDetailLoading {
+				ui.Text(c, "正在读取详情…").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
+			} else if a.home.ContinueDetailErr != "" {
+				ui.Text(c, "详情读取失败").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
+				if actionButton(c.Key("home-continue-detail-retry"), "重试详情").Clicked() {
+					a.openContinueDetail(a.home.ContinueDetailRecord)
+				}
+			}
+			if a.home.ContinueErr != "" && len(a.home.Continue) > 0 {
 				if actionButton(c.Key("home-continue-retry"), "重试").Clicked() {
 					a.loadContinueWatching(true)
 				}
 			}
 		})
-		grid := ui.GridView(c, &a.home.Grid, len(a.home.Continue), 240, 198, func(i int) {
-			if i < len(a.home.Continue) {
-				a.homeContinueCard(c, a.home.Continue[i], 240)
-			}
-		}).Grow(1).FillHeight().FillWidth()
-		bindSmoothScroll(grid, &a.home.GridScroll)
-		bindScrollEdgeFades(grid, &a.home.GridScroll, c.Theme().Background)
+		if len(a.home.Continue) == 0 {
+			a.homeContinueEmpty(c, 0)
+		} else {
+			grid := ui.GridView(c, &a.home.Grid, len(a.home.Continue), 240, 198, func(i int) {
+				if i < len(a.home.Continue) {
+					a.homeContinueCard(c, a.home.Continue[i], 240)
+				}
+			}).Grow(1).FillHeight().FillWidth()
+			bindSmoothScroll(grid, &a.home.GridScroll)
+			bindScrollEdgeFades(grid, &a.home.GridScroll, c.Theme().Background)
+		}
 	})
 }

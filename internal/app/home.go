@@ -21,6 +21,9 @@ type homeState struct {
 	ContinueLoading                                             bool
 	ContinueErr                                                 string
 	ContinueUpdatedAt                                           time.Time
+	ContinueDetailLoading                                       bool
+	ContinueDetailErr                                           string
+	ContinueDetailRecord                                        ContinueWatchingItem
 	AllContinue                                                 bool
 	Scroll, GridScroll, RowScroll                               ui.ScrollState
 	Grid                                                        ui.GridState
@@ -113,6 +116,7 @@ func (a *appState) loadHomeHeroes(retry bool) {
 				if a.home.HeroFromCache {
 					a.home.Heroes = mergeHomeHeroesStable(nil, items)
 					a.home.HeroIndex, a.home.HeroPrevious = 0, 0
+					a.home.HeroChangedAt = time.Time{}
 					a.home.HeroFromCache = false
 				} else {
 					a.home.Heroes = mergeHomeHeroesStable(a.home.Heroes, items)
@@ -201,6 +205,13 @@ func (a *appState) syncHomeLifecycle() {
 	if !visible && a.home.DetailCancel != nil {
 		a.home.DetailCancel()
 		a.home.DetailCancel = nil
+		a.home.ContinueDetailLoading = false
+	}
+	if a.home.Visible && !visible && a.home.HeroCancel != nil {
+		a.home.HeroCancel()
+		a.home.HeroCancel = nil
+		a.home.HeroLoading = false
+		a.home.HeroAttempted = false
 	}
 	if a.home.Visible && !visible && a.home.ContinueCancel != nil {
 		a.home.ContinueCancel()
@@ -280,6 +291,9 @@ func (a *appState) openContinueDetail(record ContinueWatchingItem) {
 	ctx, cancel := context.WithCancel(context.Background())
 	a.home.DetailCancel = cancel
 	a.home.DetailRequest++
+	a.home.ContinueDetailLoading = true
+	a.home.ContinueDetailErr = ""
+	a.home.ContinueDetailRecord = record
 	server, generation, request := a.server, a.home.Generation, a.home.DetailRequest
 	go func() {
 		item, err := server.ContinueWatchingDetailContext(ctx, record)
@@ -289,10 +303,13 @@ func (a *appState) openContinueDetail(record ContinueWatchingItem) {
 				return
 			}
 			a.home.DetailCancel = nil
+			a.home.ContinueDetailLoading = false
 			if err != nil {
-				a.home.ContinueErr = "详情读取失败：" + err.Error()
+				a.home.ContinueDetailErr = "详情读取失败：" + err.Error()
 				return
 			}
+			a.home.ContinueDetailErr = ""
+			a.home.ContinueDetailRecord = ContinueWatchingItem{}
 			a.openDetail(item)
 		})
 	}()

@@ -349,10 +349,7 @@ func (a *appState) advancePlayerOverlayAnimation(c *ui.Context) {
 			// Idle fading must not reactivate the application while the user is
 			// in another window. Restore shortcuts only after an owned control
 			// window actually had keyboard focus.
-			ownedFocus := a.playerOverlayWindow.IsFocused() || a.playerHeaderWindow.IsFocused()
-			if a.playerMenuWindow != nil {
-				ownedFocus = ownedFocus || a.playerMenuWindow.IsFocused()
-			}
+			ownedFocus := a.playerOverlayHasFocus()
 			a.playerOverlayWindow.Hide()
 			a.playerHeaderWindow.Hide()
 			if a.playerMenuWindow != nil {
@@ -367,13 +364,11 @@ func (a *appState) advancePlayerOverlayAnimation(c *ui.Context) {
 
 func (a *appState) closePlayerOverlay() {
 	a.cancelPlayerFullscreen()
+	ownedFocus := a.playerOverlayHasFocus()
 	a.destroyPlayerMenuWindow()
 	if a.playerOverlayMonitorDone != nil {
 		close(a.playerOverlayMonitorDone)
 		a.playerOverlayMonitorDone = nil
-	}
-	if a.window != nil {
-		restoreWindowFocus(a.window)
 	}
 	if a.playerOverlayWindow != nil {
 		a.playerOverlayWindow.Destroy()
@@ -387,7 +382,7 @@ func (a *appState) closePlayerOverlay() {
 		a.playerSeekFeedbackWindow.Destroy()
 		a.playerSeekFeedbackWindow = nil
 	}
-	if a.window != nil {
+	if ownedFocus && a.window != nil {
 		restoreWindowFocus(a.window)
 	}
 	a.overlayMu.Lock()
@@ -401,6 +396,16 @@ func (a *appState) closePlayerOverlay() {
 	a.seekDragging = false
 	a.seekFeedback = seekFeedback{}
 	a.volumeDragging = false
+}
+
+func (a *appState) playerOverlayHasFocus() bool {
+	if a.playerOverlayWindow != nil && a.playerOverlayWindow.IsFocused() {
+		return true
+	}
+	if a.playerHeaderWindow != nil && a.playerHeaderWindow.IsFocused() {
+		return true
+	}
+	return a.playerMenuWindow != nil && a.playerMenuWindow.IsFocused()
 }
 
 func (a *appState) markPlayerOverlayActivity() {
@@ -805,7 +810,7 @@ func playerTrackLabel(track PlayerTrack) string {
 }
 
 func (a *appState) closePlayerOverlayMenu() {
-	hadMenu := a.playerMenuWindow != nil
+	ownedFocus := a.playerOverlayHasFocus()
 	a.destroyPlayerMenuWindow()
 	a.playerOverlayMenu = ""
 	a.playerMenuTracks = nil
@@ -814,7 +819,7 @@ func (a *appState) closePlayerOverlayMenu() {
 	}
 	a.setPlayerOverlayPinned(false)
 	a.markPlayerOverlayActivity()
-	if hadMenu && a.window != nil {
+	if ownedFocus && a.window != nil {
 		restoreWindowFocus(a.window)
 	}
 }

@@ -33,6 +33,7 @@ func (a *appState) openDetail(item MediaItem) {
 	a.seriesEpisodeLoading, a.seriesEpisodeError = false, ""
 	a.seriesEpisodeRequest++
 	a.seriesRootCast = append([]CastMember(nil), item.Cast...)
+	a.seriesRootCastError = ""
 	a.seriesRootCastLoading = item.IsSeries
 	a.seriesCastRequest++
 	if item.IsSeries && cachedDetail && len(item.Seasons) > 0 {

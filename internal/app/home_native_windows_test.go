@@ -32,7 +32,10 @@ func TestNativeHomeVerification(t *testing.T) {
 }
 
 func TestHomeNavigationAndVirtualization(t *testing.T) {
-	a := &appState{section: "home", catalogs: map[string]*CatalogState{}, home: homeState{Heroes: []MediaItem{{ID: "one", Title: "第一张海报"}, {ID: "two", Title: strings.Repeat("长标题", 20)}}}}
+	a := &appState{
+		section: "home", loggedIn: true, server: NewServer("http://synthetic.invalid", ""), catalogs: map[string]*CatalogState{},
+		home: homeState{ContinueLoading: true, Heroes: []MediaItem{{ID: "one", Title: "第一张海报"}, {ID: "two", Title: strings.Repeat("长标题", 20)}}},
+	}
 	tester := ui.NewTester(a.view, 1280, 800)
 	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
 	tester.Frame()
@@ -42,14 +45,17 @@ func TestHomeNavigationAndVirtualization(t *testing.T) {
 	if a.home.HeroIndex != 1 || a.selected != nil {
 		t.Fatalf("arrow navigated away from carousel: index=%d selected=%v", a.home.HeroIndex, a.selected)
 	}
-	if tester.HasText("还没有观看记录") || tester.HasText("正在读取观看记录") {
-		t.Fatal("home should keep the empty continue area free of transient status text")
+	if !tester.HasText("正在读取观看记录…") {
+		t.Fatal("home did not show the initial continue loading state")
 	}
 	emptyHero, _ := tester.Find("下一张海报")
-	a.home.ContinueLoading = true
+	a.home.ContinueLoading = false
 	a.home.ContinueErr = "观看记录暂不可用"
 	a.home.HeroErr = "推荐读取部分失败"
 	tester.Frame()
+	if !tester.HasText("观看记录读取失败：观看记录暂不可用") || !tester.HasText("重试") {
+		t.Fatal("home did not show the continue error and retry action")
+	}
 	statusHero, _ := tester.Find("下一张海报")
 	if emptyHero != statusHero {
 		t.Fatalf("transient home status changed carousel layout: before=%+v after=%+v", emptyHero, statusHero)

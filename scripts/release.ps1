@@ -67,15 +67,52 @@ try {
         throw '工作区有未提交的改动。请先提交、暂存或处理这些改动，再运行发版命令。'
     }
 
-    Invoke-Git -GitArgs @('fetch', $remote, '--tags') | Out-Null
-    $counts = (Invoke-Git -GitArgs @('rev-list', '--left-right', '--count', "$upstream...HEAD")) -split '\s+'
-    if ($counts.Count -ne 2) {
-        throw "无法比较当前分支与上游分支 '$upstream'。"
+    $remoteRelationKnown = $true
+    if ($WhatIf) {
+        # A preview must not update remote-tracking refs, tags, or FETCH_HEAD.
+        # Read the advertised branch directly and compare its commit when the
+        # object is already present locally.
+        $remoteBranchRef = "refs/heads/$remoteBranch"
+        $remoteBranchLine = Invoke-Git -GitArgs @('ls-remote', '--heads', $remote, $remoteBranchRef)
+        if ([string]::IsNullOrWhiteSpace($remoteBranchLine)) {
+            throw "远程分支 '$remoteBranchRef' 不存在。"
+        }
+        $remoteBranchFields = $remoteBranchLine -split '\s+'
+        if ($remoteBranchFields.Count -lt 2 -or $remoteBranchFields[1] -ne $remoteBranchRef) {
+            throw "无法解析远程分支 '$remoteBranchRef'：$remoteBranchLine"
+        }
+        $remoteHead = $remoteBranchFields[0]
+        $remoteHeadObject = Invoke-GitResult -GitArgs @('cat-file', '-e', "$remoteHead`^{commit}")
+        if ($remoteHeadObject.ExitCode -eq 0) {
+            $compareBase = $remoteHead
+        } else {
+            # The remote advanced to an object not available in the local
+            # object database. Keep the preview read-only and avoid claiming
+            # an ahead/behind count from the stale tracking ref.
+            $remoteRelationKnown = $false
+            $compareBase = $null
+        }
+    } else {
+        Invoke-Git -GitArgs @('fetch', $remote, '--tags') | Out-Null
+        $compareBase = $upstream
     }
-    $behind = [int]$counts[0]
-    $ahead = [int]$counts[1]
-    if ($behind -gt 0) {
+
+    if ($remoteRelationKnown) {
+        $counts = (Invoke-Git -GitArgs @('rev-list', '--left-right', '--count', "$compareBase...HEAD")) -split '\s+'
+        if ($counts.Count -ne 2) {
+            throw "无法比较当前分支与远程分支 '$remoteBranch'。"
+        }
+        $behind = [int]$counts[0]
+        $ahead = [int]$counts[1]
+    } else {
+        $behind = 0
+        $ahead = 0
+    }
+    if ($remoteRelationKnown -and $behind -gt 0) {
         throw "当前分支 '$branch' 落后上游 '$upstream' $behind 个提交。请先拉取或变基，再发版。"
+    }
+    if ($WhatIf -and -not $remoteRelationKnown) {
+        Write-ReleaseMessage '' "远程分支 '$remoteBranch' 当前指向 $remoteHead，但该提交不在本地对象库中；预览保持本地只读，无法计算与远端的 ahead/behind 提交数。" Yellow
     }
 
     Invoke-Git -GitArgs @('var', 'GIT_AUTHOR_IDENT') | Out-Null
@@ -105,6 +142,27 @@ try {
             $remoteTagFields = $remoteTag -split '\s+'
             if ($remoteTagFields.Count -lt 2 -or $remoteTagFields[1] -ne "refs/tags/$currentTag") {
                 throw "无法解析远程标签 '$currentTag'：$remoteTag"
+            }
+            if ($WhatIf -and $localTag.ExitCode -eq 1) {
+                $remoteTagDetails = Invoke-Git -GitArgs @('ls-remote', '--tags', $remote, $currentTagRef, "$currentTagRef^{}")
+                $remoteTagCommit = $null
+                foreach ($line in ($remoteTagDetails -split '\r?\n')) {
+                    $fields = $line -split '\s+'
+                    if ($fields.Count -lt 2) {
+                        continue
+                    }
+                    if ($fields[1] -eq "$currentTagRef^{}") {
+                        $remoteTagCommit = $fields[0]
+                    } elseif ($fields[1] -eq $currentTagRef -and $null -eq $remoteTagCommit) {
+                        # A lightweight tag points directly at its commit.
+                        $remoteTagCommit = $fields[0]
+                    }
+                }
+                if ($remoteTagCommit -ne $head) {
+                    throw "远程标签 '$currentTag' 指向 $remoteTagCommit，当前版本提交为 $head；为避免增加版本，已停止发版。"
+                }
+                Write-ReleaseMessage '' "$currentTag 已指向当前版本提交，远程发布已完成，无需再次增加版本。" Green Green
+                return
             }
             if ($localTag.ExitCode -ne 0) {
                 throw "远程标签 '$currentTag' 已存在，但本地未找到对应标签；为避免意外增加版本，已停止发版。"

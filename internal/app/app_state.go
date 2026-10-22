@@ -90,6 +90,7 @@ type detailUIState struct {
 	seriesEpisodeError    string
 	seriesEpisodeRequest  uint64
 	seriesRootCast        []CastMember
+	seriesRootCastError   string
 	seriesCastRequest     uint64
 	favoritePending       map[string]bool
 }

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"strings"
 
 	"github.com/egoist/mygo/ui"
 )
@@ -111,13 +112,25 @@ func (a *appState) loadSeriesCast(seasonID string, episodes []MediaItem) {
 	if len(episodes) > 0 {
 		episodeID = episodes[0].ID
 	}
+	rootCastError := a.seriesRootCastError
 	a.castLoading = true
 	ctx, cancel := context.WithCancel(context.Background())
 	a.seriesCastCancel = cancel
 	go func() {
+		var requestErrors []string
+		if rootCastError != "" {
+			requestErrors = append(requestErrors, "主条目："+rootCastError)
+		}
 		people, err := server.PeopleContext(ctx, seasonID)
+		if err != nil {
+			requestErrors = append(requestErrors, "季度："+err.Error())
+		}
 		if len(people) == 0 && episodeID != "" {
-			people, err = server.PeopleContext(ctx, episodeID)
+			episodePeople, episodeErr := server.PeopleContext(ctx, episodeID)
+			if episodeErr != nil {
+				requestErrors = append(requestErrors, "剧集："+episodeErr.Error())
+			}
+			people = episodePeople
 		}
 		a.window.Update(func() {
 			defer cancel()
@@ -129,8 +142,8 @@ func (a *appState) loadSeriesCast(seasonID string, episodes []MediaItem) {
 			if len(people) > 0 {
 				a.selected.Cast = people
 				a.castError = ""
-			} else if err != nil {
-				a.castError = "演职人员读取失败：" + err.Error()
+			} else if len(requestErrors) > 0 {
+				a.castError = "演职人员读取失败：" + strings.Join(requestErrors, "；")
 			} else {
 				a.castError = ""
 				a.selected.Cast = nil

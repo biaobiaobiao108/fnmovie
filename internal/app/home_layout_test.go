@@ -115,3 +115,46 @@ func TestHomeFitsViewport(t *testing.T) {
 		}
 	}
 }
+
+func TestHomeShowsContinueEmptyStates(t *testing.T) {
+	tests := []struct {
+		name       string
+		loggedIn   bool
+		withServer bool
+		loading    bool
+		err        string
+		updated    bool
+		wantText   string
+		wantRetry  bool
+	}{
+		{name: "logged out", wantText: "登录后可查看观看记录"},
+		{name: "server unavailable", loggedIn: true, wantText: "影视服务器暂不可用"},
+		{name: "loading", loggedIn: true, withServer: true, loading: true, wantText: "正在读取观看记录…"},
+		{name: "error", loggedIn: true, withServer: true, err: "合成读取失败", wantText: "观看记录读取失败：合成读取失败", wantRetry: true},
+		{name: "empty", loggedIn: true, withServer: true, updated: true, wantText: "暂无继续观看的内容"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := &appState{section: "home", loggedIn: tt.loggedIn, catalogs: map[string]*CatalogState{}}
+			if tt.withServer {
+				a.server = NewServer("http://synthetic.invalid", "")
+			}
+			a.home.Heroes = []MediaItem{{ID: "hero", Title: "推荐影片"}, {ID: "next", Title: "下一张"}}
+			a.home.ContinueLoading = tt.loading
+			a.home.ContinueErr = tt.err
+			if tt.updated {
+				a.home.ContinueUpdatedAt = time.Now()
+			}
+			tester := ui.NewTester(a.view, 1280, 800)
+			tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+			tester.Frame()
+			tester.Frame()
+			if !tester.HasText(tt.wantText) {
+				t.Fatalf("missing continue state %q; rendered=%v", tt.wantText, tester.Texts())
+			}
+			if tt.wantRetry && !tester.HasText("重试") {
+				t.Fatal("continue error did not expose a retry action")
+			}
+		})
+	}
+}

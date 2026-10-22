@@ -257,7 +257,6 @@ func (a *appState) stopPlayback() {
 		}()
 	}
 	if a.window != nil {
-		restoreWindowFocus(a.window)
 		a.window.Invalidate()
 	}
 }
