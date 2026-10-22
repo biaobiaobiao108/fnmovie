@@ -1,5 +1,7 @@
 node_modules/
+# Local agent guidance is workspace-specific and should not be published.
 /AGENTS.md
+/docs/agent-guides/
 /dist/
 /build/
 /.mygo/
