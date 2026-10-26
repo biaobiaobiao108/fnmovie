@@ -36,7 +36,7 @@ func (a *appState) homeView(c *ui.Context) {
 	if bounds.W > 0 && bounds.H > 0 {
 		width, height = bounds.W, bounds.H
 	} else {
-		width, height = max(1, width-273), max(1, height-84)
+		width, height = max(1, width-float32(movieSidebarWidth+movieMainHorizontalInset*2)), max(1, height-84)
 	}
 	heroHeight, cardWidth, rowHeight := homeViewportLayout(width, height)
 	page.Children(func() {
@@ -262,7 +262,7 @@ func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, wi
 	height := width * 9 / 16
 	loading := a.playbackLoading && a.playbackLoadingID == item.RecordGUID
 	ui.Column(c.Key("home-continue:" + item.RecordGUID)).Width(width).Gap(8).Children(func() {
-		button := actionButton(c.Key("resume:"+item.RecordGUID), "").Size(width, height).Padding(0).BorderWidth(0).Radius(12).Clip().Background(ui.Hex("#dce1db")).Label("继续观看 " + media.Title)
+		button := actionButton(c.Key("resume:"+item.RecordGUID), "").Size(width, height).Padding(0).BorderWidth(0).Radius(12).Clip().Background(c.Theme().Surface).Label("继续观看 " + media.Title)
 		button.Children(func() {
 			image := a.imageForURL(media.Backdrop, int(width), int(height))
 			if image == nil {

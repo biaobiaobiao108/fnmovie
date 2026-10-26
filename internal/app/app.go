@@ -71,7 +71,7 @@ func Run() {
 	mygo.App.WhenReady(func() {
 		app.window = mygo.NewWindow(mygo.WindowOptions{
 			Title: applicationWindowTitle, Width: 1280, Height: 800, MinWidth: 960, MinHeight: 640,
-			BackgroundColor: "#f7f6f2", StateKey: "main", Content: ui.View(app.view),
+			BackgroundColor: movieWindowBackground, StateKey: "main", Content: ui.View(app.view),
 		})
 		setWindowTheme(app.window)
 		app.displayScale = windowScale(app.window.NativeHandle())
@@ -109,9 +109,10 @@ func (a *appState) view(c *ui.Context) {
 		a.playerView(c)
 		return
 	}
-	ui.Row(c).Fill().Background(ui.Hex("#f7f6f2")).Children(func() {
+	t := c.Theme()
+	ui.Row(c).Fill().Background(t.Background).Children(func() {
 		a.sidebar(c)
-		ui.Column(c).Grow(1).FillHeight().Padding(16, 34, 12, 34).Gap(18).Children(func() {
+		ui.Column(c).Grow(1).FillHeight().Padding(16, movieMainHorizontalInset, 12, movieMainHorizontalInset).Gap(18).Children(func() {
 			a.topbar(c)
 			ui.Column(c.Key(a.navigationKey())).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
 				switch {
@@ -132,25 +133,6 @@ func (a *appState) view(c *ui.Context) {
 	a.loginModal(c)
 	a.detailSynopsisDialog(c)
 	a.syncHomeCarousel()
-}
-
-func movieTheme() *ui.Theme {
-	t := ui.LightTheme()
-	t.Background = ui.Hex("#f7f6f2")
-	t.Surface = ui.Hex("#ffffff")
-	t.SurfaceHover = ui.Hex("#f2f1ec")
-	t.SurfacePressed = ui.Hex("#e8e7e1")
-	t.Text = ui.Hex("#1c201d")
-	t.TextMuted = ui.Hex("#747d77")
-	t.Border = ui.Hex("#e4e2dc")
-	t.Accent = ui.Hex("#2d5a49")
-	t.AccentHover = ui.Hex("#366d58")
-	t.AccentPressed = ui.Hex("#244639")
-	t.AccentText = ui.Hex("#ffffff")
-	t.Radius = 11
-	// Scrollable regions indicate overflow with shared edge fades.
-	t.Scrollbar = ui.Transparent
-	return t
 }
 
 // Draw after the scroll content without adding an input-catching overlay.

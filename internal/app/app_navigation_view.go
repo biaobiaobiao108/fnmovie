@@ -9,8 +9,9 @@ import (
 
 func (a *appState) sidebar(c *ui.Context) {
 	t := c.Theme()
-	background := ui.Hex("#f4f2ed")
-	ui.Column(c).Width(205).FillHeight().Padding(24, 16).Gap(8).Background(background).Border(1, t.Border).Children(func() {
+	background := movieColors.sidebar
+	ui.Column(c).Width(movieSidebarWidth).FillHeight().Padding(24, 14).Gap(8).Background(background).
+		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
 		ui.Row(c).Padding(0, 10).Gap(11).Children(func() {
 			if a.icon != nil {
 				ui.Image(c, a.icon).Size(38, 38).Radius(10).Fit(ui.Cover)
@@ -30,17 +31,19 @@ func (a *appState) sidebar(c *ui.Context) {
 		list := ui.List(c, &a.sidebarList, len(libraries), func(i int) {
 			library := libraries[i]
 			selected := a.section == "library" && a.libraryID == library.ID
-			button := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).Background(ui.Color{}).TextColor(t.TextMuted).
-				Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
+			button := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0).Background(ui.Color{}).TextColor(t.TextMuted).
+				Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 			if selected {
-				button.Background(ui.Hex("#e6eee8")).TextColor(t.Accent)
+				button.Background(movieColors.selected).TextColor(t.Accent)
 			} else if button.Hovered() {
-				button.Background(ui.Hex("#eeece6"))
+				button.Background(t.SurfaceHover).TextColor(t.Text)
 			}
 			button.Children(func() {
 				iconColor := t.TextMuted
 				if selected {
 					iconColor = t.Accent
+				} else if button.Hovered() {
+					iconColor = t.Text
 				}
 				ui.Icon(c, libraryNavigationIcon(library)).Size(20, 20).TextColor(iconColor)
 				ui.Text(c, library.Name).FontSize(13).SingleLine()
@@ -57,10 +60,10 @@ func (a *appState) sidebar(c *ui.Context) {
 		bindSmoothScroll(list, &a.sidebarScroll)
 		bindScrollEdgeFades(list, &a.sidebarScroll, background)
 		if a.loggedIn {
-			exitBtn := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
-				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
+			exitBtn := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0).
+				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 			if exitBtn.Hovered() {
-				exitBtn.Background(ui.Hex("#eeece6"))
+				exitBtn.Background(t.SurfaceHover).TextColor(t.Text)
 			}
 			exitBtn.Children(func() {
 				ui.Icon(c, sidebarNavIcon("logout")).Size(20, 20).TextColor(t.TextMuted)
@@ -70,10 +73,10 @@ func (a *appState) sidebar(c *ui.Context) {
 				a.logout()
 			}
 		} else if !a.loggedIn {
-			loginBtn := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0).
-				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
+			loginBtn := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0).
+				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 			if loginBtn.Hovered() {
-				loginBtn.Background(ui.Hex("#eeece6"))
+				loginBtn.Background(t.SurfaceHover).TextColor(t.Text)
 			}
 			loginBtn.Children(func() {
 				ui.Icon(c, sidebarNavIcon("login")).Size(20, 20).TextColor(t.TextMuted)
@@ -88,14 +91,14 @@ func (a *appState) sidebar(c *ui.Context) {
 
 func (a *appState) navButton(c *ui.Context, icon *ui.SVG, label, key string) {
 	selected := a.section == key
-	e := actionButton(c, "").Justify(ui.Start).Padding(10, 14).Gap(10).Radius(9).BorderWidth(0)
-	e.Transition(ui.ElementTransition{Colors: true, Duration: 150 * time.Millisecond})
+	e := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0)
+	e.Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 	if selected {
-		e.Background(ui.Hex("#e6eee8")).TextColor(c.Theme().Accent)
+		e.Background(movieColors.selected).TextColor(c.Theme().Accent)
 	} else {
 		e.Background(ui.Color{}).TextColor(c.Theme().TextMuted)
 		if e.Hovered() {
-			e.Background(ui.Hex("#eeece6"))
+			e.Background(c.Theme().SurfaceHover).TextColor(c.Theme().Text)
 		}
 	}
 	e.Children(func() {
@@ -216,7 +219,7 @@ func (a *appState) loginModal(c *ui.Context) {
 			if a.status != "" && !a.loggedIn {
 				color := t.TextMuted
 				if strings.Contains(a.status, "失败") || strings.Contains(a.status, "无法") {
-					color = ui.Hex("#ad5148")
+					color = t.Danger
 				}
 				ui.Text(c, a.status).FontSize(11).TextColor(color).MaxLines(3)
 			}
@@ -266,7 +269,7 @@ func (a *appState) libraryView(c *ui.Context) {
 			} else if state != nil && state.Loading {
 				ui.Text(c, "正在读取影视库…").FontSize(13).TextColor(t.TextMuted)
 			} else if state != nil && state.Err != "" {
-				ui.Text(c, state.Err).FontSize(13).TextColor(ui.Hex("#ad5148")).MaxLines(3)
+				ui.Text(c, state.Err).FontSize(13).TextColor(t.Danger).MaxLines(3)
 			} else {
 				label := "这里还没有内容"
 				if strings.TrimSpace(a.query) != "" {
@@ -292,7 +295,7 @@ func (a *appState) libraryView(c *ui.Context) {
 		gridCount++
 	}
 	windowWidth, _ := c.Size()
-	gridColumns := max(1, int((windowWidth-273)/152))
+	gridColumns := max(1, int((windowWidth-(movieSidebarWidth+movieMainHorizontalInset*2))/152))
 	grid := ui.GridView(c, &a.grid, gridCount, 150, 286, func(i int) {
 		if i >= len(items) {
 			if state != nil && !state.Loading && !state.Exhausted && !state.PageAutoRequested && state.Err == "" {
@@ -325,13 +328,13 @@ func (a *appState) libraryView(c *ui.Context) {
 					if poster != nil {
 						ui.Image(c, poster).Size(150, 225).Fit(ui.Cover)
 					} else {
-						ui.Box(c).Size(150, 225).Background(ui.Hex("#e8e8e2")).Center().Children(func() {
-							ui.Text(c, "FILM").FontSize(10).Bold().TextColor(ui.Hex("#969d96"))
+						ui.Box(c).Size(150, 225).Background(movieColors.placeholder).Center().Children(func() {
+							ui.Text(c, "FILM").FontSize(10).Bold().TextColor(movieColors.placeholderText)
 						})
 					}
 					if item.Rating != "" {
 						ui.Text(c, item.Rating).Absolute().Top(10).Left(10).Padding(4, 8).Radius(6).
-							Background(ui.Hex("#376655")).FontSize(12).Bold().TextColor(ui.Hex("#fffefa"))
+							Background(movieColors.rating).FontSize(12).Bold().TextColor(movieColors.ratingText)
 					}
 				})
 				ui.Text(c, item.Title).FontSize(14).Bold().TextAlign(ui.Center).SingleLine()
@@ -357,12 +360,12 @@ func (a *appState) libraryView(c *ui.Context) {
 
 func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 	t := c.Theme()
-	ui.Row(c).Height(224).Padding(20, 22).Gap(24).Radius(14).Background(ui.Hex("#eeeee8")).Children(func() {
+	ui.Row(c).Height(224).Padding(20, 22).Gap(24).Radius(14).Background(t.Surface).Children(func() {
 		if poster := a.imageFor(item, 136, 184); poster != nil {
 			ui.Image(c, poster).Size(136, 184).Fit(ui.Cover).Radius(9)
 		} else {
-			ui.Box(c).Size(136, 184).Radius(9).Background(ui.Hex("#e5e5df")).Center().Children(func() {
-				ui.Text(c, "FN").FontSize(22).Bold().TextColor(ui.Hex("#7d8b82"))
+			ui.Box(c).Size(136, 184).Radius(9).Background(movieColors.placeholder).Center().Children(func() {
+				ui.Text(c, "FN").FontSize(22).Bold().TextColor(movieColors.placeholderText)
 			})
 		}
 		ui.Column(c).Grow(1).Center().Gap(11).Children(func() {
@@ -374,7 +377,7 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 			ui.Text(c, item.Title).FontSize(25).Bold().SingleLine()
 			ui.Text(c, item.Subtitle()).FontSize(12).TextColor(t.TextMuted)
 			if item.Overview != "" {
-				ui.Text(c, item.Overview).FontSize(12).TextColor(ui.Hex("#66716b")).MaxLines(2)
+				ui.Text(c, item.Overview).FontSize(12).TextColor(t.TextMuted).MaxLines(2)
 			}
 			ui.Row(c).Gap(9).Children(func() {
 				if item.Watched {
