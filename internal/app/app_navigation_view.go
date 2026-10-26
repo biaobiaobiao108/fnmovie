@@ -74,7 +74,6 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 		}).Grow(1)
 		bindSmoothScroll(list, &a.sidebarScroll)
-		bindScrollEdgeMaterial(list, &a.sidebarScroll, background)
 		if a.loggedIn {
 			exitBtn := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0).
 				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
@@ -355,7 +354,6 @@ func (a *appState) libraryView(c *ui.Context) {
 		}
 	}).Grow(1)
 	bindSmoothScroll(grid, &a.catalogScroll)
-	bindScrollEdgeMaterial(grid, &a.catalogScroll, t.Background)
 }
 
 func (a *appState) libraryHeading(c *ui.Context) {

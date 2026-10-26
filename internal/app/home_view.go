@@ -370,7 +370,6 @@ func (a *appState) homeContinueGrid(c *ui.Context) {
 				}
 			}).Grow(1).FillHeight().FillWidth()
 			bindSmoothScroll(grid, &a.home.GridScroll)
-			bindScrollEdgeMaterial(grid, &a.home.GridScroll, c.Theme().Background)
 		}
 	})
 }

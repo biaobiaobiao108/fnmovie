@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
-	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -148,21 +147,6 @@ func (a *appState) view(c *ui.Context) {
 	a.loginModal(c)
 	a.detailSynopsisDialog(c)
 	a.syncHomeCarousel()
-}
-
-// Draw after the scroll content without adding an input-catching overlay.
-func bindScrollEdgeMaterial(element ui.Element, state *ui.ScrollState, background ui.Color) {
-	element.DrawOver(func(p *ui.Painter, rect ui.Rect) {
-		edgeHeight := min(float32(40), rect.H/2)
-		if state.Y > 1 {
-			glass.ScrollEdge{Hard: true, Background: background}.PaintMaterial(p,
-				ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: edgeHeight}, [4]float32{})
-		}
-		if state.MaxY-state.Y > 1 {
-			glass.ScrollEdge{Hard: true, Bottom: true, Background: background}.PaintMaterial(p,
-				ui.Rect{X: rect.X, Y: rect.Y + rect.H - edgeHeight, W: rect.W, H: edgeHeight}, [4]float32{})
-		}
-	})
 }
 
 func cardCaption(item MediaItem) string {
