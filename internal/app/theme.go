@@ -3,7 +3,7 @@ package app
 import "github.com/egoist/mygo/ui"
 
 const (
-	movieWindowBackground    = "#ffffff"
+	movieWindowBackground    = "#f7f7f6"
 	movieSidebarWidth        = 232
 	movieMainHorizontalInset = 28
 	movieTitleBarHeight      = 46

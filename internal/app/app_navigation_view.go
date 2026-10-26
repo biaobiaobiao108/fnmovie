@@ -244,7 +244,7 @@ func (a *appState) selectedLibraryName() string {
 }
 
 func (a *appState) libraryView(c *ui.Context) {
-	ui.Column(c.Key("library-view")).Grow(1).FillHeight().Padding(movieTitleBarHeight, 0, 0, 0).Children(func() {
+	ui.Box(c.Key("library-view")).Grow(1).FillHeight().FillWidth().Children(func() {
 		a.libraryViewContent(c)
 	})
 }
@@ -252,7 +252,6 @@ func (a *appState) libraryView(c *ui.Context) {
 func (a *appState) libraryViewContent(c *ui.Context) {
 	t := c.Theme()
 	items := a.visibleItems()
-	a.libraryHeading(c)
 	key := a.currentCatalogKey() + "\x00" + a.section
 	if key != a.catalogScrollKey {
 		a.catalogScrollKey = key
@@ -264,35 +263,38 @@ func (a *appState) libraryViewContent(c *ui.Context) {
 		if catalogNeedsMoreVisibleItems(len(items), state) {
 			a.loadNextCatalogPage(false)
 		}
-		ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
-			ui.Text(c, "⌕").FontSize(34).TextColor(t.TextMuted)
-			if a.searchPending && strings.TrimSpace(a.query) != "" {
-				ui.Text(c, "正在搜索…").FontSize(13).TextColor(t.TextMuted)
-			} else if state != nil && state.Loading && len(state.Items) > 0 {
-				ui.Text(c, "正在加载媒体…").FontSize(13).TextColor(t.TextMuted)
-			} else if a.status != "" {
-				ui.Text(c, a.status).FontSize(13).TextColor(t.TextMuted)
-			} else if state != nil && state.Loading {
-				ui.Text(c, "正在读取影视库…").FontSize(13).TextColor(t.TextMuted)
-			} else if state != nil && state.Err != "" {
-				ui.Text(c, state.Err).FontSize(13).TextColor(t.Danger).MaxLines(3)
-			} else {
-				label := "这里还没有内容"
-				if strings.TrimSpace(a.query) != "" {
-					label = "没有找到相关内容"
-				}
-				ui.Text(c, label).FontSize(14).TextColor(t.TextMuted)
-			}
-			if actionButton(c, "重新加载").Clicked() {
-				if state != nil && state.Err != "" {
-					a.loadNextCatalogPage(true)
-				} else if state != nil {
-					state.Refreshed = false
-					a.loadLibrary()
+		ui.Column(c).Fill().Padding(movieTitleBarHeight, 0, 0, 0).Children(func() {
+			a.libraryHeading(c)
+			ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
+				ui.Text(c, "⌕").FontSize(34).TextColor(t.TextMuted)
+				if a.searchPending && strings.TrimSpace(a.query) != "" {
+					ui.Text(c, "正在搜索…").FontSize(13).TextColor(t.TextMuted)
+				} else if state != nil && state.Loading && len(state.Items) > 0 {
+					ui.Text(c, "正在加载媒体…").FontSize(13).TextColor(t.TextMuted)
+				} else if a.status != "" {
+					ui.Text(c, a.status).FontSize(13).TextColor(t.TextMuted)
+				} else if state != nil && state.Loading {
+					ui.Text(c, "正在读取影视库…").FontSize(13).TextColor(t.TextMuted)
+				} else if state != nil && state.Err != "" {
+					ui.Text(c, state.Err).FontSize(13).TextColor(t.Danger).MaxLines(3)
 				} else {
-					a.loadLibrary()
+					label := "这里还没有内容"
+					if strings.TrimSpace(a.query) != "" {
+						label = "没有找到相关内容"
+					}
+					ui.Text(c, label).FontSize(14).TextColor(t.TextMuted)
 				}
-			}
+				if actionButton(c, "重新加载").Clicked() {
+					if state != nil && state.Err != "" {
+						a.loadNextCatalogPage(true)
+					} else if state != nil {
+						state.Refreshed = false
+						a.loadLibrary()
+					} else {
+						a.loadLibrary()
+					}
+				}
+			})
 		})
 		return
 	}
@@ -359,9 +361,14 @@ func (a *appState) libraryViewContent(c *ui.Context) {
 				a.openDetail(item)
 			}
 		}
-	}).Grow(1)
+	}).Fill().Padding(movieTitleBarHeight+38, 0, 0, 0)
 	bindSmoothScroll(grid, &a.catalogScroll)
 	bindSoftScrollEdges(grid, &a.catalogScroll, t.Background)
+	if a.catalogScroll.Y < movieTitleBarHeight+38 {
+		ui.Box(c).Absolute().Top(movieTitleBarHeight - a.catalogScroll.Y).Left(0).Right(0).Height(38).Children(func() {
+			a.libraryHeading(c)
+		})
+	}
 }
 
 func (a *appState) libraryHeading(c *ui.Context) {

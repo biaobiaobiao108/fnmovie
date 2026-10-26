@@ -99,6 +99,10 @@ func TestHomeFitsViewport(t *testing.T) {
 				if !ok {
 					t.Fatal("hero title is not visible")
 				}
+				hero, found := tester.Find("首页推荐海报")
+				if !found || hero.Y < movieTitleBarHeight+16 {
+					t.Fatalf("home poster overlaps the transparent title bar: %+v", hero)
+				}
 				for _, label := range []string{"上一张海报", "下一张海报"} {
 					arrow, found := tester.Find(label)
 					if !found || (arrow.X < title.X+title.W && arrow.X+arrow.W > title.X && arrow.Y < title.Y+title.H && arrow.Y+arrow.H > title.Y) {
@@ -113,6 +117,47 @@ func TestHomeFitsViewport(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestHomeContinueGridScrollsBehindTitleBar(t *testing.T) {
+	a := &appState{section: "home", catalogs: map[string]*CatalogState{}}
+	a.home.AllContinue = true
+	for i := 0; i < 30; i++ {
+		a.home.Continue = append(a.home.Continue, ContinueWatchingItem{
+			RecordGUID: fmt.Sprintf("record-%d", i),
+			Media:      MediaItem{Title: fmt.Sprintf("续播影片 %d", i)},
+			Position:   10,
+			Duration:   60,
+		})
+	}
+	tester := ui.NewTester(a.view, 1280, 800)
+	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tester.Frame()
+	tester.Frame()
+
+	header, found := tester.Find("继续观看 · 30")
+	if !found || header.Y < movieTitleBarHeight+8 {
+		t.Fatalf("continue heading should start below the title bar: %+v (found=%v)", header, found)
+	}
+	firstCard, found := tester.Find("续播影片 0")
+	if !found || firstCard.Y <= header.Y+header.H {
+		t.Fatalf("first card should start below the heading: heading=%+v card=%+v (found=%v)", header, firstCard, found)
+	}
+
+	tester.Scroll(500, 300, 0, 70)
+	scrolledHeader, found := tester.Find("继续观看 · 30")
+	if !found || scrolledHeader.Y >= header.Y || scrolledHeader.Y < 0 {
+		t.Fatalf("heading did not move with the grid scroll: initial=%+v scrolled=%+v (found=%v), offset=%v", header, scrolledHeader, found, a.home.GridScroll.Y)
+	}
+	delta := header.Y - scrolledHeader.Y - a.home.GridScroll.Y
+	if delta > 5 || delta < -5 {
+		t.Fatalf("heading and grid scroll offsets differ: difference=%v grid offset=%v", delta, a.home.GridScroll.Y)
+	}
+	tester.Scroll(500, 300, 0, firstCard.Y-20-a.home.GridScroll.Y)
+	scrolledCard, found := tester.Find("续播影片 0")
+	if !found || scrolledCard.Y >= firstCard.Y || scrolledCard.Y >= movieTitleBarHeight {
+		t.Fatalf("first card did not scroll beneath the title bar: initial=%+v scrolled=%+v (found=%v), offset=%v", firstCard, scrolledCard, found, a.home.GridScroll.Y)
 	}
 }
 

@@ -31,12 +31,12 @@ func (a *appState) homeView(c *ui.Context) {
 		return
 	}
 	width, height := c.Size()
-	page := ui.Column(c.Key("home-viewport")).Bind(&a.home.ViewportHandle).Grow(1).FillHeight().FillWidth().Gap(16)
+	page := ui.Column(c.Key("home-viewport")).Bind(&a.home.ViewportHandle).Grow(1).FillHeight().FillWidth().Padding(movieTitleBarHeight+16, 0, 0, 0).Gap(16)
 	bounds := a.home.ViewportHandle.Bounds(c)
 	if bounds.W > 0 && bounds.H > 0 {
-		width, height = bounds.W, bounds.H
+		width, height = bounds.W, max(1, bounds.H-float32(movieTitleBarHeight+16))
 	} else {
-		width, height = max(1, width-float32(movieSidebarWidth+movieMainHorizontalInset*2)), max(1, height-84)
+		width, height = max(1, width-float32(movieSidebarWidth+movieMainHorizontalInset*2)), max(1, height-float32(movieTitleBarHeight+100))
 	}
 	heroHeight, cardWidth, rowHeight := homeViewportLayout(width, height)
 	page.Children(func() {
@@ -111,7 +111,7 @@ func (a *appState) homeContinueEmpty(c *ui.Context, height float32) {
 
 func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 	width, _ := c.Size()
-	hero := ui.Box(c.Key("home-carousel")).Bind(&a.home.HeroHandle).FillWidth().Radius(18).Clip().Background(ui.Hex("#27352e"))
+	hero := ui.Box(c.Key("home-carousel")).Bind(&a.home.HeroHandle).FillWidth().Radius(18).Clip().Background(ui.Hex("#27352e")).Label("首页推荐海报")
 	contentWidth := a.home.HeroHandle.Bounds(c).W
 	if contentWidth <= 0 {
 		contentWidth = max(1, width-float32(movieSidebarWidth+movieMainHorizontalInset*2))
@@ -339,38 +339,50 @@ func homeContinueSubtitle(item MediaItem) string {
 }
 
 func (a *appState) homeContinueGrid(c *ui.Context) {
-	ui.Column(c).Grow(1).FillHeight().FillWidth().Padding(movieTitleBarHeight, 0, 0, 0).Gap(16).Children(func() {
-		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
-			back := actionButton(c.Key("home-continue-back"), "").Size(34, 34).Padding(0).BorderWidth(0).Background(ui.Transparent).Label("返回首页")
-			back.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(18, 18) })
-			if back.Clicked() {
-				a.home.AllContinue = false
-			}
-			ui.Text(c, fmt.Sprintf("继续观看 · %d", len(a.home.Continue))).FontSize(22).Bold().Grow(1)
-			if a.home.ContinueDetailLoading {
-				ui.Text(c, "正在读取详情…").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
-			} else if a.home.ContinueDetailErr != "" {
-				ui.Text(c, "详情读取失败").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
-				if actionButton(c.Key("home-continue-detail-retry"), "重试详情").Clicked() {
-					a.openContinueDetail(a.home.ContinueDetailRecord)
-				}
-			}
-			if a.home.ContinueErr != "" && len(a.home.Continue) > 0 {
-				if actionButton(c.Key("home-continue-retry"), "重试").Clicked() {
-					a.loadContinueWatching(true)
-				}
-			}
-		})
-		if len(a.home.Continue) == 0 {
+	if len(a.home.Continue) == 0 {
+		ui.Column(c).Grow(1).FillHeight().FillWidth().Padding(movieTitleBarHeight+16, 0, 0, 0).Gap(16).Children(func() {
+			a.homeContinueGridHeader(c)
 			a.homeContinueEmpty(c, 0)
-		} else {
-			grid := ui.GridView(c, &a.home.Grid, len(a.home.Continue), 240, 198, func(i int) {
-				if i < len(a.home.Continue) {
-					a.homeContinueCard(c, a.home.Continue[i], 240)
-				}
-			}).Grow(1).FillHeight().FillWidth()
-			bindSmoothScroll(grid, &a.home.GridScroll)
-			bindSoftScrollEdges(grid, &a.home.GridScroll, c.Theme().Background)
+		})
+		return
+	}
+
+	ui.Box(c.Key("home-continue-grid-page")).Grow(1).Fill().Clip().Children(func() {
+		contentTop := float32(movieTitleBarHeight + 16 + 38 + 16)
+		grid := ui.GridView(c, &a.home.Grid, len(a.home.Continue), 240, 198, func(i int) {
+			if i < len(a.home.Continue) {
+				a.homeContinueCard(c, a.home.Continue[i], 240)
+			}
+		}).Absolute().Top(0).Left(0).Right(0).Bottom(0).Padding(contentTop, 0, 0, 0)
+		bindSmoothScroll(grid, &a.home.GridScroll)
+		bindSoftScrollEdges(grid, &a.home.GridScroll, c.Theme().Background)
+
+		header := ui.Row(c).Absolute().Top(float32(movieTitleBarHeight+16) - a.home.GridScroll.Y).Left(0).Right(0).
+			Height(38).FillWidth().Gap(10).AlignItems(ui.Center)
+		header.Children(func() { a.homeContinueGridHeader(c) })
+	})
+}
+
+func (a *appState) homeContinueGridHeader(c *ui.Context) {
+	ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+		back := actionButton(c.Key("home-continue-back"), "").Size(34, 34).Padding(0).BorderWidth(0).Background(ui.Transparent).Label("返回首页")
+		back.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(18, 18) })
+		if back.Clicked() {
+			a.home.AllContinue = false
+		}
+		ui.Text(c, fmt.Sprintf("继续观看 · %d", len(a.home.Continue))).FontSize(22).Bold().Grow(1)
+		if a.home.ContinueDetailLoading {
+			ui.Text(c, "正在读取详情…").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
+		} else if a.home.ContinueDetailErr != "" {
+			ui.Text(c, "详情读取失败").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
+			if actionButton(c.Key("home-continue-detail-retry"), "重试详情").Clicked() {
+				a.openContinueDetail(a.home.ContinueDetailRecord)
+			}
+		}
+		if a.home.ContinueErr != "" && len(a.home.Continue) > 0 {
+			if actionButton(c.Key("home-continue-retry"), "重试").Clicked() {
+				a.loadContinueWatching(true)
+			}
 		}
 	})
 }

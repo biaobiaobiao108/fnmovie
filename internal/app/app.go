@@ -149,7 +149,7 @@ func (a *appState) view(c *ui.Context) {
 			})
 		})
 		ui.Box(c.Key("window-title-material")).Absolute().Top(0).Left(movieSidebarWidth).
-			Right(titleBar.Right).Height(titleHeight).PassThrough().
+			Right(0).Height(titleHeight).PassThrough().
 			Material(glass.ScrollEdge{Hard: true, Background: t.Background})
 		ui.Box(c.Key("window-drag-region")).Absolute().Top(0).Left(movieSidebarWidth).
 			Right(titleBar.Right).Height(titleHeight).DragWindow()
