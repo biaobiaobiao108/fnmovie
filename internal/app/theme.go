@@ -22,17 +22,17 @@ var movieColors = struct {
 	text:            ui.Hex("#1d1d1f"),
 	textMuted:       ui.RGBA(60, 60, 67, 0.62),
 	border:          ui.RGBA(0, 0, 0, 0.07),
-	accent:          ui.Oklch(0.6, 0.21, 24),
-	accentHover:     ui.Oklch(0.55, 0.21, 24),
-	accentPressed:   ui.Oklch(0.5, 0.21, 24),
+	accent:          ui.Hex("#526f84"),
+	accentHover:     ui.Hex("#456479"),
+	accentPressed:   ui.Hex("#3c586b"),
 	accentText:      ui.Hex("#ffffff"),
-	selected:        ui.RGBA(0, 0, 0, 0.08),
+	selected:        ui.RGBA(82, 111, 132, 0.12),
 	danger:          ui.Hex("#c0392b"),
 	favorite:        ui.Hex("#d94f68"),
 	placeholder:     ui.Hex("#e9e9ed"),
 	placeholderText: ui.Hex("#8a8a91"),
-	rating:          ui.Oklch(0.6, 0.21, 24),
-	ratingText:      ui.Hex("#ffffff"),
+	rating:          ui.Hex("#e6d19b"),
+	ratingText:      ui.Hex("#57451e"),
 }
 
 func movieTheme() *ui.Theme {
@@ -49,7 +49,7 @@ func movieTheme() *ui.Theme {
 	t.AccentPressed = movieColors.accentPressed
 	t.AccentText = movieColors.accentText
 	t.Danger = movieColors.danger
-	t.Warning = movieColors.rating
+	t.Warning = ui.Hex("#916a1c")
 	t.Success = movieColors.accent
 	t.Selection = movieColors.accent.Alpha(0.32)
 	t.Focus = movieColors.accent.Alpha(0.55)

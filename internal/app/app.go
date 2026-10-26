@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -122,27 +123,37 @@ func (a *appState) view(c *ui.Context) {
 	}
 	t := c.Theme()
 	titleBar := c.TitleBar()
+	titleHeight := titleBar.Height
+	if titleHeight <= 0 {
+		titleHeight = movieTitleBarHeight
+	}
 	background := t.Background
 	if c.Vibrancy() {
 		background = ui.Transparent
 	}
 	ui.Row(c).Fill().Background(background).Children(func() {
 		a.sidebar(c)
-		ui.Column(c).Grow(1).FillHeight().Background(t.Background).
-			Padding(movieTitleBarHeight, movieMainHorizontalInset, 12, movieMainHorizontalInset).Children(func() {
-			ui.Column(c.Key(a.navigationKey())).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
-				switch {
-				case strings.TrimSpace(a.query) != "":
-					a.libraryView(c)
-				case a.section == "home":
-					a.homeView(c)
-				default:
-					a.libraryView(c)
-				}
+		main := ui.Box(c.Key("main-content")).Grow(1).FillHeight().MinWidth(0)
+		main.Children(func() {
+			ui.Box(c).Absolute().Top(titleHeight).Left(0).Right(0).Bottom(0).Background(t.Background).PassThrough()
+			ui.Column(c).Grow(1).FillHeight().Padding(0, movieMainHorizontalInset, 12, movieMainHorizontalInset).Children(func() {
+				ui.Column(c.Key(a.navigationKey())).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
+					switch {
+					case strings.TrimSpace(a.query) != "":
+						a.libraryView(c)
+					case a.section == "home":
+						a.homeView(c)
+					default:
+						a.libraryView(c)
+					}
+				})
 			})
 		})
+		ui.Box(c.Key("window-title-material")).Absolute().Top(0).Left(movieSidebarWidth).
+			Right(titleBar.Right).Height(titleHeight).PassThrough().
+			Material(glass.ScrollEdge{Hard: true, Background: t.Background})
 		ui.Box(c.Key("window-drag-region")).Absolute().Top(0).Left(movieSidebarWidth).
-			Right(titleBar.Right).Height(titleBar.Height).DragWindow()
+			Right(titleBar.Right).Height(titleHeight).DragWindow()
 	})
 	a.loginModal(c)
 	a.detailSynopsisDialog(c)
@@ -163,6 +174,23 @@ func cardCaption(item MediaItem) string {
 		return "共 " + count + " 集 · " + item.Year
 	}
 	return item.Year
+}
+
+// bindSoftScrollEdges fades clipped content into the page surface while it
+// passes a scroll viewport's edge. The soft MyGo material is a gradient and
+// avoids the heavy frosted band of a hard scroll edge.
+func bindSoftScrollEdges(element ui.Element, state *ui.ScrollState, background ui.Color) {
+	element.DrawOver(func(p *ui.Painter, rect ui.Rect) {
+		edgeHeight := min(float32(18), rect.H/3)
+		if state.Y > 1 {
+			glass.ScrollEdge{Background: background}.PaintMaterial(p,
+				ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: edgeHeight}, [4]float32{})
+		}
+		if state.MaxY-state.Y > 1 {
+			glass.ScrollEdge{Bottom: true, Background: background}.PaintMaterial(p,
+				ui.Rect{X: rect.X, Y: rect.Y + rect.H - edgeHeight, W: rect.W, H: edgeHeight}, [4]float32{})
+		}
+	})
 }
 
 func detailPosterSize(c *ui.Context) (int, int) {

@@ -74,6 +74,7 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 		}).Grow(1)
 		bindSmoothScroll(list, &a.sidebarScroll)
+		bindSoftScrollEdges(list, &a.sidebarScroll, background)
 		if a.loggedIn {
 			exitBtn := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0).
 				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
@@ -243,6 +244,12 @@ func (a *appState) selectedLibraryName() string {
 }
 
 func (a *appState) libraryView(c *ui.Context) {
+	ui.Column(c.Key("library-view")).Grow(1).FillHeight().Padding(movieTitleBarHeight, 0, 0, 0).Children(func() {
+		a.libraryViewContent(c)
+	})
+}
+
+func (a *appState) libraryViewContent(c *ui.Context) {
 	t := c.Theme()
 	items := a.visibleItems()
 	a.libraryHeading(c)
@@ -354,6 +361,7 @@ func (a *appState) libraryView(c *ui.Context) {
 		}
 	}).Grow(1)
 	bindSmoothScroll(grid, &a.catalogScroll)
+	bindSoftScrollEdges(grid, &a.catalogScroll, t.Background)
 }
 
 func (a *appState) libraryHeading(c *ui.Context) {

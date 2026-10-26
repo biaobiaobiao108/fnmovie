@@ -186,7 +186,7 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 		if len(a.home.Heroes) > 1 {
 			arrowTop := height/2 - 20
 			if height < 520 {
-				arrowTop = 16
+				arrowTop = movieTitleBarHeight + 8
 			}
 			for _, direction := range []int{-1, 1} {
 				label, icon := "上一张海报", "back"
@@ -339,7 +339,7 @@ func homeContinueSubtitle(item MediaItem) string {
 }
 
 func (a *appState) homeContinueGrid(c *ui.Context) {
-	ui.Column(c).Grow(1).FillHeight().FillWidth().Gap(16).Children(func() {
+	ui.Column(c).Grow(1).FillHeight().FillWidth().Padding(movieTitleBarHeight, 0, 0, 0).Gap(16).Children(func() {
 		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 			back := actionButton(c.Key("home-continue-back"), "").Size(34, 34).Padding(0).BorderWidth(0).Background(ui.Transparent).Label("返回首页")
 			back.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(18, 18) })
@@ -370,6 +370,7 @@ func (a *appState) homeContinueGrid(c *ui.Context) {
 				}
 			}).Grow(1).FillHeight().FillWidth()
 			bindSmoothScroll(grid, &a.home.GridScroll)
+			bindSoftScrollEdges(grid, &a.home.GridScroll, c.Theme().Background)
 		}
 	})
 }

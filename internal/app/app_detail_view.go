@@ -564,7 +564,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 								}
 								if item.Rating != "" {
 									ui.Text(c, item.Rating).Absolute().Top(10).Left(10).Padding(4, 8).Radius(7).
-										Background(t.Accent).FontSize(12).Bold().TextColor(t.AccentText)
+										Background(movieColors.rating).FontSize(12).Bold().TextColor(movieColors.ratingText)
 								}
 							})
 							ui.Text(c, item.Title).FontSize(14).Bold().TextAlign(ui.Center).SingleLine()
