@@ -1,6 +1,10 @@
 package app
 
-import "github.com/egoist/mygo/ui"
+import (
+	"time"
+
+	"github.com/egoist/mygo/ui"
+)
 
 func (a *appState) secondaryPage(c *ui.Context) {
 	key := a.navigationKey()
@@ -17,21 +21,30 @@ func (a *appState) secondaryPage(c *ui.Context) {
 	theme := immersiveDetailTheme(tint)
 	c.SetTheme(theme)
 
-	root := ui.Box(c.Key("secondary-page:" + key)).Grow(1).Fill().Clip().Background(theme.Background)
+	root := ui.Box(c.Key("secondary-page")).Grow(1).Fill().Clip().Background(theme.Background)
 	root.Children(func() {
 		if backdrop != nil {
 			ui.Image(c, backdrop).Absolute().Top(-100).Left(-100).Right(-100).Bottom(-100).
-				Fit(ui.Cover).Opacity(0.30).Blur(34).PassThrough()
+				Fit(ui.Cover).Opacity(0.34).Blur(34).PassThrough()
 		}
-		ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough().Draw(func(p *ui.Painter, rect ui.Rect) {
+		palette := ui.Box(c.Key("secondary-backdrop-palette")).Absolute().Top(0).Left(0).Right(0).Bottom(0).PassThrough()
+		r := palette.AnimateTo("red", float32(tint.R), ui.Animation{Duration: 440 * time.Millisecond})
+		g := palette.AnimateTo("green", float32(tint.G), ui.Animation{Duration: 440 * time.Millisecond})
+		b := palette.AnimateTo("blue", float32(tint.B), ui.Animation{Duration: 440 * time.Millisecond})
+		animatedTint := ui.RGB(uint8(r), uint8(g), uint8(b))
+		palette.Draw(func(p *ui.Painter, rect ui.Rect) {
+			ink := ui.Hex("#0b0c10")
 			p.FillGradient(rect, ui.LinearGradient{
-				From:  tint.Mix(ui.Hex("#0b0c10"), 0.48).Alpha(0.62),
-				To:    ui.Hex("#0b0c10").Alpha(0.84),
-				Angle: 90,
+				Angle: 180, Oklab: true,
+				Stops: []ui.GradientStop{
+					{Color: animatedTint.Mix(ink, 0.48).Alpha(0.56), At: 0},
+					{Color: animatedTint.Mix(ink, 0.66).Alpha(0.72), At: 0.56},
+					{Color: ink.Alpha(0.84), At: 1},
+				},
 			}, 0)
 			p.FillGradient(rect, ui.LinearGradient{
-				From:  ui.RGBA(7, 8, 11, 0.12),
-				To:    ui.RGBA(7, 8, 11, 0.30),
+				From:  ui.RGBA(7, 8, 11, 0.08),
+				To:    ui.RGBA(7, 8, 11, 0.26),
 				Angle: 0,
 			}, 0)
 		})

@@ -14,6 +14,9 @@ func (a *appState) sidebar(c *ui.Context) {
 	if titleBar := c.TitleBar(); titleBar.Left > 0 {
 		top = titleBar.Height + 4
 	}
+	if c.Vibrancy() {
+		background = ui.Transparent
+	}
 	ui.Column(c).Width(movieSidebarWidth).FillHeight().Padding(top, 14, 14, 14).Gap(4).Background(background).
 		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).DragWindow().Children(func() {
 		a.globalSearchField(c)
@@ -71,7 +74,7 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 		}).Grow(1)
 		bindSmoothScroll(list, &a.sidebarScroll)
-		bindScrollEdgeFades(list, &a.sidebarScroll, background)
+		bindScrollEdgeMaterial(list, &a.sidebarScroll, background)
 		if a.loggedIn {
 			exitBtn := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0).
 				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
@@ -352,7 +355,7 @@ func (a *appState) libraryView(c *ui.Context) {
 		}
 	}).Grow(1)
 	bindSmoothScroll(grid, &a.catalogScroll)
-	bindScrollEdgeFades(grid, &a.catalogScroll, t.Background)
+	bindScrollEdgeMaterial(grid, &a.catalogScroll, t.Background)
 }
 
 func (a *appState) libraryHeading(c *ui.Context) {

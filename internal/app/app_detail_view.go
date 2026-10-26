@@ -225,18 +225,21 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 func (a *appState) detailPosterActions(c *ui.Context, item MediaItem) {
 	width, height := detailPosterSize(c)
 	ui.Column(c).Width(float32(width)).Gap(12).Children(func() {
-		if poster := a.imageFor(item, width, height); poster != nil {
-			ui.Image(c, poster).Size(float32(width), float32(height)).Fit(ui.Cover).Radius(13).Label("影片海报")
-		} else {
-			ui.Box(c).Size(float32(width), float32(height)).Radius(13).Background(c.Theme().Surface).
-				Border(1, c.Theme().Border).Center().Label("影片海报").Children(func() {
-				initial := "影"
-				if runes := []rune(item.Title); len(runes) > 0 {
-					initial = string(runes[:1])
-				}
-				ui.Text(c, initial).FontSize(64).Bold().TextColor(c.Theme().TextMuted)
-			})
-		}
+		poster := detailArtworkSurface(c, "detail-poster:"+item.ID, float32(width), float32(height), 13, "影片海报")
+		poster.Children(func() {
+			if image := a.imageFor(item, width, height); image != nil {
+				ui.Image(c, image).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover).Radius(13)
+			} else {
+				ui.Box(c).Absolute().Top(0).Left(0).Right(0).Bottom(0).Radius(13).Background(c.Theme().Surface).
+					Border(1, c.Theme().Border).Center().Children(func() {
+					initial := "影"
+					if runes := []rune(item.Title); len(runes) > 0 {
+						initial = string(runes[:1])
+					}
+					ui.Text(c, initial).FontSize(64).Bold().TextColor(c.Theme().TextMuted)
+				})
+			}
+		})
 		ui.Row(c).Height(42).FillWidth().Justify(ui.Center).Gap(13).AlignItems(ui.Center).Children(func() {
 			playItem, label := item, "▶  立即播放"
 			available := true
@@ -265,6 +268,28 @@ func (a *appState) detailPosterActions(c *ui.Context, item MediaItem) {
 			a.favoriteButton(c, item)
 		})
 	})
+}
+
+func detailArtworkSurface(c *ui.Context, key string, width, height, radius float32, label string) ui.Element {
+	artwork := ui.Box(c.Key(key)).Size(width, height).Radius(radius).Label(label).
+		Shadow(0, 20, 42, -10, ui.RGBA(0, 0, 0, 0.34))
+	x, y, hovered := artwork.PointerPosition()
+	var rotateX, rotateY, lift float32
+	scale := float32(1)
+	if hovered && !c.Preferences().ReduceMotion {
+		rotateX = (0.5 - y/height) * 5
+		rotateY = (x/width - 0.5) * 5
+		lift = -2
+		scale = 1.008
+	}
+	rotation := ui.Animation{Spring: ui.SpringOptions{Duration: 360 * time.Millisecond, Bounce: 0.08}}
+	rotateX = artwork.AnimateTo("tilt-x", rotateX, rotation)
+	rotateY = artwork.AnimateTo("tilt-y", rotateY, rotation)
+	artwork.AnimatePose(ui.Pose{Y: lift, Scale: scale}, ui.Snappy)
+	if rotateX*rotateX+rotateY*rotateY > 0.0025 {
+		artwork.RotateX(rotateX).RotateY(rotateY).Perspective(1000)
+	}
+	return artwork
 }
 
 // The intro keeps a bounded synopsis preview with a separate full-text view.
@@ -443,8 +468,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 	ui.Row(c.Key("person-detail-layout:"+person.ID)).Grow(1).Fill().Padding(24, 56, 34, 56).
 		Gap(56).AlignItems(ui.Stretch).Children(func() {
 		ui.Column(c).Width(float32(portraitWidth)).Justify(ui.Center).Children(func() {
-			image := ui.Box(c).Size(float32(portraitWidth), float32(portraitHeight)).Radius(18).Clip().
-				Background(t.Surface).Label("演员头像")
+			image := detailArtworkSurface(c, "person-portrait:"+person.ID, float32(portraitWidth), float32(portraitHeight), 18, "演员头像")
 			image.Children(func() {
 				if profile != nil {
 					ui.Image(c, profile).Absolute().Top(0).Left(0).Right(0).Bottom(0).Fit(ui.Cover).Radius(18)

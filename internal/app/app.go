@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/egoist/mygo"
+	"github.com/egoist/mygo/plugins/glass"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -69,7 +70,8 @@ func Run() {
 		app.window = mygo.NewWindow(mygo.WindowOptions{
 			Title: applicationWindowTitle, Width: 1280, Height: 800, MinWidth: 960, MinHeight: 640,
 			TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: movieTitleBarHeight,
-			BackgroundColor: movieWindowBackground, StateKey: "main", Content: ui.View(app.view),
+			Vibrancy: mygo.VibrancySidebar, BackgroundColor: movieWindowBackground,
+			StateKey: "main", Content: ui.View(app.view),
 		})
 		setWindowTheme(app.window)
 		app.displayScale = windowScale(app.window.NativeHandle())
@@ -101,6 +103,9 @@ func Run() {
 func (a *appState) view(c *ui.Context) {
 	a.syncHomeLifecycle()
 	c.SetTheme(movieTheme())
+	if c.Vibrancy() {
+		c.Root().Background(ui.Transparent)
+	}
 	if a.loggedIn && a.searchPending && c.Now().Sub(a.searchChangedAt) >= 300*time.Millisecond {
 		a.searchPending = false
 		a.loadLibrary()
@@ -118,9 +123,14 @@ func (a *appState) view(c *ui.Context) {
 	}
 	t := c.Theme()
 	titleBar := c.TitleBar()
-	ui.Row(c).Fill().Background(t.Background).Children(func() {
+	background := t.Background
+	if c.Vibrancy() {
+		background = ui.Transparent
+	}
+	ui.Row(c).Fill().Background(background).Children(func() {
 		a.sidebar(c)
-		ui.Column(c).Grow(1).FillHeight().Padding(movieTitleBarHeight, movieMainHorizontalInset, 12, movieMainHorizontalInset).Children(func() {
+		ui.Column(c).Grow(1).FillHeight().Background(t.Background).
+			Padding(movieTitleBarHeight, movieMainHorizontalInset, 12, movieMainHorizontalInset).Children(func() {
 			ui.Column(c.Key(a.navigationKey())).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
 				switch {
 				case strings.TrimSpace(a.query) != "":
@@ -141,18 +151,16 @@ func (a *appState) view(c *ui.Context) {
 }
 
 // Draw after the scroll content without adding an input-catching overlay.
-func bindScrollEdgeFades(element ui.Element, state *ui.ScrollState, background ui.Color) {
+func bindScrollEdgeMaterial(element ui.Element, state *ui.ScrollState, background ui.Color) {
 	element.DrawOver(func(p *ui.Painter, rect ui.Rect) {
-		fadeHeight := min(float32(24), rect.H/2)
+		edgeHeight := min(float32(40), rect.H/2)
 		if state.Y > 1 {
-			p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: fadeHeight}, ui.LinearGradient{
-				From: background, To: background.Alpha(0), Angle: 180,
-			}, 0)
+			glass.ScrollEdge{Hard: true, Background: background}.PaintMaterial(p,
+				ui.Rect{X: rect.X, Y: rect.Y, W: rect.W, H: edgeHeight}, [4]float32{})
 		}
 		if state.MaxY-state.Y > 1 {
-			p.FillGradient(ui.Rect{X: rect.X, Y: rect.Y + rect.H - fadeHeight, W: rect.W, H: fadeHeight}, ui.LinearGradient{
-				From: background.Alpha(0), To: background, Angle: 180,
-			}, 0)
+			glass.ScrollEdge{Hard: true, Bottom: true, Background: background}.PaintMaterial(p,
+				ui.Rect{X: rect.X, Y: rect.Y + rect.H - edgeHeight, W: rect.W, H: edgeHeight}, [4]float32{})
 		}
 	})
 }
