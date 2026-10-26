@@ -148,15 +148,28 @@ func (a *appState) view(c *ui.Context) {
 				})
 			})
 		})
-		ui.Box(c.Key("window-title-material")).Absolute().Top(0).Left(movieSidebarWidth).
+		edge := ui.Box(c.Key("window-title-material")).Absolute().Top(0).Left(movieSidebarWidth).
 			Right(0).Height(titleHeight).PassThrough().
 			Material(glass.ScrollEdge{Hard: true, Background: t.Background})
+		shown := float32(0)
+		if a.contentUnderTitleBar(titleHeight) {
+			shown = 1
+		}
+		edge.Opacity(edge.AnimateTo("shown", shown, ui.Animation{Duration: 180 * time.Millisecond}))
 		ui.Box(c.Key("window-drag-region")).Absolute().Top(0).Left(movieSidebarWidth).
 			Right(titleBar.Right).Height(titleHeight).DragWindow()
 	})
 	a.loginModal(c)
 	a.detailSynopsisDialog(c)
 	a.syncHomeCarousel()
+}
+
+func (a *appState) contentUnderTitleBar(titleHeight float32) bool {
+	if strings.TrimSpace(a.query) == "" && a.section == "home" {
+		return a.home.AllContinue && len(a.home.Continue) > 0 &&
+			a.home.GridScroll.Y > max(0, float32(movieTitleBarHeight+16)-titleHeight)+0.5
+	}
+	return len(a.visibleItems()) > 0 && a.catalogScroll.Y > max(0, float32(movieTitleBarHeight)-titleHeight)+0.5
 }
 
 func cardCaption(item MediaItem) string {
