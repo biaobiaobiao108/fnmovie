@@ -327,8 +327,9 @@ func TestDetailBackButton(t *testing.T) {
 	}
 
 	// Click the icon back button, with an accessibility label and no tooltip.
-	// detailBackButton is placed at X=239, Y=70 with Size 36x34
-	tester.ClickAt(250, 85)
+	if err := tester.Click("返回影视库"); err != nil {
+		t.Fatal(err)
+	}
 
 	if app.selected != nil {
 		t.Fatalf("expected selected to be nil after clicking back button")

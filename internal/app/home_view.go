@@ -114,7 +114,7 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 	hero := ui.Box(c.Key("home-carousel")).Bind(&a.home.HeroHandle).FillWidth().Radius(18).Clip().Background(ui.Hex("#27352e"))
 	contentWidth := a.home.HeroHandle.Bounds(c).W
 	if contentWidth <= 0 {
-		contentWidth = max(1, width-273)
+		contentWidth = max(1, width-float32(movieSidebarWidth+movieMainHorizontalInset*2))
 	}
 	hero.Height(height)
 	a.home.HeroHover = hero.Hovered()

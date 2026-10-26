@@ -10,22 +10,31 @@ import (
 func (a *appState) sidebar(c *ui.Context) {
 	t := c.Theme()
 	background := movieColors.sidebar
-	ui.Column(c).Width(movieSidebarWidth).FillHeight().Padding(24, 14).Gap(8).Background(background).
-		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).Children(func() {
-		ui.Row(c).Padding(0, 10).Gap(11).Children(func() {
-			if a.icon != nil {
-				ui.Image(c, a.icon).Size(38, 38).Radius(10).Fit(ui.Cover)
-			}
-			ui.Column(c).Gap(1).Children(func() {
-				ui.Text(c, "哞哩影院").FontSize(16).Bold()
-			})
-		})
-		ui.Box(c).Height(15)
+	top := float32(14)
+	if titleBar := c.TitleBar(); titleBar.Left > 0 {
+		top = titleBar.Height + 4
+	}
+	ui.Column(c).Width(movieSidebarWidth).FillHeight().Padding(top, 14, 14, 14).Gap(4).Background(background).
+		BorderWidth(0, 1, 0, 0).BorderColor(t.Border).DragWindow().Children(func() {
+		a.globalSearchField(c)
 		a.navButton(c, sidebarNavIcon("home"), "首页", "home")
 		a.navButton(c, sidebarNavIcon("movies"), "电影", "movies")
 		a.navButton(c, sidebarNavIcon("tv"), "电视节目", "tv")
 		a.navButton(c, sidebarNavIcon("favorites"), "我的收藏", "favorites")
-		ui.Text(c, "影视库").Padding(6, 14).FontSize(11).Bold().TextColor(t.TextMuted)
+		ui.Text(c, "影视库").Padding(8, 10, 4, 10).FontSize(11).Bold().TextColor(t.TextMuted)
+		if a.libraryErr != "" && !a.libraryLoading {
+			ui.Column(c).Padding(0, 10, 6, 10).Gap(6).Children(func() {
+				ui.Text(c, "读取影视库失败").FontSize(11).TextColor(t.Danger).MaxLines(2)
+				if actionButton(c, "重试").Height(30).Padding(6, 10).Clicked() {
+					a.loadLibraries()
+				}
+			})
+		} else if a.libraryLoading && len(a.libraries) == 0 {
+			ui.Row(c).Padding(0, 10, 6, 10).Gap(8).AlignItems(ui.Center).Children(func() {
+				ui.Spinner(c).Size(14, 14)
+				ui.Text(c, "正在读取影视库…").FontSize(11).TextColor(t.TextMuted)
+			})
+		}
 		libraries := a.libraries
 		a.sidebarList.Key = func(i int) any { return libraries[i].ID }
 		list := ui.List(c, &a.sidebarList, len(libraries), func(i int) {
@@ -45,7 +54,11 @@ func (a *appState) sidebar(c *ui.Context) {
 				} else if button.Hovered() {
 					iconColor = t.Text
 				}
-				ui.Icon(c, libraryNavigationIcon(library)).Size(20, 20).TextColor(iconColor)
+				if cover := a.imageForURL(library.Poster, 22, 22); cover != nil {
+					ui.Image(c, cover).Size(22, 22).Fit(ui.Cover).Radius(5).Label("影视库封面：" + library.Name)
+				} else {
+					ui.Icon(c, libraryNavigationIcon(library)).Size(20, 20).TextColor(iconColor).Label("影视库类型：" + library.Name)
+				}
 				ui.Text(c, library.Name).FontSize(13).SingleLine()
 			})
 			if button.Clicked() {
@@ -89,6 +102,44 @@ func (a *appState) sidebar(c *ui.Context) {
 	})
 }
 
+func (a *appState) globalSearchField(c *ui.Context) {
+	t := c.Theme()
+	focused := c.Focused(a.searchBox)
+	field := ui.Row(c.Key("global-search-field")).Height(32).FillWidth().PaddingX(10).Gap(7).Radius(9).AlignItems(ui.Center).Margin(0, 0, 14, 0)
+	if focused {
+		field.Background(t.Background).Shadow(0, 0, 0, 3, movieColors.accent.Alpha(0.25)).Border(1, movieColors.accent.Alpha(0.6))
+	} else {
+		field.Background(t.SurfaceHover).Border(1, t.Border)
+	}
+	field.Children(func() {
+		ui.Icon(c, sidebarNavIcon("search")).Size(14, 14).TextColor(t.TextMuted)
+		input := ui.TextInputBase(c.Key("global-search-input"), &a.query).Bind(&a.searchBox).Grow(1).
+			Placeholder("搜索影片、演员或导演").FontSize(13).Label("全局搜索")
+		if a.loggedIn {
+			input.OnChange(func() { a.globalSearchChanged(c) })
+		} else {
+			input.Disabled(true)
+		}
+	})
+}
+
+func (a *appState) globalSearchChanged(c *ui.Context) {
+	a.closeDetail()
+	a.closePerson()
+	a.selectedTab = 0
+	a.status = ""
+	if strings.TrimSpace(a.query) == "" {
+		a.items = nil
+		if state := a.catalogs[a.currentCatalogKey()]; state != nil {
+			a.items = state.Items
+		}
+	}
+	a.mediaView.Invalidate()
+	a.searchChangedAt = c.Now()
+	a.searchPending = true
+	c.After(320 * time.Millisecond)
+}
+
 func (a *appState) navButton(c *ui.Context, icon *ui.SVG, label, key string) {
 	selected := a.section == key
 	e := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0)
@@ -127,61 +178,6 @@ func (a *appState) navButton(c *ui.Context, icon *ui.SVG, label, key string) {
 			a.loadLibrary()
 		}
 	}
-}
-
-func (a *appState) topbar(c *ui.Context) {
-	t := c.Theme()
-	ui.Row(c).Gap(14).Children(func() {
-		ui.Column(c).Grow(1).Gap(3).Children(func() {
-			label := map[string]string{"home": "首页", "movies": "电影", "tv": "电视节目", "favorites": "我的收藏", "library": a.selectedLibraryName()}[a.section]
-			if label == "" {
-				label = "影视库"
-			}
-			if strings.TrimSpace(a.query) != "" && a.selected == nil && a.selectedPerson == nil {
-				label = "全局搜索"
-			}
-			ui.Text(c, label).FontSize(27).Bold()
-		})
-		if state := a.catalogs[a.currentCatalogKey()]; state != nil && state.Err != "" && len(state.Items) > 0 {
-			if actionButton(c, "重试").Padding(5, 9).Clicked() {
-				a.loadNextCatalogPage(true)
-			}
-		}
-		if a.libraryErr != "" && !a.libraryLoading {
-			if actionButton(c, "重试影视库").Padding(5, 9).Clicked() {
-				a.loadLibraries()
-			}
-		}
-		if a.loggedIn {
-			if a.searchPending && c.Now().Sub(a.searchChangedAt) >= 300*time.Millisecond {
-				a.searchPending = false
-				a.loadLibrary()
-			}
-			if a.busy || a.libraryLoading || a.currentCatalogLoading() {
-				ui.Box(c).Size(20, 20).Center().Children(func() {
-					ui.Text(c, "↻").FontSize(15).TextColor(t.TextMuted)
-				})
-			} else {
-				ui.Box(c).Size(20, 20)
-			}
-			ui.SearchField(c.Key("global-search"), &a.query).Width(270).Placeholder("全局搜索影片、演员或导演").Label("全局搜索").OnChange(func() {
-				a.closeDetail()
-				a.closePerson()
-				a.selectedTab = 0
-				a.status = ""
-				if strings.TrimSpace(a.query) == "" {
-					a.items = nil
-					if state := a.catalogs[a.currentCatalogKey()]; state != nil {
-						a.items = state.Items
-					}
-				}
-				a.mediaView.Invalidate()
-				a.searchChangedAt = c.Now()
-				a.searchPending = true
-				c.After(320 * time.Millisecond)
-			})
-		}
-	})
 }
 
 func (a *appState) connectionView(c *ui.Context) {
@@ -247,6 +243,7 @@ func (a *appState) selectedLibraryName() string {
 func (a *appState) libraryView(c *ui.Context) {
 	t := c.Theme()
 	items := a.visibleItems()
+	a.libraryHeading(c)
 	key := a.currentCatalogKey() + "\x00" + a.section
 	if key != a.catalogScrollKey {
 		a.catalogScrollKey = key
@@ -356,6 +353,29 @@ func (a *appState) libraryView(c *ui.Context) {
 	}).Grow(1)
 	bindSmoothScroll(grid, &a.catalogScroll)
 	bindScrollEdgeFades(grid, &a.catalogScroll, t.Background)
+}
+
+func (a *appState) libraryHeading(c *ui.Context) {
+	label := map[string]string{
+		"home": "首页", "movies": "电影", "tv": "电视节目", "favorites": "我的收藏", "library": a.selectedLibraryName(),
+	}[a.section]
+	if label == "" {
+		label = "影视库"
+	}
+	if strings.TrimSpace(a.query) != "" {
+		label = "全局搜索"
+	}
+	ui.Row(c).Height(38).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+		ui.Text(c, label).FontSize(26).Bold().Grow(1)
+		if a.loggedIn && (a.busy || a.libraryLoading || a.currentCatalogLoading()) {
+			ui.Spinner(c).Size(16, 16)
+		}
+		if state := a.catalogs[a.currentCatalogKey()]; state != nil && state.Err != "" && len(state.Items) > 0 {
+			if actionButton(c, "重试").Padding(5, 9).Clicked() {
+				a.loadNextCatalogPage(true)
+			}
+		}
+	})
 }
 
 func (a *appState) homeHero(c *ui.Context, item MediaItem) {

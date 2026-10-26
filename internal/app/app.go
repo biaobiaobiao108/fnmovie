@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -30,8 +31,8 @@ func (a *appState) syncWindowTitle() {
 	}
 	title := windowTitleForPlayback(a.playback)
 	if a.window.Title() != title {
-		// Windows renders the native caption and adds an ellipsis when the
-		// current window width leaves insufficient room for the full title.
+		// Keep the native title current for task switching and accessibility,
+		// even while the title bar itself is hidden.
 		a.window.SetTitle(title)
 	}
 }
@@ -43,12 +44,8 @@ func Run() {
 	if err != nil {
 		log.Printf("settings: %v", err)
 	}
-	icon, iconErr := ui.DecodeBitmap(appIconPNG)
-	if iconErr != nil {
-		log.Printf("app icon: %v", iconErr)
-	}
 	app := &appState{
-		settings: settings, serverAddress: settings.ServerURL, player: NewPlayer(), posters: NewPosterLoader(), icon: icon,
+		settings: settings, serverAddress: settings.ServerURL, player: NewPlayer(), posters: NewPosterLoader(),
 		navigationUIState: navigationUIState{section: "home"},
 		sessionUIState:    sessionUIState{status: "连接飞牛影视服务器后开始浏览", loginOpen: true},
 		catalogUIState:    catalogUIState{catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache()},
@@ -71,6 +68,7 @@ func Run() {
 	mygo.App.WhenReady(func() {
 		app.window = mygo.NewWindow(mygo.WindowOptions{
 			Title: applicationWindowTitle, Width: 1280, Height: 800, MinWidth: 960, MinHeight: 640,
+			TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: movieTitleBarHeight,
 			BackgroundColor: movieWindowBackground, StateKey: "main", Content: ui.View(app.view),
 		})
 		setWindowTheme(app.window)
@@ -103,6 +101,10 @@ func Run() {
 func (a *appState) view(c *ui.Context) {
 	a.syncHomeLifecycle()
 	c.SetTheme(movieTheme())
+	if a.loggedIn && a.searchPending && c.Now().Sub(a.searchChangedAt) >= 300*time.Millisecond {
+		a.searchPending = false
+		a.loadLibrary()
+	}
 	a.advancePlayerFullscreen(c)
 	if a.playback.Active {
 		a.advancePlayerOverlayAnimation(c)
@@ -110,10 +112,10 @@ func (a *appState) view(c *ui.Context) {
 		return
 	}
 	t := c.Theme()
+	titleBar := c.TitleBar()
 	ui.Row(c).Fill().Background(t.Background).Children(func() {
 		a.sidebar(c)
-		ui.Column(c).Grow(1).FillHeight().Padding(16, movieMainHorizontalInset, 12, movieMainHorizontalInset).Gap(18).Children(func() {
-			a.topbar(c)
+		ui.Column(c).Grow(1).FillHeight().Padding(movieTitleBarHeight, movieMainHorizontalInset, 12, movieMainHorizontalInset).Children(func() {
 			ui.Column(c.Key(a.navigationKey())).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
 				switch {
 				case a.selectedPerson != nil:
@@ -129,6 +131,8 @@ func (a *appState) view(c *ui.Context) {
 				}
 			})
 		})
+		ui.Box(c.Key("window-drag-region")).Absolute().Top(0).Left(movieSidebarWidth).
+			Right(titleBar.Right).Height(titleBar.Height).DragWindow()
 	})
 	a.loginModal(c)
 	a.detailSynopsisDialog(c)
@@ -180,8 +184,8 @@ func detailPlayButton(c *ui.Context, label string) ui.Element {
 
 func detailViewportHeight(c *ui.Context) float32 {
 	_, height := c.Size()
-	// Global header, outer padding and back navigation row.
-	return max(float32(240), height-146)
+	// Window-button inset, outer padding and back navigation row.
+	return max(float32(240), height-118)
 }
 
 func detailContentInset(c *ui.Context) float32 {

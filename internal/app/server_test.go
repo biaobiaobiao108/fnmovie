@@ -119,7 +119,7 @@ func TestServerListsAccessibleLibrariesAndScopesItems(t *testing.T) {
 		}
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/mdb/list":
-			writeJSON(t, w, `{"code":0,"data":[{"guid":"mdb-1","name":"Movies","category":"movie","poster":"/poster.jpg"},{"guid":"mdb-2","name":"Series","category":"tv"}]}`)
+			writeJSON(t, w, `{"code":0,"data":[{"guid":"mdb-1","name":"Movies","category":"movie","poster":"/poster.jpg"},{"guid":"mdb-2","name":"Series","category":"tv","cover":{"url":"/series-cover.jpg"}}]}`)
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/item/list":
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -137,7 +137,7 @@ func TestServerListsAccessibleLibrariesAndScopesItems(t *testing.T) {
 	client := NewServer(server.URL, "session-token")
 	client.client = server.Client()
 	libraries, err := client.Libraries()
-	if err != nil || len(libraries) != 2 || libraries[0].ID != "mdb-1" || libraries[1].Name != "Series" {
+	if err != nil || len(libraries) != 2 || libraries[0].ID != "mdb-1" || libraries[0].Poster != "/poster.jpg" || libraries[1].Name != "Series" || libraries[1].Poster != "/series-cover.jpg" {
 		t.Fatalf("unexpected libraries: %#v, err=%v", libraries, err)
 	}
 	items, err := client.LibraryItems("mdb-2", "")

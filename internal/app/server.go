@@ -235,7 +235,7 @@ func (s *Server) LibrariesContext(ctx context.Context) ([]MediaLibrary, error) {
 			ID:     firstString(object, "guid", "id", "mdb_guid"),
 			Name:   firstString(object, "name", "title"),
 			Kind:   firstString(object, "category", "type", "view_type"),
-			Poster: firstString(object, "poster", "posters", "poster_url"),
+			Poster: firstImagePath(object, "poster", "posters", "poster_url", "cover", "cover_url", "image", "image_url", "thumb"),
 			Raw:    object,
 		}
 		if library.ID != "" {

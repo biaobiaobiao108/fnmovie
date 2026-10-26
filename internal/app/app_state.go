@@ -19,7 +19,6 @@ type appState struct {
 	serverAddress string
 	server        *Server
 	player        *Player
-	icon          *ui.Bitmap
 	displayScale  float64
 	posters       *PosterLoader
 
@@ -35,6 +34,7 @@ type appState struct {
 type navigationUIState struct {
 	section          string
 	query            string
+	searchBox        ui.Handle
 	grid             ui.GridState
 	catalogScroll    ui.ScrollState
 	catalogScrollKey string

@@ -86,9 +86,12 @@ func TestGlobalSearchInputLeavesDetails(t *testing.T) {
 			a.selected = &MediaItem{ID: "movie", Title: "影片详情", Kind: "movie"}
 		}
 		tester := ui.NewTester(a.view, 1280, 800)
-		_, ok := tester.Find("全局搜索")
+		input, ok := tester.Find("全局搜索")
 		if !ok {
 			t.Fatal("detail page missing global search input")
+		}
+		if input.X+input.W > float32(movieSidebarWidth) {
+			t.Fatalf("global search input is not in the sidebar: %+v", input)
 		}
 		tester.Click("全局搜索")
 		tester.Type("keyword")

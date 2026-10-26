@@ -3,9 +3,10 @@ package app
 import "github.com/egoist/mygo/ui"
 
 const (
-	movieWindowBackground    = "#111311"
-	movieSidebarWidth        = 220
+	movieWindowBackground    = "#ffffff"
+	movieSidebarWidth        = 232
 	movieMainHorizontalInset = 28
+	movieTitleBarHeight      = 46
 )
 
 var movieColors = struct {
@@ -14,28 +15,28 @@ var movieColors = struct {
 	selected, danger, favorite, placeholder, placeholderText, rating, ratingText ui.Color
 }{
 	background:      ui.Hex(movieWindowBackground),
-	sidebar:         ui.Hex("#171a18"),
-	surface:         ui.Hex("#1d211e"),
-	surfaceHover:    ui.Hex("#292e2a"),
-	surfacePressed:  ui.Hex("#343a35"),
-	text:            ui.Hex("#f1f4f1"),
-	textMuted:       ui.Hex("#a2aaa4"),
-	border:          ui.Hex("#303632"),
-	accent:          ui.Hex("#83bd98"),
-	accentHover:     ui.Hex("#9ad0aa"),
-	accentPressed:   ui.Hex("#669879"),
-	accentText:      ui.Hex("#101712"),
-	selected:        ui.Hex("#26372c"),
-	danger:          ui.Hex("#f18a7f"),
-	favorite:        ui.Hex("#f27b91"),
-	placeholder:     ui.Hex("#262b27"),
-	placeholderText: ui.Hex("#7e8981"),
-	rating:          ui.Hex("#d8b66e"),
-	ratingText:      ui.Hex("#211d14"),
+	sidebar:         ui.Hex("#f4f4f6"),
+	surface:         ui.Hex("#f4f4f5"),
+	surfaceHover:    ui.RGBA(0, 0, 0, 0.04),
+	surfacePressed:  ui.RGBA(0, 0, 0, 0.08),
+	text:            ui.Hex("#1d1d1f"),
+	textMuted:       ui.RGBA(60, 60, 67, 0.62),
+	border:          ui.RGBA(0, 0, 0, 0.07),
+	accent:          ui.Oklch(0.6, 0.21, 24),
+	accentHover:     ui.Oklch(0.55, 0.21, 24),
+	accentPressed:   ui.Oklch(0.5, 0.21, 24),
+	accentText:      ui.Hex("#ffffff"),
+	selected:        ui.RGBA(0, 0, 0, 0.08),
+	danger:          ui.Hex("#c0392b"),
+	favorite:        ui.Hex("#d94f68"),
+	placeholder:     ui.Hex("#e9e9ed"),
+	placeholderText: ui.Hex("#8a8a91"),
+	rating:          ui.Oklch(0.6, 0.21, 24),
+	ratingText:      ui.Hex("#ffffff"),
 }
 
 func movieTheme() *ui.Theme {
-	t := ui.DarkTheme()
+	t := ui.LightTheme()
 	t.Background = movieColors.background
 	t.Surface = movieColors.surface
 	t.SurfaceHover = movieColors.surfaceHover
