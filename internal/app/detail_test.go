@@ -1,7 +1,10 @@
 package app
 
 import (
+	"container/list"
 	"fmt"
+	"image"
+	"image/color"
 	"image/png"
 	"math"
 	"os"
@@ -11,6 +14,37 @@ import (
 
 	"github.com/egoist/mygo/ui"
 )
+
+func TestSecondaryPageUsesCachedArtworkTint(t *testing.T) {
+	server := NewServer("https://synthetic.invalid", "")
+	artwork := image.NewRGBA(image.Rect(0, 0, 1280, 720))
+	for y := range 720 {
+		for x := range 1280 {
+			artwork.SetRGBA(x, y, color.RGBA{R: 24, G: 128, B: 210, A: 255})
+		}
+	}
+	tint := ui.RGB(24, 128, 210)
+	posters := &PosterLoader{entries: map[posterKey]*list.Element{}, lru: list.New(), maxBytes: posterCacheBudget}
+	url := server.imageURL("/backdrop.jpg")
+	posters.putTintLocked(posterKey{URL: url, Width: 1280, Height: 720}, ui.NewBitmap(artwork), 1280*720*4, tint)
+	item := MediaItem{ID: "movie", Title: "沉浸式详情", Kind: "movie", Backdrop: "/backdrop.jpg"}
+	a := &appState{server: server, posters: posters, displayScale: 1, selected: &item, catalogs: map[string]*CatalogState{}}
+
+	bitmap, gotTint := a.imageForURLWithTint("/backdrop.jpg", 1280, 720)
+	if bitmap == nil || gotTint.R != tint.R || gotTint.G != tint.G || gotTint.B != tint.B {
+		t.Fatalf("detail backdrop = %v, tint=%+v; want cached artwork tint %+v", bitmap != nil, gotTint, tint)
+	}
+	theme := immersiveDetailTheme(gotTint)
+	wantAccent := tint.Mix(ui.RGB(255, 255, 255), 0.28)
+	if theme.Accent.R != wantAccent.R || theme.Accent.G != wantAccent.G || theme.Accent.B != wantAccent.B {
+		t.Fatalf("theme accent = %+v, want artwork accent %+v", theme.Accent, wantAccent)
+	}
+	tester := ui.NewTester(a.view, 1280, 800)
+	if !tester.HasText("沉浸式详情") || !tester.HasText("电影详情") || tester.HasText("首页") {
+		t.Fatal("detail page should fill the window and retain its navigation")
+	}
+	saveDetailPreview(t, tester, "immersive-artwork")
+}
 
 func TestSidebarAlignment(t *testing.T) {
 	app := &appState{
@@ -90,11 +124,16 @@ func TestMovieDetailViewLayout(t *testing.T) {
 		t.Fatalf("Movie cast not visible: ok=%v, rect=%+v", okActor, rectActor)
 	}
 
+	saveDetailPreview(t, tester, "movie")
 	rectSource, okSource := tester.Find("4K 原画")
-	if !okSource || rectSource.W <= 0 || rectSource.H <= 0 {
+	if !okSource {
 		t.Fatalf("Movie source version not visible: ok=%v, rect=%+v", okSource, rectSource)
 	}
-	saveDetailPreview(t, tester, "movie")
+	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tester.Scroll(1000, 700, 0, 400)
+	if rectSource, okSource = tester.Find("4K 原画"); !okSource || rectSource.W <= 0 || rectSource.H <= 0 {
+		t.Fatalf("Movie source version not reachable: ok=%v, rect=%+v", okSource, rectSource)
+	}
 }
 
 func TestMovieDetailKeepsSlotsStableForLongSynopsis(t *testing.T) {
@@ -111,18 +150,18 @@ func TestMovieDetailKeepsSlotsStableForLongSynopsis(t *testing.T) {
 			t.Fatal("detail title missing")
 		}
 		poster, _ := tester.Find("影片海报")
-		if math.Abs(float64(title.Y-poster.Y)) > 3 || title.X <= poster.X+poster.W || title.H != 72 {
-			t.Fatalf("title must align with poster top in the information column: title=%+v poster=%+v", title, poster)
+		if title.X <= poster.X+poster.W || title.H != 88 {
+			t.Fatalf("title should sit in the information column beside the poster: title=%+v poster=%+v", title, poster)
 		}
-		if synopsis, ok := tester.Find("影片简介"); !ok || synopsis.H < 154 {
-			t.Fatalf("synopsis must reserve more complete lines: %+v, found=%v", synopsis, ok)
+		if synopsis, ok := tester.Find("影片简介"); !ok || synopsis.H < 100 {
+			t.Fatalf("synopsis must reserve complete lines: %+v, found=%v", synopsis, ok)
 		}
 		if long {
 			preview, ok := tester.Find(item.Overview)
-			if title.Y != titleY || !ok || preview.H < 132 || math.Mod(float64(preview.H), 22) != 0 {
+			if title.Y != titleY || !ok || preview.H < 75 || math.Mod(float64(preview.H), 25) != 0 {
 				t.Fatalf("preview must show whole lines without moving slots: title=%+v preview=%+v", title, preview)
 			}
-			tester.Click("展开简介")
+			tester.Click("展开全部简介")
 			if !a.detailSynopsisOpen || a.detailSynopsisScroll.MaxY <= 0 {
 				t.Fatalf("full synopsis must remain readable: open=%v scroll=%+v", a.detailSynopsisOpen, a.detailSynopsisScroll)
 			}
@@ -141,7 +180,7 @@ func TestMovieDetailKeepsSlotsStableForLongSynopsis(t *testing.T) {
 
 func TestMovieAndSeriesShareDetailAnchors(t *testing.T) {
 	for _, size := range [][2]int{{960, 640}, {1280, 800}, {1920, 1080}} {
-		var moviePlay, movieCast ui.Rect
+		var moviePlay ui.Rect
 		for _, series := range []bool{false, true} {
 			item := MediaItem{ID: "anchors", Title: "统一详情布局", Kind: "movie", Overview: "短简介"}
 			item.Year = "2024"
@@ -159,7 +198,7 @@ func TestMovieAndSeriesShareDetailAnchors(t *testing.T) {
 				playLabel = "▶  播放本季首集"
 			}
 			play, playOK := tester.Find(playLabel)
-			cast, castOK := tester.Find("演职人员")
+			_, castOK := tester.Find("演职人员")
 			if !playOK || !castOK {
 				t.Fatal("missing anchored controls")
 			}
@@ -169,13 +208,13 @@ func TestMovieAndSeriesShareDetailAnchors(t *testing.T) {
 			if !posterOK || !titleOK || play.Y < poster.Y+poster.H {
 				t.Fatalf("actions must be below the poster: poster=%+v play=%+v", poster, play)
 			}
-			if !titleOK || !creditsOK || math.Abs(float64(title.Y-poster.Y)) > 3 || math.Abs(float64(credits.Y+credits.H-poster.Y-poster.H)) > 3 {
-				t.Fatalf("information must align to poster edges: title=%+v credits=%+v poster=%+v", title, credits, poster)
+			if !titleOK || !creditsOK || title.X <= poster.X+poster.W || credits.X <= poster.X+poster.W {
+				t.Fatalf("information should occupy a spacious column beside the poster: title=%+v credits=%+v poster=%+v", title, credits, poster)
 			}
 			if !series {
-				moviePlay, movieCast = play, cast
-			} else if play.X+play.W/2 != moviePlay.X+moviePlay.W/2 || play.Y != moviePlay.Y || cast.X != movieCast.X || math.Abs(float64(cast.Y-movieCast.Y)) > 3 {
-				t.Fatalf("%v anchors differ: movie=%+v/%+v series=%+v/%+v", size, moviePlay, movieCast, play, cast)
+				moviePlay = play
+			} else if play.X+play.W/2 != moviePlay.X+moviePlay.W/2 || play.Y != moviePlay.Y {
+				t.Fatalf("%v poster actions differ: movie=%+v series=%+v", size, moviePlay, play)
 			}
 		}
 	}
@@ -222,6 +261,9 @@ func TestSeriesDetailViewLayout(t *testing.T) {
 		t.Fatalf("Series play button not visible: ok=%v, rect=%+v", okPlay, rectPlay)
 	}
 
+	saveDetailPreview(t, tester, "series")
+	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tester.Scroll(900, 700, 0, 500)
 	rectSeason, okSeason := tester.Find("第 1 季")
 	if !okSeason || rectSeason.W <= 0 || rectSeason.H <= 0 {
 		t.Fatalf("Series season button not visible: ok=%v, rect=%+v", okSeason, rectSeason)
@@ -231,10 +273,7 @@ func TestSeriesDetailViewLayout(t *testing.T) {
 	if !okCast || rectCast.W <= 0 || rectCast.H <= 0 {
 		t.Fatalf("Cast not visible: ok=%v, rect=%+v", okCast, rectCast)
 	}
-	saveDetailPreview(t, tester, "series")
-	// The poster-aligned information block may put episodes below the fold.
-	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
-	tester.Scroll(800, 600, 0, 180)
+	tester.Scroll(900, 700, 0, 400)
 	rectEp1, okEp1 := tester.Find("这是一个美好的日子")
 	if !okEp1 || rectEp1.W <= 0 || rectEp1.H <= 0 {
 		t.Fatalf("Episode 1 not reachable: ok=%v, rect=%+v", okEp1, rectEp1)
@@ -454,6 +493,24 @@ func TestPersonViewLayoutAndNavigation(t *testing.T) {
 	}
 }
 
+func TestPersonImmersiveLayoutAtMinimumWindow(t *testing.T) {
+	person := CastMember{ID: "p-minimum", Name: "最小窗口演员", Job: "演员"}
+	a := &appState{
+		selectedPerson: &person,
+		personItems:    []MediaItem{{ID: "work", Title: "代表作品", Year: "2025"}},
+		catalogs:       map[string]*CatalogState{},
+	}
+	tester := ui.NewTester(a.view, 960, 640)
+	portrait, portraitOK := tester.Find("演员头像")
+	work, workOK := tester.Find("代表作品")
+	if !portraitOK || portrait.W <= 0 || portrait.H <= 0 || !workOK || work.W <= 0 || work.H <= 0 {
+		t.Fatalf("actor identity and works should fit the minimum window: portrait=%+v works=%+v", portrait, work)
+	}
+	if tester.HasText("首页") || !tester.HasText("演职人员") {
+		t.Fatal("minimum-size actor page should remain immersive")
+	}
+}
+
 func saveDetailPreview(t *testing.T, tester *ui.Tester, name string) {
 	t.Helper()
 	if os.Getenv("FNMOVIE_UI_PREVIEW") != "1" {
@@ -511,8 +568,8 @@ func TestFavoritePersonNavigationAndSectionSwitch(t *testing.T) {
 		t.Fatal("favorite actor must expose an unfavorite button")
 	}
 	name, ok := tester.Find("新垣结衣")
-	if !ok || button.X >= name.X {
-		t.Fatalf("favorite button should sit left of the actor name: button=%+v name=%+v", button, name)
+	if !ok || button.X <= name.X+name.W {
+		t.Fatalf("favorite button should follow the actor name: button=%+v name=%+v", button, name)
 	}
 	app.updateFavoriteProjection(personItem.ID, false)
 	tester.Frame()

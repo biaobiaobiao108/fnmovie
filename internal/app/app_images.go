@@ -70,3 +70,23 @@ func (a *appState) imageForURL(remoteURL string, width, height int) *ui.Bitmap {
 		}
 	})
 }
+
+func (a *appState) imageForURLWithTint(remoteURL string, width, height int) (*ui.Bitmap, ui.Color) {
+	bitmap := a.imageForURL(remoteURL, width, height)
+	if a.server == nil || a.posters == nil || strings.TrimSpace(remoteURL) == "" {
+		return bitmap, movieColors.accent
+	}
+	scale := a.displayScale
+	if scale <= 0 {
+		scale = 1
+		if a.window != nil {
+			scale = windowScale(a.window.NativeHandle())
+		}
+	}
+	pixelWidth := max(1, int(math.Ceil(float64(width)*scale)))
+	pixelHeight := max(1, int(math.Ceil(float64(height)*scale)))
+	if tint, ok := a.posters.Tint(a.server.imageURL(remoteURL), pixelWidth, pixelHeight); ok {
+		return bitmap, tint
+	}
+	return bitmap, movieColors.accent
+}

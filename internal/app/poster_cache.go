@@ -11,6 +11,7 @@ import (
 	_ "image/jpeg"
 	_ "image/png"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -37,6 +38,7 @@ type posterKey struct {
 type posterEntry struct {
 	key    posterKey
 	bitmap *ui.Bitmap
+	tint   ui.Color
 	bytes  int64
 }
 
@@ -146,6 +148,22 @@ func (p *PosterLoader) Cached(remoteURL string, width, height int) *ui.Bitmap {
 	return nil
 }
 
+func (p *PosterLoader) Tint(remoteURL string, width, height int) (ui.Color, bool) {
+	if p == nil {
+		return ui.Color{}, false
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.paused {
+		return ui.Color{}, false
+	}
+	if element := p.entries[posterKey{URL: remoteURL, Width: width, Height: height}]; element != nil {
+		p.lru.MoveToFront(element)
+		return element.Value.(*posterEntry).tint, true
+	}
+	return ui.Color{}, false
+}
+
 func (p *PosterLoader) worker() {
 	for request := range p.queue {
 		p.mu.Lock()
@@ -157,7 +175,7 @@ func (p *PosterLoader) worker() {
 			}
 			continue
 		}
-		bitmap, size, err := p.loadPoster(request)
+		bitmap, size, tint, err := p.loadPosterWithTint(request)
 		if request.cancel != nil {
 			request.cancel()
 		}
@@ -178,7 +196,7 @@ func (p *PosterLoader) worker() {
 			p.failed[request.key] = time.Now().Add(5 * time.Second)
 		} else {
 			delete(p.failed, request.key)
-			p.putLocked(request.key, bitmap, size)
+			p.putTintLocked(request.key, bitmap, size, tint)
 		}
 		p.mu.Unlock()
 		if err != nil {
@@ -270,41 +288,46 @@ func (p *PosterLoader) Close() {
 }
 
 func (p *PosterLoader) loadPoster(request posterRequest) (*ui.Bitmap, int64, error) {
+	bitmap, size, _, err := p.loadPosterWithTint(request)
+	return bitmap, size, err
+}
+
+func (p *PosterLoader) loadPosterWithTint(request posterRequest) (*ui.Bitmap, int64, ui.Color, error) {
 	ctx := request.ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, 0, err
+		return nil, 0, ui.Color{}, err
 	}
 	if p.diskDir == "" {
-		return loadPosterContext(ctx, request.server, request.url, request.key.Width, request.key.Height)
+		return loadPosterWithTintContext(ctx, request.server, request.url, request.key.Width, request.key.Height)
 	}
 	path := posterSourcePath(p.diskDir, request.url)
 	if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) < 30*24*time.Hour {
 		if data, err := os.ReadFile(path); err == nil {
-			if bitmap, size, decodeErr := decodePoster(data, request.key.Width, request.key.Height); decodeErr == nil {
+			if bitmap, size, tint, decodeErr := decodePosterWithTint(data, request.key.Width, request.key.Height); decodeErr == nil {
 				_ = os.Chtimes(path, time.Now(), time.Now())
-				return bitmap, size, nil
+				return bitmap, size, tint, nil
 			}
 		}
 	}
 	data, err := request.server.FetchImageContext(ctx, request.url)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, ui.Color{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, 0, err
+		return nil, 0, ui.Color{}, err
 	}
-	bitmap, size, err := decodePoster(data, request.key.Width, request.key.Height)
+	bitmap, size, tint, err := decodePosterWithTint(data, request.key.Width, request.key.Height)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, ui.Color{}, err
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, 0, err
+		return nil, 0, ui.Color{}, err
 	}
 	p.cachePosterSource(path, data)
-	return bitmap, size, nil
+	return bitmap, size, tint, nil
 }
 
 func posterSourcePath(dir, remoteURL string) string {
@@ -405,6 +428,10 @@ func (p *PosterLoader) prunePosterDiskLocked(reserved int64) bool {
 }
 
 func (p *PosterLoader) putLocked(key posterKey, bitmap *ui.Bitmap, size int64) {
+	p.putTintLocked(key, bitmap, size, movieColors.accent)
+}
+
+func (p *PosterLoader) putTintLocked(key posterKey, bitmap *ui.Bitmap, size int64, tint ui.Color) {
 	if old := p.entries[key]; old != nil {
 		p.used -= old.Value.(*posterEntry).bytes
 		p.lru.Remove(old)
@@ -413,7 +440,7 @@ func (p *PosterLoader) putLocked(key posterKey, bitmap *ui.Bitmap, size int64) {
 	if size > p.maxBytes {
 		return
 	}
-	entry := &posterEntry{key: key, bitmap: bitmap, bytes: size}
+	entry := &posterEntry{key: key, bitmap: bitmap, tint: tint, bytes: size}
 	p.entries[key] = p.lru.PushFront(entry)
 	p.used += size
 	for p.used > p.maxBytes {
@@ -472,21 +499,34 @@ func loadPosterContext(ctx context.Context, server *Server, remoteURL string, ma
 	return decodePoster(data, maxWidth, maxHeight)
 }
 
+func loadPosterWithTintContext(ctx context.Context, server *Server, remoteURL string, maxWidth, maxHeight int) (*ui.Bitmap, int64, ui.Color, error) {
+	data, err := server.FetchImageContext(ctx, remoteURL)
+	if err != nil {
+		return nil, 0, ui.Color{}, err
+	}
+	return decodePosterWithTint(data, maxWidth, maxHeight)
+}
+
 func decodePoster(data []byte, maxWidth, maxHeight int) (*ui.Bitmap, int64, error) {
+	bitmap, size, _, err := decodePosterWithTint(data, maxWidth, maxHeight)
+	return bitmap, size, err
+}
+
+func decodePosterWithTint(data []byte, maxWidth, maxHeight int) (*ui.Bitmap, int64, ui.Color, error) {
 	config, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, ui.Color{}, err
 	}
 	if config.Width <= 0 || config.Height <= 0 || int64(config.Width)*int64(config.Height) > 12_000_000 {
-		return nil, 0, errInvalidPosterDimensions
+		return nil, 0, ui.Color{}, errInvalidPosterDimensions
 	}
 	source, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, ui.Color{}, err
 	}
 	imageSize := fitPosterSize(source.Bounds().Size(), image.Pt(maxWidth, maxHeight))
 	if imageSize.X <= 0 || imageSize.Y <= 0 {
-		return nil, 0, errInvalidPosterDimensions
+		return nil, 0, ui.Color{}, errInvalidPosterDimensions
 	}
 	var resized image.Image = source
 	if imageSize != source.Bounds().Size() {
@@ -501,7 +541,64 @@ func decodePoster(data []byte, maxWidth, maxHeight int) (*ui.Bitmap, int64, erro
 	bitmap := ui.NewBitmap(resized)
 	// Account for the RGBA source plus the bitmap's lazily generated mip levels.
 	bytes := int64(imageSize.X) * int64(imageSize.Y) * 4 * 4 / 3
-	return bitmap, bytes, nil
+	return bitmap, bytes, dominantPosterTint(resized), nil
+}
+
+func dominantPosterTint(img image.Image) ui.Color {
+	bounds := img.Bounds()
+	stepX, stepY := max(1, bounds.Dx()/24), max(1, bounds.Dy()/24)
+	const buckets = 18
+	var weight [buckets]float64
+	var sum [buckets][3]float64
+	for y := bounds.Min.Y; y < bounds.Max.Y; y += stepY {
+		for x := bounds.Min.X; x < bounds.Max.X; x += stepX {
+			rawR, rawG, rawB, _ := img.At(x, y).RGBA()
+			r, g, b := float64(rawR>>8)/255, float64(rawG>>8)/255, float64(rawB>>8)/255
+			h, saturation, value := posterHSV(r, g, b)
+			if saturation < 0.15 || value < 0.15 {
+				continue
+			}
+			bucket := int(h/360*buckets) % buckets
+			w := saturation * saturation * value
+			weight[bucket] += w
+			sum[bucket][0], sum[bucket][1], sum[bucket][2] = sum[bucket][0]+r*w, sum[bucket][1]+g*w, sum[bucket][2]+b*w
+		}
+	}
+	best := 0
+	for i := 1; i < buckets; i++ {
+		if weight[i] > weight[best] {
+			best = i
+		}
+	}
+	if weight[best] < 2 {
+		return movieColors.accent
+	}
+	w := weight[best]
+	return ui.RGB(uint8(sum[best][0]/w*255), uint8(sum[best][1]/w*255), uint8(sum[best][2]/w*255))
+}
+
+func posterHSV(r, g, b float64) (h, saturation, value float64) {
+	maxValue, minValue := math.Max(r, math.Max(g, b)), math.Min(r, math.Min(g, b))
+	value = maxValue
+	if maxValue == 0 {
+		return 0, 0, 0
+	}
+	saturation = (maxValue - minValue) / maxValue
+	delta := maxValue - minValue
+	switch {
+	case delta == 0:
+		h = 0
+	case maxValue == r:
+		h = math.Mod((g-b)/delta, 6) * 60
+	case maxValue == g:
+		h = ((b-r)/delta + 2) * 60
+	default:
+		h = ((r-g)/delta + 4) * 60
+	}
+	if h < 0 {
+		h += 360
+	}
+	return h, saturation, value
 }
 
 const posterDiskCacheBudget = int64(512 << 20)

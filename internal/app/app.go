@@ -111,6 +111,11 @@ func (a *appState) view(c *ui.Context) {
 		a.playerView(c)
 		return
 	}
+	if a.selectedPerson != nil || a.selected != nil {
+		a.secondaryPage(c)
+		a.detailSynopsisDialog(c)
+		return
+	}
 	t := c.Theme()
 	titleBar := c.TitleBar()
 	ui.Row(c).Fill().Background(t.Background).Children(func() {
@@ -118,10 +123,6 @@ func (a *appState) view(c *ui.Context) {
 		ui.Column(c).Grow(1).FillHeight().Padding(movieTitleBarHeight, movieMainHorizontalInset, 12, movieMainHorizontalInset).Children(func() {
 			ui.Column(c.Key(a.navigationKey())).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
 				switch {
-				case a.selectedPerson != nil:
-					a.personView(c, *a.selectedPerson)
-				case a.selected != nil:
-					a.detailView(c, *a.selected)
 				case strings.TrimSpace(a.query) != "":
 					a.libraryView(c)
 				case a.section == "home":
@@ -184,23 +185,12 @@ func detailPlayButton(c *ui.Context, label string) ui.Element {
 
 func detailViewportHeight(c *ui.Context) float32 {
 	_, height := c.Size()
-	// Window-button inset, outer padding and back navigation row.
-	return max(float32(240), height-118)
-}
-
-func detailContentInset(c *ui.Context) float32 {
-	_, height := detailPosterSize(c)
-	return max(float32(0), (detailViewportHeight(c)-54-float32(height))/2)
+	return max(float32(280), height-float32(movieTitleBarHeight+58))
 }
 
 func detailSynopsisLines(c *ui.Context) int {
-	_, height := detailPosterSize(c)
-	return max(1, min(8, (height-366)/22))
-}
-
-func detailCastGap(c *ui.Context) float32 {
-	_, height := detailPosterSize(c)
-	return max(float32(0), float32(height)-150-float32(detailSynopsisLines(c)*22)-200)
+	width, _ := c.Size()
+	return min(5, max(2, int(width/400)))
 }
 
 func episodeOverview(episode MediaItem) string {

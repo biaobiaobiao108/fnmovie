@@ -19,6 +19,41 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+func TestPosterTintFollowsArtworkAndStaysWithCachedBitmap(t *testing.T) {
+	artwork := image.NewRGBA(image.Rect(0, 0, 24, 24))
+	for y := 0; y < 24; y++ {
+		for x := 0; x < 24; x++ {
+			artwork.SetRGBA(x, y, color.RGBA{R: 75, G: 75, B: 75, A: 255})
+		}
+	}
+	for y := 6; y < 18; y++ {
+		for x := 6; x < 18; x++ {
+			artwork.SetRGBA(x, y, color.RGBA{R: 18, G: 165, B: 218, A: 255})
+		}
+	}
+	tint := dominantPosterTint(artwork)
+	if tint.B <= tint.R || tint.G <= tint.R {
+		t.Fatalf("dominant tint = %+v, want the artwork's vivid blue tone", tint)
+	}
+	neutral := image.NewRGBA(image.Rect(0, 0, 24, 24))
+	for y := 0; y < 24; y++ {
+		for x := 0; x < 24; x++ {
+			neutral.SetRGBA(x, y, color.RGBA{R: 90, G: 90, B: 90, A: 255})
+		}
+	}
+	if got := dominantPosterTint(neutral); got.R != movieColors.accent.R || got.G != movieColors.accent.G || got.B != movieColors.accent.B {
+		t.Fatalf("neutral artwork tint = %+v, want brand fallback %+v", got, movieColors.accent)
+	}
+
+	loader := &PosterLoader{entries: map[posterKey]*list.Element{}, lru: list.New(), maxBytes: posterCacheBudget}
+	key := posterKey{URL: "artwork", Width: 24, Height: 24}
+	loader.putTintLocked(key, ui.NewBitmap(artwork), 24*24*4, tint)
+	got, ok := loader.Tint(key.URL, key.Width, key.Height)
+	if !ok || got.R != tint.R || got.G != tint.G || got.B != tint.B {
+		t.Fatalf("cached tint = %+v, found=%v; want %+v", got, ok, tint)
+	}
+}
+
 func TestPlaybackDropsPostersAndRejectsObsoleteDecode(t *testing.T) {
 	var data bytes.Buffer
 	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 20, 30))); err != nil {

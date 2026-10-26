@@ -76,7 +76,7 @@ func TestGlobalSearchUIFromHomeAndMovies(t *testing.T) {
 	}
 }
 
-func TestGlobalSearchInputLeavesDetails(t *testing.T) {
+func TestImmersiveDetailsReturnToGlobalSearch(t *testing.T) {
 	for _, person := range []bool{false, true} {
 		a := &appState{section: "library", libraryID: "selected", loggedIn: true,
 			catalogs: map[string]*CatalogState{}}
@@ -86,9 +86,17 @@ func TestGlobalSearchInputLeavesDetails(t *testing.T) {
 			a.selected = &MediaItem{ID: "movie", Title: "影片详情", Kind: "movie"}
 		}
 		tester := ui.NewTester(a.view, 1280, 800)
+		if tester.HasText("全局搜索") || tester.HasText("首页") {
+			t.Fatal("immersive detail should cover the sidebar")
+		}
+		back := "返回影视库"
+		if person {
+			back = "返回"
+		}
+		tester.Click(back)
 		input, ok := tester.Find("全局搜索")
 		if !ok {
-			t.Fatal("detail page missing global search input")
+			t.Fatal("sidebar search should be available after returning from detail")
 		}
 		if input.X+input.W > float32(movieSidebarWidth) {
 			t.Fatalf("global search input is not in the sidebar: %+v", input)

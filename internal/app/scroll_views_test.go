@@ -28,8 +28,12 @@ func TestSidebarVirtualizesAndKeepsItsPlaceAcrossPageChanges(t *testing.T) {
 	}
 	a.selected = &MediaItem{ID: "movie", Title: "影片详情"}
 	tester.Frame()
+	if tester.HasText("库条目-700") || tester.HasText("首页") {
+		t.Fatal("immersive detail should temporarily cover the sidebar")
+	}
+	tester.Click("返回影视库")
 	if !tester.HasText("库条目-700") {
-		t.Fatal("opening detail reset the sidebar position")
+		t.Fatal("returning from detail should restore the sidebar position")
 	}
 	assertBoundedRows(t, tester, "库条目-")
 }
