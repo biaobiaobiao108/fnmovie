@@ -7,7 +7,6 @@ import (
 )
 
 func (a *appState) secondaryPage(c *ui.Context) {
-	key := a.navigationKey()
 	var backdropURL string
 	if a.selectedPerson != nil {
 		backdropURL = a.selectedPerson.Profile
@@ -48,8 +47,7 @@ func (a *appState) secondaryPage(c *ui.Context) {
 				Angle: 0,
 			}, 0)
 		})
-		ui.Column(c.Key("secondary-content:" + key)).Absolute().Top(0).Left(0).Right(0).Bottom(0).
-			Transition(pageTransition()).Children(func() {
+		ui.Column(c.Key("secondary-content")).Absolute().Top(0).Left(0).Right(0).Bottom(0).Children(func() {
 			a.secondaryHeader(c)
 			if a.selectedPerson != nil {
 				a.personView(c, *a.selectedPerson)

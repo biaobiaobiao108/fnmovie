@@ -116,11 +116,32 @@ func (a *appState) view(c *ui.Context) {
 		a.playerView(c)
 		return
 	}
-	if a.selectedPerson != nil || a.selected != nil {
-		a.secondaryPage(c)
-		a.detailSynopsisDialog(c)
-		return
+	secondary := a.selectedPerson != nil || a.selected != nil
+	host := ui.Box(c.Key("navigation-host")).Fill()
+	if secondary {
+		host.Background(c.Theme().Background)
 	}
+	host.Children(func() {
+		key := "main-shell"
+		if secondary {
+			key = a.navigationKey()
+		}
+		ui.Box(c.Key(key)).Fill().Transition(pageTransition()).Children(func() {
+			if secondary {
+				a.secondaryPage(c)
+			} else {
+				a.primaryPage(c)
+			}
+		})
+	})
+	if !secondary {
+		a.loginModal(c)
+		a.syncHomeCarousel()
+	}
+	a.detailSynopsisDialog(c)
+}
+
+func (a *appState) primaryPage(c *ui.Context) {
 	t := c.Theme()
 	titleBar := c.TitleBar()
 	titleHeight := titleBar.Height
@@ -159,9 +180,6 @@ func (a *appState) view(c *ui.Context) {
 		ui.Box(c.Key("window-drag-region")).Absolute().Top(0).Left(movieSidebarWidth).
 			Right(titleBar.Right).Height(titleHeight).DragWindow()
 	})
-	a.loginModal(c)
-	a.detailSynopsisDialog(c)
-	a.syncHomeCarousel()
 }
 
 func (a *appState) contentUnderTitleBar(titleHeight float32) bool {
