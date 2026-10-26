@@ -133,9 +133,8 @@ func (a *appState) view(c *ui.Context) {
 	}
 	ui.Row(c).Fill().Background(background).Children(func() {
 		a.sidebar(c)
-		main := ui.Box(c.Key("main-content")).Grow(1).FillHeight().MinWidth(0)
+		main := ui.Box(c.Key("main-content")).Grow(1).FillHeight().MinWidth(0).Background(t.Background)
 		main.Children(func() {
-			ui.Box(c).Absolute().Top(titleHeight).Left(0).Right(0).Bottom(0).Background(t.Background).PassThrough()
 			ui.Column(c).Grow(1).FillHeight().Padding(0, movieMainHorizontalInset, 12, movieMainHorizontalInset).Children(func() {
 				ui.Column(c.Key(a.navigationKey())).Grow(1).FillHeight().Transition(pageTransition()).Children(func() {
 					switch {
