@@ -89,7 +89,6 @@ func (a *appState) detailView(c *ui.Context, item MediaItem) {
 			})
 		})
 		bindSmoothScroll(scroll, &a.detailScroll)
-		bindScrollEdgeFades(scroll, &a.detailScroll, t.Background)
 	})
 }
 
@@ -220,7 +219,6 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 			}
 		}).Grow(1).MinWidth(0).AlignSelf(ui.Stretch).FillHeight().Gap(6).Padding(10, 6, 34, 6)
 		bindSmoothScroll(list, &a.detailScroll)
-		bindScrollEdgeFades(list, &a.detailScroll, t.Background)
 	})
 }
 
@@ -561,7 +559,6 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 					}
 				}).Grow(1)
 				bindSmoothScroll(grid, &a.personScroll)
-				bindScrollEdgeFades(grid, &a.personScroll, t.Background)
 			}
 		})
 	})
