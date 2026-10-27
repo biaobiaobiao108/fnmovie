@@ -44,7 +44,7 @@ jobs:
           }
 
           $releaseDir = Join-Path $PWD 'out\fnmovie-20261007\windows-amd64'
-          $installer = Join-Path $releaseDir "哞哩影院 Setup $($config.version) amd64.exe"
+          $installer = Join-Path $releaseDir "mou-li-ying-yuan-setup-$($config.version)-amd64.exe"
           if (-not (Test-Path -LiteralPath $installer)) {
             throw "MyGo did not produce the expected Windows installer: $installer"
           }
@@ -68,7 +68,7 @@ jobs:
         with:
           name: 哞哩影院-windows-amd64
           path: |
-            out/fnmovie-20261007/windows-amd64/哞哩影院 Setup *.exe
+            out/fnmovie-20261007/windows-amd64/mou-li-ying-yuan-setup-*-amd64.exe
             out/fnmovie-20261007/windows-amd64/哞哩影院-*-windows-amd64-portable.zip
           if-no-files-found: error
           retention-days: 1
