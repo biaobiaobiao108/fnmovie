@@ -541,8 +541,8 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 	if err := waitForBounds(); err != nil {
 		return err
 	}
-	if !hasCaptionButtonCutout(video, main) || !hasCaptionButtonCutout(a.playerHeaderWindow.NativeHandle(), main) {
-		return fmt.Errorf("video or header popup covers MyGo's titlebar buttons")
+	if hasCaptionButtonCutout(video, main) || hasCaptionButtonCutout(a.playerHeaderWindow.NativeHandle(), main) {
+		return fmt.Errorf("video or header popup cuts a hole under the player caption controls")
 	}
 	client := clientScreenRect(main)
 	scale := windowScale(main)
@@ -551,8 +551,9 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 	hit, _, _ := user.NewProc("WindowFromPoint").Call(pointValue)
 	var className [64]uint16
 	length, _, _ := user.NewProc("GetClassNameW").Call(hit, uintptr(unsafe.Pointer(&className[0])), uintptr(len(className)))
-	if syscall.UTF16ToString(className[:length]) != "MyGoCaption" {
-		return fmt.Errorf("native window close button is covered: hit=%x class=%q", hit, syscall.UTF16ToString(className[:length]))
+	captionRoot, _, _ := user.NewProc("GetAncestor").Call(hit, 2) // GA_ROOT
+	if captionRoot != a.playerHeaderWindow.NativeHandle() {
+		return fmt.Errorf("player caption buttons are not above video: hit=%x class=%q root=%x header=%x", hit, syscall.UTF16ToString(className[:length]), captionRoot, a.playerHeaderWindow.NativeHandle())
 	}
 
 	// Move and resize the owner and wait for the popup to match its client area.
@@ -640,6 +641,15 @@ func checkNativeVideoFrames(a *appState, onUI func(func()), duration time.Durati
 					frameErr = fmt.Errorf("video frame %d flashed at offset %d: RGB(%d,%d,%d)", frame, offset, r, g, b)
 					return
 				}
+			}
+			// The caption controls sit over the video without punching a black
+			// hole in the top-right corner.
+			captionX := bounds.X + bounds.Width - 130
+			captionY := bounds.Y + movieTitleBarHeight/2
+			color, _, _ := getPixel.Call(dc, uintptr(float64(captionX)*scale), uintptr(float64(captionY)*scale))
+			r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
+			if absInt(r-24) > 12 || absInt(g-80) > 12 || absInt(b-164) > 12 {
+				frameErr = fmt.Errorf("video frame %d missing beneath caption controls: RGB(%d,%d,%d)", frame, r, g, b)
 			}
 		})
 		if frameErr != nil {
@@ -772,7 +782,7 @@ func nativeTestAVI() []byte {
 		}
 		return b
 	}
-	const width, height, frameSize, frames = 160, 90, 160 * 90 * 3, 100
+	const width, height, frameSize, frames = 160, 104, 160 * 104 * 3, 100
 	header := chunk("avih", words(200000, frameSize*5, 0, 0, frames, 0, 1, frameSize, width, height, 0, 0, 0, 0))
 	stream := append([]byte("vidsDIB "), words(0, 0, 0, 1, 5, 0, frames, frameSize, 0xffffffff, 0)...)
 	stream = append(stream, words(0, width|height<<16)...)

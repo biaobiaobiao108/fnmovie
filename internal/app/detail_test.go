@@ -437,6 +437,14 @@ func TestPlayerOverlayViews(t *testing.T) {
 	if _, ok := headerTester.Find("返回影片库"); !ok {
 		t.Fatalf("player header back button missing")
 	}
+	minimize, hasMinimize := headerTester.Find("最小化窗口")
+	maximize, hasMaximize := headerTester.Find("最大化窗口")
+	closeButton, hasClose := headerTester.Find("关闭窗口")
+	if !hasMinimize || !hasMaximize || !hasClose || minimize.W != 46 || minimize.H != 46 ||
+		maximize.W != 46 || closeButton.W != 46 || minimize.X+minimize.W != maximize.X ||
+		maximize.X+maximize.W != closeButton.X || closeButton.X+closeButton.W != 1280 {
+		t.Fatalf("player caption controls should fill the top-right button area: minimize=%+v maximize=%+v close=%+v", minimize, maximize, closeButton)
+	}
 	if _, ok := headerTester.Find("流浪地球 2"); !ok {
 		t.Fatal("player header should show the current title")
 	}

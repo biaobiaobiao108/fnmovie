@@ -205,10 +205,11 @@ func (p *Player) HideSurface() {
 	hidePlayerSurface(p.surface)
 }
 
-func (p *Player) SetWindowButtonsVisible(visible bool, owner uintptr) {
+// SetCaptionButtonCutout leaves room for native titlebar controls above the video surface.
+func (p *Player) SetCaptionButtonCutout(enabled bool, owner uintptr) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	setPlayerWindowButtonsCutout(p.surface, owner, visible)
+	setPlayerWindowButtonsCutout(p.surface, owner, enabled)
 }
 
 func (p *Player) ReleaseSurface() {

@@ -32,6 +32,10 @@ var playerOverlayIcons = map[string]*ui.SVG{
 	"muted":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="m16 9 6 6m0-6-6 6"/></svg>`)),
 	"fullscreen":      ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>`)),
 	"window":          ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M10 14L3 21"/><path d="M14 10l7-7"/></svg>`)),
+	"minimize":        ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M6 12h12"/></svg>`)),
+	"maximize":        ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="6.5" y="6.5" width="11" height="11" rx="0.8"/></svg>`)),
+	"restore":         ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M9 8V6.5c0-.6.4-1 1-1h7.5c.6 0 1 .4 1 1V14c0 .6-.4 1-1 1H16"/><rect x="5.5" y="8.5" width="10.5" height="10" rx="0.8"/></svg>`)),
+	"close":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="m7 7 10 10M17 7 7 17"/></svg>`)),
 	"seek-back-10":    ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5A8.5 8.5 0 1 0 20.5 13"/><path d="M12 1.5l-3 3 3 3"/></svg>`)),
 	"seek-forward-10": ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5A8.5 8.5 0 1 1 3.5 13"/><path d="M12 1.5l3 3-3 3"/></svg>`)),
 	"subtitles":       ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 15h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2H7"/><path d="M13 15h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-2"/></svg>`)),
@@ -93,6 +97,9 @@ func (a *appState) registerPlayerOverlayHooks() {
 			a.player.HideSurface()
 		}
 		a.hidePlayerOverlay(false)
+		if a.playerHeaderWindow != nil {
+			a.playerHeaderWindow.Hide()
+		}
 		a.syncPlayerSeekFeedbackVisibility()
 	})
 	a.window.OnRestore(func() {
@@ -142,10 +149,12 @@ func (a *appState) syncPlayerOverlay() {
 	if a.player != nil {
 		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
 		a.player.SetViewport(ui.Rect{W: float32(width), H: float32(height)})
-		a.player.SetWindowButtonsVisible(!a.window.IsFullScreen(), a.window.NativeHandle())
+		// Keep the video continuous under the titlebar. The custom MyGo
+		// caption buttons live in the transparent header popup above it.
+		a.player.SetCaptionButtonCutout(false, a.window.NativeHandle())
 	}
 	if a.playerHeaderWindow != nil {
-		setPlayerWindowButtonsCutout(a.playerHeaderWindow.NativeHandle(), a.window.NativeHandle(), !a.window.IsFullScreen())
+		setPlayerWindowButtonsCutout(a.playerHeaderWindow.NativeHandle(), a.window.NativeHandle(), false)
 	}
 	if a.player != nil {
 		video := a.player.surface
@@ -294,7 +303,9 @@ func (a *appState) hidePlayerOverlay(returnFocus bool) {
 		a.playerOverlayAnimationStart = time.Time{}
 		a.overlayMu.Unlock()
 		a.playerOverlayWindow.Hide()
-		a.playerHeaderWindow.Hide()
+		if a.window == nil || a.window.IsFullScreen() {
+			a.playerHeaderWindow.Hide()
+		}
 		if a.playerMenuWindow != nil {
 			a.playerMenuWindow.Hide()
 		}
@@ -331,7 +342,11 @@ func (a *appState) setPlayerOverlayOpacity(alpha float64) {
 		a.playerOverlayContent.SetOpacity(a.playerOverlayWindow, alpha)
 	}
 	if a.playerHeaderContent != nil && a.playerHeaderWindow != nil {
-		a.playerHeaderContent.SetOpacity(a.playerHeaderWindow, alpha)
+		headerOpacity := alpha
+		if a.window != nil && !a.window.IsFullScreen() {
+			headerOpacity = 1
+		}
+		a.playerHeaderContent.SetOpacity(a.playerHeaderWindow, headerOpacity)
 	}
 	if a.playerMenuContent != nil && a.playerMenuWindow != nil {
 		a.playerMenuContent.SetOpacity(a.playerMenuWindow, alpha)
@@ -372,7 +387,9 @@ func (a *appState) advancePlayerOverlayAnimation(c *ui.Context) {
 			// window actually had keyboard focus.
 			ownedFocus := a.playerOverlayHasFocus()
 			a.playerOverlayWindow.Hide()
-			a.playerHeaderWindow.Hide()
+			if a.window.IsFullScreen() {
+				a.playerHeaderWindow.Hide()
+			}
 			if a.playerMenuWindow != nil {
 				a.playerMenuWindow.Hide()
 			}
@@ -532,6 +549,57 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 			ui.Text(c, errorMessage).Shrink(0).FontSize(11).TextColor(playerOverlayAccent()).SingleLine()
 		}
 	})
+	a.playerCaptionButtons(c)
+}
+
+func (a *appState) playerCaptionButtons(c *ui.Context) {
+	if a.window != nil && a.window.IsFullScreen() {
+		return
+	}
+	ui.Row(c).Absolute().Top(0).Right(0).Size(138, float32(movieTitleBarHeight)).Children(func() {
+		playerCaptionButton(c, "minimize", "最小化窗口").OnClick(func() {
+			if a.window != nil {
+				a.window.Minimize()
+			}
+		})
+		maximizeIcon, maximizeLabel := "maximize", "最大化窗口"
+		if a.window != nil && a.window.IsMaximized() {
+			maximizeIcon, maximizeLabel = "restore", "还原窗口"
+		}
+		playerCaptionButton(c, maximizeIcon, maximizeLabel).OnClick(func() {
+			if a.window != nil {
+				a.window.ToggleMaximize()
+			}
+		})
+		playerCaptionButton(c, "close", "关闭窗口").OnClick(func() {
+			if a.window != nil {
+				a.window.Close()
+			}
+		})
+	})
+}
+
+func playerCaptionButton(c *ui.Context, iconName, label string) ui.Element {
+	b := ui.ButtonBase(c.Key("player-caption-"+iconName)).Size(46, 46).Center().Radius(0).
+		BorderWidth(0).Label(label).TextColor(ui.RGBA(255, 255, 255, 0.92)).FocusRing(false)
+	background := ui.RGBA(0, 0, 0, 0.01)
+	if b.Pressed() {
+		background = ui.RGBA(255, 255, 255, 0.20)
+	} else if b.Hovered() {
+		background = ui.RGBA(255, 255, 255, 0.13)
+	}
+	if iconName == "close" {
+		if b.Pressed() {
+			background = ui.RGB(155, 35, 25)
+		} else if b.Hovered() {
+			background = ui.RGB(196, 43, 28)
+		}
+	}
+	b.Background(b.AnimateColor("caption-background", background, ui.Animation{Duration: 100 * time.Millisecond}))
+	b.Children(func() {
+		ui.Icon(c, playerOverlayIcons[iconName]).Size(12, 12).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.65))
+	})
+	return b
 }
 
 // Keep the constructor-applied edit until its change notice is handled,
