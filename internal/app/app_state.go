@@ -73,6 +73,7 @@ type detailUIState struct {
 	detailScroll          ui.ScrollState
 	detailSynopsisScroll  ui.ScrollState
 	detailSynopsisOpen    bool
+	castExpanded          bool
 	selected              *MediaItem
 	detailRequest         uint64
 	detailCancel          context.CancelFunc

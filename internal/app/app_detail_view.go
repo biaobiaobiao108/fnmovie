@@ -27,6 +27,7 @@ func (a *appState) openDetail(item MediaItem) {
 	a.detailScroll = ui.ScrollState{}
 	a.detailSynopsisScroll = ui.ScrollState{}
 	a.detailSynopsisOpen = false
+	a.castExpanded = false
 	a.seriesLoading, a.seriesError, a.selectedSeasonID = false, "", ""
 	a.castLoading, a.castError = len(item.Cast) == 0, ""
 	a.seriesEpisodes, a.seriesEpisodeCache = nil, nil
@@ -400,11 +401,36 @@ func (a *appState) favoriteButton(c *ui.Context, item MediaItem) {
 
 func (a *appState) castSection(c *ui.Context, item MediaItem) {
 	t := c.Theme()
+	width, _ := c.Size()
+	posterWidth, _ := detailPosterSize(c)
+	// Match the detail layout's outer padding, column gap and scroll padding.
+	contentWidth := width - float32(posterWidth) - 190
+	if item.IsSeries {
+		contentWidth -= 4
+	} else {
+		contentWidth = min(contentWidth, 900)
+	}
+	columns := max(1, int((contentWidth+16)/136))
+	visible := min(len(item.Cast), columns*2)
+	canExpand := visible < len(item.Cast)
+	if a.castExpanded {
+		visible = len(item.Cast)
+	}
 	ui.Column(c).FillWidth().Gap(12).Children(func() {
-		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
-			ui.Text(c, "演职人员").FontSize(16).Bold()
+		ui.Row(c).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
+			ui.Text(c, "演职人员").Grow(1).FontSize(16).Bold()
 			if a.castLoading {
 				ui.Text(c, "正在读取…").FontSize(10).TextColor(t.TextMuted)
+			}
+			if canExpand {
+				label := "展开全部"
+				if a.castExpanded {
+					label = "收起"
+				}
+				if actionButton(c, label).Height(28).Padding(0, 2).BorderWidth(0).
+					Background(ui.Transparent).FontSize(12).TextColor(t.Accent).Clicked() {
+					a.castExpanded = !a.castExpanded
+				}
 			}
 		})
 		if len(item.Cast) == 0 {
@@ -421,7 +447,7 @@ func (a *appState) castSection(c *ui.Context, item MediaItem) {
 			return
 		}
 		ui.Row(c).FillWidth().Wrap().Gap(16).AlignItems(ui.Start).Children(func() {
-			for _, person := range item.Cast {
+			for _, person := range item.Cast[:visible] {
 				p := person
 				btn := actionButton(c, "").Width(120).Padding(8, 8).Radius(12).BorderWidth(0).
 					Background(ui.Color{}).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond}).

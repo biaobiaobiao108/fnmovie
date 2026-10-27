@@ -150,6 +150,10 @@ func TestDetailCastWrapsAndScrolls(t *testing.T) {
 			if !ok {
 				t.Fatal("first cast member missing")
 			}
+			if tester.HasText("演员14") || !tester.HasText("展开全部") {
+				t.Fatal("cast beyond two rows should be collapsed")
+			}
+			tester.Click("展开全部")
 			last, ok := tester.Find("演员14")
 			if !ok || last.Y <= first.Y {
 				t.Fatalf("cast should wrap onto later rows: first=%+v last=%+v found=%v", first, last, ok)
@@ -159,7 +163,37 @@ func TestDetailCastWrapsAndScrolls(t *testing.T) {
 			if !ok || last.Y < 0 || last.Y+last.H > 800 {
 				t.Fatalf("last cast member should be reachable by vertical scrolling: %+v, found=%v", last, ok)
 			}
+			tester.Scroll(1000, 400, 0, -1000)
+			tester.Click("收起")
+			if tester.HasText("演员14") || a.castExpanded {
+				t.Fatal("cast should collapse again")
+			}
 		})
+	}
+}
+
+func TestCollapsedCastFitsTwoRowsAtEachWindowSize(t *testing.T) {
+	for _, series := range []bool{false, true} {
+		item := MediaItem{ID: "cast-sizes", Title: "影片", IsSeries: series}
+		for i := 0; i < 30; i++ {
+			item.Cast = append(item.Cast, CastMember{Name: fmt.Sprintf("演员%02d", i)})
+		}
+		a := &appState{selected: &item, catalogs: map[string]*CatalogState{}}
+		tester := ui.NewTester(a.view, 1280, 800)
+		for _, size := range [][2]int{{960, 640}, {1920, 1080}, {1280, 800}} {
+			tester.SetSize(size[0], size[1])
+			rows := map[float32]bool{}
+			count := 0
+			for i := 0; i < len(item.Cast); i++ {
+				if rect, ok := tester.Find(fmt.Sprintf("演员%02d", i)); ok {
+					rows[rect.Y] = true
+					count++
+				}
+			}
+			if len(rows) != 2 || count == len(item.Cast) || !tester.HasText("展开全部") {
+				t.Fatalf("series=%t size=%v: collapsed cast has %d rows and %d members", series, size, len(rows), count)
+			}
+		}
 	}
 }
 
