@@ -136,6 +136,33 @@ func TestMovieDetailViewLayout(t *testing.T) {
 	}
 }
 
+func TestDetailCastWrapsAndScrolls(t *testing.T) {
+	for _, series := range []bool{false, true} {
+		t.Run(fmt.Sprintf("series=%t", series), func(t *testing.T) {
+			item := MediaItem{ID: "cast", Title: "影片", IsSeries: series}
+			for i := 0; i < 15; i++ {
+				item.Cast = append(item.Cast, CastMember{Name: fmt.Sprintf("演员%02d", i), Role: "角色"})
+			}
+			a := &appState{selected: &item, catalogs: map[string]*CatalogState{}}
+			tester := ui.NewTester(a.view, 1280, 800)
+			tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+			first, ok := tester.Find("演员00")
+			if !ok {
+				t.Fatal("first cast member missing")
+			}
+			last, ok := tester.Find("演员14")
+			if !ok || last.Y <= first.Y {
+				t.Fatalf("cast should wrap onto later rows: first=%+v last=%+v found=%v", first, last, ok)
+			}
+			tester.Scroll(1000, 700, 0, 1000)
+			last, ok = tester.Find("演员14")
+			if !ok || last.Y < 0 || last.Y+last.H > 800 {
+				t.Fatalf("last cast member should be reachable by vertical scrolling: %+v, found=%v", last, ok)
+			}
+		})
+	}
+}
+
 func TestMovieDetailKeepsSlotsStableForLongSynopsis(t *testing.T) {
 	var titleY float32
 	for _, long := range []bool{false, true} {

@@ -400,7 +400,7 @@ func (a *appState) favoriteButton(c *ui.Context, item MediaItem) {
 
 func (a *appState) castSection(c *ui.Context, item MediaItem) {
 	t := c.Theme()
-	ui.Column(c).Gap(12).Children(func() {
+	ui.Column(c).FillWidth().Gap(12).Children(func() {
 		ui.Row(c).Gap(10).AlignItems(ui.Center).Children(func() {
 			ui.Text(c, "演职人员").FontSize(16).Bold()
 			if a.castLoading {
@@ -420,7 +420,7 @@ func (a *appState) castSection(c *ui.Context, item MediaItem) {
 			}
 			return
 		}
-		ui.ScrollHorizontal(c).Height(164).Gap(16).Children(func() {
+		ui.Row(c).FillWidth().Wrap().Gap(16).AlignItems(ui.Start).Children(func() {
 			for _, person := range item.Cast {
 				p := person
 				btn := actionButton(c, "").Width(120).Padding(8, 8).Radius(12).BorderWidth(0).
