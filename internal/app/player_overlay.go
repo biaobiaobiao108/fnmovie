@@ -178,6 +178,14 @@ func (a *appState) syncPlayerOverlay() {
 			}
 		}
 	}
+	var headerHandle, overlayHandle uintptr
+	if a.playerHeaderWindow != nil {
+		headerHandle = a.playerHeaderWindow.NativeHandle()
+	}
+	if a.playerOverlayWindow != nil {
+		overlayHandle = a.playerOverlayWindow.NativeHandle()
+	}
+	updatePlayerOverlayShapes(a.window.NativeHandle(), headerHandle, overlayHandle)
 }
 
 func playerSeekFeedbackBounds(bounds mygo.Rectangle) mygo.Rectangle {
@@ -591,7 +599,11 @@ func (a *appState) playerTransport(c *ui.Context) {
 	maxPosition := maxFloat(1, a.playback.Duration)
 	width, _ := c.Size()
 	gutter := float32(max(16, (int(width)-1760)/2))
-	ui.Box(c).Label("播放沉浸渐隐").Absolute().Fill().PassThrough().LinearGradient(ui.LinearGradient{
+	var cornerRadius float32
+	if a.window != nil && !a.window.IsFullScreen() {
+		cornerRadius = 8
+	}
+	ui.Box(c).Label("播放沉浸渐隐").Absolute().Fill().PassThrough().Radius(0, 0, cornerRadius, cornerRadius).Clip().LinearGradient(ui.LinearGradient{
 		Angle: 180,
 		Stops: []ui.GradientStop{
 			{Color: ui.RGBA(0, 0, 0, 0), At: 0},

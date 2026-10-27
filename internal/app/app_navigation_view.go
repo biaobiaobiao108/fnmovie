@@ -452,7 +452,7 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 
 func (a *appState) playerView(c *ui.Context) {
 	a.playerShortcuts(c)
-	videoArea := ui.Box(c.Key("player-video-host")).Fill().Background(ui.RGB(0, 0, 0))
+	videoArea := ui.Box(c.Key("player-video-host")).Fill().Background(ui.Transparent)
 	if videoArea.DoubleClicked() {
 		a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
 	}

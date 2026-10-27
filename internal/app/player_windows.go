@@ -48,7 +48,11 @@ var (
 	procSendMessageW          = user32Player.NewProc("SendMessageW")
 	procSetWindowRgn          = user32Player.NewProc("SetWindowRgn")
 	procIsZoomed              = user32Player.NewProc("IsZoomed")
-	procCreateRoundRectRgn    = syscall.NewLazyDLL("gdi32.dll").NewProc("CreateRoundRectRgn")
+	gdi32Player               = syscall.NewLazyDLL("gdi32.dll")
+	procCreateRoundRectRgn    = gdi32Player.NewProc("CreateRoundRectRgn")
+	procCreateRectRgn         = gdi32Player.NewProc("CreateRectRgn")
+	procCombineRgn            = gdi32Player.NewProc("CombineRgn")
+	procDeleteObject          = gdi32Player.NewProc("DeleteObject")
 	procDwmSetWindowAttribute = syscall.NewLazyDLL("dwmapi.dll").NewProc("DwmSetWindowAttribute")
 	procGetPlayerModule       = syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW")
 	procReadProcessMemory     = syscall.NewLazyDLL("kernel32.dll").NewProc("ReadProcessMemory")
@@ -1019,15 +1023,22 @@ func fitPlayerSurface(host uintptr) {
 			if vp.W > 0 && vp.H > 0 {
 				leftOffset := int32(math.Round(float64(vp.X) * scale))
 				topOffset := int32(math.Round(float64(vp.Y) * scale))
-				targetX = origin.x + leftOffset
-				targetY = origin.y + topOffset
-				targetW = int32(math.Round(float64(vp.W) * scale))
-				targetH = int32(math.Round(float64(vp.H) * scale))
-				if targetX+targetW > origin.x+rect[2] {
-					targetW = origin.x + rect[2] - targetX
-				}
-				if targetY+targetH > origin.y+rect[3] {
-					targetH = origin.y + rect[3] - targetY
+				if leftOffset == 0 && topOffset == 0 {
+					targetX = origin.x
+					targetY = origin.y
+					targetW = rect[2]
+					targetH = rect[3]
+				} else {
+					targetX = origin.x + leftOffset
+					targetY = origin.y + topOffset
+					targetW = int32(math.Round(float64(vp.W) * scale))
+					targetH = int32(math.Round(float64(vp.H) * scale))
+					if targetX+targetW > origin.x+rect[2] {
+						targetW = origin.x + rect[2] - targetX
+					}
+					if targetY+targetH > origin.y+rect[3] {
+						targetH = origin.y + rect[3] - targetY
+					}
 				}
 			}
 		}
@@ -1065,18 +1076,102 @@ func updatePlayerSurfaceShape(host, parent uintptr, width, height int32, scale f
 			procDwmSetWindowAttribute.Call(host, 33, uintptr(unsafe.Pointer(&pref)), 4)
 		}
 	} else {
-		radius := int32(math.Round(12 * scale))
-		if radius < 8 {
-			radius = 8
+		radius := int32(math.Round(8 * scale))
+		if radius < 6 {
+			radius = 6
 		}
 		diameter := radius * 2
 		rgn, _, _ := procCreateRoundRectRgn.Call(0, 0, uintptr(width+1), uintptr(height+1), uintptr(diameter), uintptr(diameter))
 		if rgn != 0 {
-			procSetWindowRgn.Call(host, rgn, 1)
+			if accepted, _, _ := procSetWindowRgn.Call(host, rgn, 1); accepted == 0 {
+				procDeleteObject.Call(rgn)
+			}
 		}
 		if procDwmSetWindowAttribute.Find() == nil {
 			pref := int32(2) // DWMWCP_ROUND
 			procDwmSetWindowAttribute.Call(host, 33, uintptr(unsafe.Pointer(&pref)), 4)
+		}
+	}
+}
+
+func updatePlayerOverlayShapes(parent, header, overlay uintptr) {
+	if parent == 0 {
+		return
+	}
+	isZoomed, _, _ := procIsZoomed.Call(parent)
+	isFullScreen := isZoomed != 0
+	if !isFullScreen {
+		var winRect, clientRect [4]int32
+		if okW, _, _ := procGetWindowRect.Call(parent, uintptr(unsafe.Pointer(&winRect[0]))); okW != 0 {
+			if okC, _, _ := procGetPlayerClientRect.Call(parent, uintptr(unsafe.Pointer(&clientRect[0]))); okC != 0 {
+				if winRect[2]-winRect[0] == clientRect[2] && winRect[3]-winRect[1] == clientRect[3] {
+					isFullScreen = true
+				}
+			}
+		}
+	}
+
+	if isFullScreen {
+		if header != 0 {
+			procSetWindowRgn.Call(header, 0, 1)
+		}
+		if overlay != 0 {
+			procSetWindowRgn.Call(overlay, 0, 1)
+		}
+		return
+	}
+
+	scale := windowScale(parent)
+	radius := int32(math.Round(8 * scale))
+	if radius < 6 {
+		radius = 6
+	}
+	diameter := radius * 2
+
+	var parentRect [4]int32
+	procGetPlayerClientRect.Call(parent, uintptr(unsafe.Pointer(&parentRect[0])))
+	fullH := parentRect[3]
+
+	if overlay != 0 {
+		var ovRect [4]int32
+		if ok, _, _ := procGetPlayerClientRect.Call(overlay, uintptr(unsafe.Pointer(&ovRect[0]))); ok != 0 && ovRect[2] > 0 && ovRect[3] > 0 {
+			w := ovRect[2]
+			h := ovRect[3]
+			parentH := fullH
+			if parentH < h {
+				parentH = h
+			}
+			top := -(parentH - h)
+			roundRgn, _, _ := procCreateRoundRectRgn.Call(0, uintptr(top), uintptr(w+1), uintptr(h+1), uintptr(diameter), uintptr(diameter))
+			rectRgn, _, _ := procCreateRectRgn.Call(0, 0, uintptr(w+1), uintptr(h+1))
+			destRgn, _, _ := procCreateRectRgn.Call(0, 0, 0, 0)
+			procCombineRgn.Call(destRgn, roundRgn, rectRgn, 1) // RGN_AND
+			procDeleteObject.Call(roundRgn)
+			procDeleteObject.Call(rectRgn)
+			if accepted, _, _ := procSetWindowRgn.Call(overlay, destRgn, 1); accepted == 0 {
+				procDeleteObject.Call(destRgn)
+			}
+		}
+	}
+
+	if header != 0 {
+		var hdRect [4]int32
+		if ok, _, _ := procGetPlayerClientRect.Call(header, uintptr(unsafe.Pointer(&hdRect[0]))); ok != 0 && hdRect[2] > 0 && hdRect[3] > 0 {
+			w := hdRect[2]
+			h := hdRect[3]
+			parentH := fullH
+			if parentH < h {
+				parentH = h
+			}
+			roundRgn, _, _ := procCreateRoundRectRgn.Call(0, 0, uintptr(w+1), uintptr(parentH+1), uintptr(diameter), uintptr(diameter))
+			rectRgn, _, _ := procCreateRectRgn.Call(0, 0, uintptr(w+1), uintptr(h+1))
+			destRgn, _, _ := procCreateRectRgn.Call(0, 0, 0, 0)
+			procCombineRgn.Call(destRgn, roundRgn, rectRgn, 1) // RGN_AND
+			procDeleteObject.Call(roundRgn)
+			procDeleteObject.Call(rectRgn)
+			if accepted, _, _ := procSetWindowRgn.Call(header, destRgn, 1); accepted == 0 {
+				procDeleteObject.Call(destRgn)
+			}
 		}
 	}
 }

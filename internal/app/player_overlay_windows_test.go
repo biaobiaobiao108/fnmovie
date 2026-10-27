@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -777,4 +778,109 @@ func nativeTestAVI() []byte {
 	payload := append([]byte("AVI "), chunk("LIST", headers)...)
 	payload = append(payload, chunk("LIST", movie)...)
 	return chunk("RIFF", payload)
+}
+
+func TestUpdatePlayerOverlayShapes(t *testing.T) {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	user32 := syscall.NewLazyDLL("user32.dll")
+	gdi32 := syscall.NewLazyDLL("gdi32.dll")
+	procCreateRectRgn := gdi32.NewProc("CreateRectRgn")
+	procGetWindowRgn := user32.NewProc("GetWindowRgn")
+	procPtInRegion := gdi32.NewProc("PtInRegion")
+	procDeleteObject := gdi32.NewProc("DeleteObject")
+	procCreateWindowExW := user32.NewProc("CreateWindowExW")
+	procDestroyWindow := user32.NewProc("DestroyWindow")
+	procDefWindowProcW := user32.NewProc("DefWindowProcW")
+	procRegisterClassExW := user32.NewProc("RegisterClassExW")
+
+	className, _ := syscall.UTF16PtrFromString("TestOverlayShapesClass")
+	var wc struct {
+		CbSize        uint32
+		Style         uint32
+		LpfnWndProc   uintptr
+		CbClsExtra    int32
+		CbWndExtra    int32
+		HInstance     uintptr
+		HIcon         uintptr
+		HCursor       uintptr
+		HbrBackground uintptr
+		LpszMenuName  *uint16
+		LpszClassName *uint16
+		HIconSm       uintptr
+	}
+	wc.CbSize = uint32(unsafe.Sizeof(wc))
+	wc.LpfnWndProc = procDefWindowProcW.Addr()
+	wc.LpszClassName = className
+	procRegisterClassExW.Call(uintptr(unsafe.Pointer(&wc)))
+
+	parent, _, _ := procCreateWindowExW.Call(
+		0, uintptr(unsafe.Pointer(className)), 0,
+		0x00CF0000, 100, 100, 800, 600, 0, 0, 0, 0,
+	)
+	defer procDestroyWindow.Call(parent)
+
+	overlay, _, _ := procCreateWindowExW.Call(
+		0x00000080|0x08000000, uintptr(unsafe.Pointer(className)), 0,
+		0x80000000|0x04000000, 100, 500, 800, 200, parent, 0, 0, 0,
+	)
+	defer procDestroyWindow.Call(overlay)
+
+	header, _, _ := procCreateWindowExW.Call(
+		0x00000080|0x08000000, uintptr(unsafe.Pointer(className)), 0,
+		0x80000000|0x04000000, 100, 100, 800, 50, parent, 0, 0, 0,
+	)
+	defer procDestroyWindow.Call(header)
+
+	updatePlayerOverlayShapes(parent, header, overlay)
+
+	// Verify overlay bottom corners are clipped
+	rgn, _, _ := procCreateRectRgn.Call(0, 0, 0, 0)
+	defer procDeleteObject.Call(rgn)
+
+	ret, _, _ := procGetWindowRgn.Call(overlay, rgn)
+	if ret == 0 {
+		t.Fatalf("overlay window should have a region set")
+	}
+
+	// Bottom-left corner (0, 199) and bottom-right corner (799, 199) must be clipped (PtInRegion == 0)
+	inBL, _, _ := procPtInRegion.Call(rgn, 0, 199)
+	inBR, _, _ := procPtInRegion.Call(rgn, 799, 199)
+	inCenter, _, _ := procPtInRegion.Call(rgn, 400, 199)
+	if inBL != 0 || inBR != 0 {
+		t.Errorf("overlay bottom corners should be clipped: BL=%d BR=%d", inBL, inBR)
+	}
+	if inCenter == 0 {
+		t.Errorf("overlay bottom center should be within region: %d", inCenter)
+	}
+
+	// Verify header top corners are clipped
+	retHd, _, _ := procGetWindowRgn.Call(header, rgn)
+	if retHd == 0 {
+		t.Fatalf("header window should have a region set")
+	}
+	inTL, _, _ := procPtInRegion.Call(rgn, 0, 0)
+	inTR, _, _ := procPtInRegion.Call(rgn, 799, 0)
+	inHdCenter, _, _ := procPtInRegion.Call(rgn, 400, 0)
+	if inTL != 0 || inTR != 0 {
+		t.Errorf("header top corners should be clipped: TL=%d TR=%d", inTL, inTR)
+	}
+	if inHdCenter == 0 {
+		t.Errorf("header top center should be within region: %d", inHdCenter)
+	}
+
+	// When parent is maximized (or in fullscreen), regions should be cleared.
+	procShowWindow := user32.NewProc("ShowWindow")
+	procShowWindow.Call(parent, 3) // SW_MAXIMIZE
+	updatePlayerOverlayShapes(parent, header, overlay)
+
+	retMaxOverlay, _, _ := procGetWindowRgn.Call(overlay, rgn)
+	if retMaxOverlay != 0 {
+		t.Errorf("overlay should not have region in maximized/fullscreen mode")
+	}
+	retMaxHeader, _, _ := procGetWindowRgn.Call(header, rgn)
+	if retMaxHeader != 0 {
+		t.Errorf("header should not have region in maximized/fullscreen mode")
+	}
 }

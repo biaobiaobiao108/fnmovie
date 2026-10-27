@@ -41,4 +41,5 @@ func setupPlayerHeaderWindowDrag(uintptr, uintptr, func()) {}
 func cleanupPlayerHeaderWindowDrag(uintptr)                {}
 func findMyGoCaptionButtons(uintptr) uintptr               { return 0 }
 func placePlayerOverlayAboveSurface(uintptr, uintptr)      {}
+func updatePlayerOverlayShapes(uintptr, uintptr, uintptr)  {}
 func destroyPlayerSurface(uintptr)                         {}
