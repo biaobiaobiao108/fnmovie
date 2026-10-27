@@ -23,31 +23,35 @@ import (
 )
 
 var (
-	user32Player            = syscall.NewLazyDLL("user32.dll")
-	procEnumChildWindows    = user32Player.NewProc("EnumChildWindows")
-	procGetWindowThreadPID  = user32Player.NewProc("GetWindowThreadProcessId")
-	procGetDPIForWindow     = user32Player.NewProc("GetDpiForWindow")
-	procGetClassNameW       = user32Player.NewProc("GetClassNameW")
-	procGetWindowRect       = user32Player.NewProc("GetWindowRect")
-	procGetCursorPos        = user32Player.NewProc("GetCursorPos")
-	procSetWindowPos        = user32Player.NewProc("SetWindowPos")
-	procGetPlayerWindow     = user32Player.NewProc("GetWindow")
-	procGetForegroundWindow = user32Player.NewProc("GetForegroundWindow")
-	procGetAncestor         = user32Player.NewProc("GetAncestor")
-	procIsWindow            = user32Player.NewProc("IsWindow")
-	procIsIconic            = user32Player.NewProc("IsIconic")
-	procCreatePlayerWindow  = user32Player.NewProc("CreateWindowExW")
-	procDestroyPlayerWindow = user32Player.NewProc("DestroyWindow")
-	procShowPlayerWindow    = user32Player.NewProc("ShowWindow")
-	procGetPlayerClientRect = user32Player.NewProc("GetClientRect")
-	procGetPlayerParent     = user32Player.NewProc("GetParent")
-	procClientToScreen      = user32Player.NewProc("ClientToScreen")
-	procSetWindowLongPtrW   = user32Player.NewProc("SetWindowLongPtrW")
-	procCallWindowProcW     = user32Player.NewProc("CallWindowProcW")
-	procReleaseCapture      = user32Player.NewProc("ReleaseCapture")
-	procSendMessageW        = user32Player.NewProc("SendMessageW")
-	procGetPlayerModule     = syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW")
-	procReadProcessMemory   = syscall.NewLazyDLL("kernel32.dll").NewProc("ReadProcessMemory")
+	user32Player              = syscall.NewLazyDLL("user32.dll")
+	procEnumChildWindows      = user32Player.NewProc("EnumChildWindows")
+	procGetWindowThreadPID    = user32Player.NewProc("GetWindowThreadProcessId")
+	procGetDPIForWindow       = user32Player.NewProc("GetDpiForWindow")
+	procGetClassNameW         = user32Player.NewProc("GetClassNameW")
+	procGetWindowRect         = user32Player.NewProc("GetWindowRect")
+	procGetCursorPos          = user32Player.NewProc("GetCursorPos")
+	procSetWindowPos          = user32Player.NewProc("SetWindowPos")
+	procGetPlayerWindow       = user32Player.NewProc("GetWindow")
+	procGetForegroundWindow   = user32Player.NewProc("GetForegroundWindow")
+	procGetAncestor           = user32Player.NewProc("GetAncestor")
+	procIsWindow              = user32Player.NewProc("IsWindow")
+	procIsIconic              = user32Player.NewProc("IsIconic")
+	procCreatePlayerWindow    = user32Player.NewProc("CreateWindowExW")
+	procDestroyPlayerWindow   = user32Player.NewProc("DestroyWindow")
+	procShowPlayerWindow      = user32Player.NewProc("ShowWindow")
+	procGetPlayerClientRect   = user32Player.NewProc("GetClientRect")
+	procGetPlayerParent       = user32Player.NewProc("GetParent")
+	procClientToScreen        = user32Player.NewProc("ClientToScreen")
+	procSetWindowLongPtrW     = user32Player.NewProc("SetWindowLongPtrW")
+	procCallWindowProcW       = user32Player.NewProc("CallWindowProcW")
+	procReleaseCapture        = user32Player.NewProc("ReleaseCapture")
+	procSendMessageW          = user32Player.NewProc("SendMessageW")
+	procSetWindowRgn          = user32Player.NewProc("SetWindowRgn")
+	procIsZoomed              = user32Player.NewProc("IsZoomed")
+	procCreateRoundRectRgn    = syscall.NewLazyDLL("gdi32.dll").NewProc("CreateRoundRectRgn")
+	procDwmSetWindowAttribute = syscall.NewLazyDLL("dwmapi.dll").NewProc("DwmSetWindowAttribute")
+	procGetPlayerModule       = syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW")
+	procReadProcessMemory     = syscall.NewLazyDLL("kernel32.dll").NewProc("ReadProcessMemory")
 )
 
 type mpvAPI struct {
@@ -1030,10 +1034,50 @@ func fitPlayerSurface(host uintptr) {
 
 		var childBounds [4]int32
 		procGetWindowRect.Call(host, uintptr(unsafe.Pointer(&childBounds[0])))
-		if childBounds[0] == targetX && childBounds[1] == targetY && childBounds[2]-childBounds[0] == targetW && childBounds[3]-childBounds[1] == targetH {
-			return
+		if childBounds[0] != targetX || childBounds[1] != targetY || childBounds[2]-childBounds[0] != targetW || childBounds[3]-childBounds[1] != targetH {
+			procSetWindowPos.Call(host, 0, uintptr(targetX), uintptr(targetY), uintptr(targetW), uintptr(targetH), 0x0010|0x0004|0x0200)
 		}
-		procSetWindowPos.Call(host, 0, uintptr(targetX), uintptr(targetY), uintptr(targetW), uintptr(targetH), 0x0010|0x0004|0x0200)
+		updatePlayerSurfaceShape(host, parent, targetW, targetH, scale)
+	}
+}
+
+func updatePlayerSurfaceShape(host, parent uintptr, width, height int32, scale float64) {
+	if host == 0 || parent == 0 || width <= 0 || height <= 0 {
+		return
+	}
+	isZoomed, _, _ := procIsZoomed.Call(parent)
+	isFullScreen := isZoomed != 0
+	if !isFullScreen {
+		var winRect, clientRect [4]int32
+		if okW, _, _ := procGetWindowRect.Call(parent, uintptr(unsafe.Pointer(&winRect[0]))); okW != 0 {
+			if okC, _, _ := procGetPlayerClientRect.Call(parent, uintptr(unsafe.Pointer(&clientRect[0]))); okC != 0 {
+				if winRect[2]-winRect[0] == clientRect[2] && winRect[3]-winRect[1] == clientRect[3] {
+					isFullScreen = true
+				}
+			}
+		}
+	}
+
+	if isFullScreen {
+		procSetWindowRgn.Call(host, 0, 1)
+		if procDwmSetWindowAttribute.Find() == nil {
+			pref := int32(1) // DWMWCP_DONOTROUND
+			procDwmSetWindowAttribute.Call(host, 33, uintptr(unsafe.Pointer(&pref)), 4)
+		}
+	} else {
+		radius := int32(math.Round(12 * scale))
+		if radius < 8 {
+			radius = 8
+		}
+		diameter := radius * 2
+		rgn, _, _ := procCreateRoundRectRgn.Call(0, 0, uintptr(width+1), uintptr(height+1), uintptr(diameter), uintptr(diameter))
+		if rgn != 0 {
+			procSetWindowRgn.Call(host, rgn, 1)
+		}
+		if procDwmSetWindowAttribute.Find() == nil {
+			pref := int32(2) // DWMWCP_ROUND
+			procDwmSetWindowAttribute.Call(host, 33, uintptr(unsafe.Pointer(&pref)), 4)
+		}
 	}
 }
 

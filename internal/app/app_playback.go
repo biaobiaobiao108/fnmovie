@@ -3,8 +3,6 @@ package app
 import (
 	"context"
 	"time"
-
-	"github.com/egoist/mygo"
 )
 
 func (a *appState) startPlayback(item MediaItem) {
@@ -133,11 +131,10 @@ func (a *appState) startPlayback(item MediaItem) {
 				a.personCancel()
 				a.personCancel = nil
 			}
-			requestPlayer.ShowSurface()
-			a.window.SetWindowButtonsTheme(mygo.ThemeLight)
-			a.playerProxy = proxy
 			a.playingItem = &item
 			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
+			requestPlayer.ShowSurface()
+			a.playerProxy = proxy
 			a.syncWindowTitle()
 			a.syncPlaybackTaskbarProgress()
 			a.playbackLoading = false
@@ -326,11 +323,8 @@ func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64, *playba
 	a.clearPlaybackTaskbarProgress()
 	a.closePlayerOverlay()
 	if a.player != nil {
-		// Cover the native buttons with video while returning their theme to the
-		// light app surface, avoiding a visible color flash during player exit.
 		if a.window != nil {
 			a.player.SetCaptionButtonCutout(false, a.window.NativeHandle())
-			a.window.SetWindowButtonsTheme(mygo.ThemeSystem)
 		}
 	}
 	a.player.Stop()

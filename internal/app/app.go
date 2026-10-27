@@ -116,6 +116,7 @@ func (a *appState) view(c *ui.Context) {
 	}
 	a.advancePlayerFullscreen(c)
 	if a.playback.Active {
+		c.Root().Background(ui.RGB(0, 0, 0))
 		a.advancePlayerOverlayAnimation(c)
 		a.playerView(c)
 		return
