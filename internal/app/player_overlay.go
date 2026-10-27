@@ -13,7 +13,7 @@ import (
 const playerOverlayHideDelay = 2500 * time.Millisecond
 const (
 	playerOverlayHeaderHeight = 64
-	// Leave room above the transport panel for its complete rounded border.
+	// Keep the progress and transport comfortably inside the transparent overlay.
 	playerOverlayControlHeight = 118
 	playerOverlayFadeDuration  = 180 * time.Millisecond
 	playerOverlayTargetOpacity = 1.0
@@ -24,15 +24,16 @@ const (
 )
 
 var playerOverlayIcons = map[string]*ui.SVG{
-	"back":            ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`)),
+	"back":            ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`)),
 	"play":            ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8c0-1.4 1.5-2.2 2.7-1.5l11.5 6.7c1.2.7 1.2 2.5 0 3.2L9.7 20c-1.2.7-2.7-.2-2.7-1.5V4.8z"/></svg>`)),
-	"pause":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16" rx="2"/><rect x="14" y="4" width="4" height="16" rx="2"/></svg>`)),
-	"volume":          ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`)),
-	"muted":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5L6 9H3v6h3l5 4V5z"/><line x1="22" y1="9" x2="16" y2="15"/><line x1="16" y1="9" x2="22" y2="15"/></svg>`)),
+	"pause":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><rect x="5.5" y="4" width="4.5" height="16" rx="1.4"/><rect x="14" y="4" width="4.5" height="16" rx="1.4"/></svg>`)),
+	"volume":          ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`)),
+	"volume-low":      ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/></svg>`)),
+	"muted":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="m16 9 6 6m0-6-6 6"/></svg>`)),
 	"fullscreen":      ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6"/><path d="M9 21H3v-6"/><path d="M21 3l-7 7"/><path d="M3 21l7-7"/></svg>`)),
 	"window":          ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="M10 14L3 21"/><path d="M14 10l7-7"/></svg>`)),
-	"seek-back-10":    ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5A8.5 8.5 0 1 0 20.5 13"/><path d="M12 1.5l-3 3 3 3"/><text x="12" y="16.5" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="-apple-system,system-ui,sans-serif">10</text></svg>`)),
-	"seek-forward-10": ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5A8.5 8.5 0 1 1 3.5 13"/><path d="M12 1.5l3 3-3 3"/><text x="12" y="16.5" font-size="8" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none" font-family="-apple-system,system-ui,sans-serif">10</text></svg>`)),
+	"seek-back-10":    ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5A8.5 8.5 0 1 0 20.5 13"/><path d="M12 1.5l-3 3 3 3"/></svg>`)),
+	"seek-forward-10": ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5A8.5 8.5 0 1 1 3.5 13"/><path d="M12 1.5l3 3-3 3"/></svg>`)),
 	"subtitles":       ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 15h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2H7"/><path d="M13 15h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-2"/></svg>`)),
 	"audio":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4"/><path d="M7 6v12"/><path d="M11 3v18"/><path d="M15 8v8"/><path d="M19 5v14"/><path d="M22 10v4"/></svg>`)),
 }
@@ -555,9 +556,15 @@ func (a *appState) playerTransport(c *ui.Context) {
 	maxPosition := maxFloat(1, a.playback.Duration)
 	width, _ := c.Size()
 	gutter := float32(max(28, (int(width)-1440)/2))
-	ui.Column(c).Label("播放控件面板").Absolute().Bottom(12).Left(gutter).Right(gutter).
-		Padding(9, 14).Gap(7).Radius(18).
-		Background(ui.RGBA(16, 19, 23, 0.76)).Border(1, ui.RGBA(255, 255, 255, 0.13)).Children(func() {
+	ui.Box(c).Label("播放沉浸渐隐").Absolute().Fill().PassThrough().LinearGradient(ui.LinearGradient{
+		Angle: 180,
+		Stops: []ui.GradientStop{
+			{Color: ui.RGBA(0, 0, 0, 0), At: 0},
+			{Color: ui.RGBA(0, 0, 0, 0.04), At: 0.30},
+			{Color: ui.RGBA(0, 0, 0, 0.32), At: 0.68},
+			{Color: ui.RGBA(0, 0, 0, 0.68), At: 1},
+		}})
+	ui.Column(c).Label("播放控件区域").Absolute().Bottom(12).Left(gutter).Right(gutter).Gap(7).Children(func() {
 		// The progress line sits above the information row, as on MyGo Music's
 		// immersive player. Time labels stay at its ends while the slider fills
 		// the space between them.
@@ -593,54 +600,39 @@ func (a *appState) playerTransport(c *ui.Context) {
 				ui.Text(c, status).FontSize(11).TextColor(color).SingleLine()
 			})
 
-			ui.Row(c).Label("居中播放操作").Grow(1).Basis(0).Gap(14).Center().Children(func() {
-				playerOverlayIconButton(c, "seek-back-10", "快退 10 秒", 34, 20).OnClick(func() {
+			ui.Row(c).Label("居中播放操作").Grow(1).Basis(0).Gap(10).Center().Children(func() {
+				playerOverlayIconButton(c, "seek-back-10", "快退 10 秒", 42, 22).OnClick(func() {
 					a.requestPlayerSeekRelative(-10)
 					a.markPlayerOverlayActivity()
 				})
 
-				playIcon := "play"
-				if !a.playback.Paused {
-					playIcon = "pause"
-				}
-				playBtn := ui.Button(c, "").Size(42, 42).Padding(0).Radius(21).BorderWidth(0).
-					Background(playerOverlayAccent()).TextColor(ui.RGB(20, 24, 28)).Label("播放或暂停").
-					Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
-				if playBtn.Pressed() {
-					playBtn.Background(playerOverlayAccent().Mix(ui.RGB(0, 0, 0), 0.12))
-				} else if playBtn.Hovered() {
-					playBtn.Background(playerOverlayAccent().Mix(ui.RGB(255, 255, 255), 0.14))
-				}
-				playBtn.Children(func() {
-					iconSize := float32(18)
-					if playIcon == "pause" {
-						iconSize = 16
-					}
-					ui.Icon(c, playerOverlayIcons[playIcon]).Size(iconSize, iconSize)
-				})
+				playBtn := playerOverlayButton(c, "播放或暂停", 48, ui.RGBA(255, 255, 255, 0.96))
+				playBtn.Children(func() { playerOverlayPlayPause(c, playBtn, a.playback.Paused, 26) })
 				playBtn.OnClick(func() {
 					a.player.TogglePause()
 					a.playback.Paused = !a.playback.Paused
 					a.markPlayerOverlayActivity()
 				})
 
-				playerOverlayIconButton(c, "seek-forward-10", "快进 10 秒", 34, 20).OnClick(func() {
+				playerOverlayIconButton(c, "seek-forward-10", "快进 10 秒", 42, 22).OnClick(func() {
 					a.requestPlayerSeekRelative(10)
 					a.markPlayerOverlayActivity()
 				})
 			})
 
-			ui.Row(c).Label("影片操作").Grow(1).Basis(0).Gap(6).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+			ui.Row(c).Label("影片操作").Grow(1).Basis(0).Gap(3).Justify(ui.End).AlignItems(ui.Center).Children(func() {
 				volumeIcon := "volume"
 				if a.playback.Muted || a.playback.Volume <= 0 {
 					volumeIcon = "muted"
+				} else if a.playback.Volume <= 35 {
+					volumeIcon = "volume-low"
 				}
-				playerOverlayIconButton(c, volumeIcon, "静音", 32, 17).OnClick(func() {
+				playerOverlayIconButton(c, volumeIcon, "静音", 34, 19).OnClick(func() {
 					a.player.ToggleMute()
 					a.playback.Muted = !a.playback.Muted
 					a.markPlayerOverlayActivity()
 				})
-				volume := ui.Slider(c.Key("player-volume"), &a.playback.Volume, 0, 100).Width(72).Label("音量")
+				volume := ui.Slider(c.Key("player-volume"), &a.playback.Volume, 0, 100).Width(56).Label("音量")
 				volumePressed := volume.Pressed()
 				volume.OnChange(func() {
 					a.player.SetVolume(a.playback.Volume)
@@ -656,7 +648,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 					fullscreenIcon = "window"
 				}
 				reduceMotion := c.Preferences().ReduceMotion
-				playerOverlayIconButton(c, fullscreenIcon, "切换全屏", 32, 17).OnClick(func() {
+				playerOverlayIconButton(c, fullscreenIcon, "切换全屏", 34, 19).OnClick(func() {
 					if a.window != nil {
 						a.togglePlayerFullscreen(reduceMotion)
 					}
@@ -687,27 +679,23 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 
 	var btn ui.Element
 	if iconName != "" {
-		btn = ui.Button(c, "").Size(32, 32).Padding(0).Radius(16).BorderWidth(0).
-			Background(ui.Transparent).TextColor(ui.RGBA(255, 255, 255, 0.80)).
-			Label(accessibleLabel).Disabled(disabled).
-			Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+		btn = ui.ButtonBase(c.Key("player-option-"+option)).Size(34, 34).Center().Radius(17).
+			TextColor(ui.RGBA(255, 255, 255, 0.84)).Label(accessibleLabel).Disabled(disabled)
 		if active {
-			btn.Background(playerOverlayAccent().Alpha(0.22)).Border(1, playerOverlayAccent().Alpha(0.46)).TextColor(playerOverlayAccent())
+			btn.Background(playerOverlayAccent().Alpha(0.20)).TextColor(playerOverlayAccent())
 		} else if btn.Hovered() && !disabled {
 			btn.Background(ui.RGBA(255, 255, 255, 0.10)).TextColor(ui.RGB(255, 255, 255))
 		} else if disabled {
 			btn.TextColor(ui.RGBA(255, 255, 255, 0.38))
 		}
 		btn.Children(func() {
-			ui.Icon(c, playerOverlayIcons[iconName]).Size(17, 17)
+			ui.Icon(c, playerOverlayIcons[iconName]).Size(19, 19)
 		})
 	} else {
-		btn = ui.Button(c, "").Height(32).Padding(0, 10).Radius(16).Border(1, ui.RGBA(255, 255, 255, 0.12)).
-			Background(ui.Transparent).TextColor(ui.RGBA(255, 255, 255, 0.80)).
-			Label(accessibleLabel).Disabled(disabled).
-			Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+		btn = ui.ButtonBase(c.Key("player-option-"+option)).Height(34).Padding(0, 7).Radius(17).
+			TextColor(ui.RGBA(255, 255, 255, 0.84)).Label(accessibleLabel).Disabled(disabled)
 		if active {
-			btn.Background(playerOverlayAccent().Alpha(0.22)).Border(1, playerOverlayAccent().Alpha(0.46)).TextColor(playerOverlayAccent())
+			btn.Background(playerOverlayAccent().Alpha(0.20)).TextColor(playerOverlayAccent())
 		} else if btn.Hovered() && !disabled {
 			btn.Background(ui.RGBA(255, 255, 255, 0.10)).TextColor(ui.RGB(255, 255, 255))
 		}
@@ -843,16 +831,58 @@ func playerAppleMenuItem(c *ui.Context, label string, selected bool) ui.Element 
 }
 
 func playerOverlayIconButton(c *ui.Context, name, label string, size, iconSize float32) ui.Element {
-	b := ui.Button(c, "").Size(size, size).Padding(0).Radius(size / 2).BorderWidth(0).
-		Background(ui.Transparent).TextColor(ui.RGBA(255, 255, 255, 0.88)).Label(label).
-		Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
-	if b.Pressed() {
-		b.Background(ui.RGBA(255, 255, 255, 0.20))
-	} else if b.Hovered() {
-		b.Background(ui.RGBA(255, 255, 255, 0.12))
-	}
-	b.Children(func() { ui.Icon(c, playerOverlayIcons[name]).Size(iconSize, iconSize) })
+	b := playerOverlayButton(c, label, size, ui.RGBA(255, 255, 255, 0.88))
+	b.Children(func() {
+		if strings.HasPrefix(name, "seek-") {
+			ui.Box(c).Size(iconSize, iconSize).Children(func() {
+				ui.Icon(c, playerOverlayIcons[name]).Absolute().Top(0).Left(0).Size(iconSize, iconSize)
+				ui.Text(c, "10").Absolute().Left(0).Right(0).Bottom(2).TextAlign(ui.Center).
+					FontSize(7).Bold().TextColor(ui.RGB(255, 255, 255)).SingleLine()
+			})
+			return
+		}
+		ui.Icon(c, playerOverlayIcons[name]).Size(iconSize, iconSize)
+	})
 	return b
+}
+
+func playerOverlayButton(c *ui.Context, label string, size float32, color ui.Color) ui.Element {
+	b := ui.ButtonBase(c.Key("player-control-"+label)).Size(size, size).Center().Radius(size / 2).
+		Label(label).TextColor(color).FocusRing(false)
+	background := ui.Transparent
+	if b.Pressed() {
+		background = ui.RGBA(255, 255, 255, 0.20)
+	} else if b.Hovered() {
+		background = ui.RGBA(255, 255, 255, 0.13)
+	}
+	b.Background(b.AnimateColor("player-control-hover", background, ui.Animation{Duration: 120 * time.Millisecond}))
+	pose := ui.Pose{}
+	if b.Pressed() {
+		pose.Scale = 0.90
+	}
+	b.AnimatePose(pose, ui.Snappy)
+	return b
+}
+
+func playerOverlayPlayPause(c *ui.Context, button ui.Element, paused bool, size float32) {
+	playing := float32(1)
+	if paused {
+		playing = 0
+	}
+	v := button.AnimateTo("playing", playing, ui.Animation{Spring: ui.SpringOptions{Duration: 340 * time.Millisecond, Bounce: 0.3}})
+	ui.Box(c).Size(size, size).Children(func() {
+		for _, icon := range []struct {
+			svg   *ui.SVG
+			shown float32
+		}{{playerOverlayIcons["play"], 1 - v}, {playerOverlayIcons["pause"], v}} {
+			if icon.shown <= 0.01 {
+				continue
+			}
+			scale := 0.4 + 0.6*icon.shown
+			ui.Icon(c, icon.svg).Absolute().Top(0).Left(0).Size(size, size).
+				Scale(scale, scale).Opacity(min(icon.shown, 1))
+		}
+	})
 }
 
 func playerTrackLabel(track PlayerTrack) string {

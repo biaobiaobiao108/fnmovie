@@ -42,14 +42,16 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 			t.Run(fmt.Sprintf("width_%d_speed_%g", width, speed), func(t *testing.T) {
 				a := &appState{player: NewPlayer(), playback: PlaybackState{Duration: 7200, Volume: 80, Speed: speed}}
 				tester := ui.NewTester(a.playerTransport, width, playerOverlayControlHeight)
-				panel, ok := tester.Find("播放控件面板")
-				if !ok || panel.Y < 6 || panel.Y+panel.H > playerOverlayControlHeight-6 {
-					t.Fatalf("transport panel clipped by its window: %+v", panel)
+				area, ok := tester.Find("播放控件区域")
+				fade, fadeOK := tester.Find("播放沉浸渐隐")
+				if !ok || area.Y < 0 || area.Y+area.H > playerOverlayControlHeight ||
+					!fadeOK || fade.W != float32(width) || fade.H != playerOverlayControlHeight {
+					t.Fatalf("transparent transport or its fade is clipped: area=%+v fade=%+v", area, fade)
 				}
 				axis, axisOK := tester.Find("播放时间轴")
 				controls, controlsOK := tester.Find("播放控制栏")
-				if !axisOK || !controlsOK || axis.X <= panel.X || axis.Y <= panel.Y || axis.Y+axis.H >= controls.Y || controls.Y+controls.H >= panel.Y+panel.H {
-					t.Fatalf("timeline and controls should share one inset panel: axis=%+v controls=%+v panel=%+v", axis, controls, panel)
+				if !axisOK || !controlsOK || axis.X != area.X || axis.Y != area.Y || axis.Y+axis.H >= controls.Y || controls.Y+controls.H > area.Y+area.H {
+					t.Fatalf("timeline and controls should fit the unboxed transport area: axis=%+v controls=%+v area=%+v", axis, controls, area)
 				}
 				play, ok := tester.Find("播放或暂停")
 				if !ok {
@@ -64,8 +66,8 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 				}
 				info, infoOK := tester.Find("影片信息")
 				operations, operationsOK := tester.Find("影片操作")
-				if !infoOK || !operationsOK || info.X >= play.X || operations.X <= play.X+play.W || operations.X+operations.W > panel.X+panel.W {
-					t.Fatalf("movie info and options should flank the centered transport: info=%+v play=%+v options=%+v", info, play, operations)
+				if !infoOK || !operationsOK || info.X >= play.X || operations.X <= play.X+play.W || operations.X+operations.W > area.X+area.W+0.5 {
+					t.Fatalf("movie info and options should flank the centered transport: info=%+v play=%+v options=%+v area=%+v", info, play, operations, area)
 				}
 				if _, ok := tester.Find("音量"); !ok {
 					t.Fatal("volume slider is missing its accessible label")
@@ -84,8 +86,8 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 				if !muteOK || !volumeOK || !speedOK || !subtitlesOK || !audioOK || !fullscreenOK ||
 					mute.X <= forward.X+forward.W || volume.X <= mute.X+mute.W || speed.X <= volume.X+volume.W ||
 					subtitles.X <= speed.X+speed.W || audio.X <= subtitles.X+subtitles.W ||
-					fullscreen.X <= audio.X+audio.W || fullscreen.X+fullscreen.W > panel.X+panel.W {
-					t.Fatalf("right-side movie controls overlap or overflow: mute=%+v volume=%+v speed=%+v subtitles=%+v audio=%+v fullscreen=%+v panel=%+v", mute, volume, speed, subtitles, audio, fullscreen, panel)
+					fullscreen.X <= audio.X+audio.W || fullscreen.X+fullscreen.W > area.X+area.W+0.5 {
+					t.Fatalf("right-side movie controls overlap or overflow: mute=%+v volume=%+v speed=%+v subtitles=%+v audio=%+v fullscreen=%+v area=%+v", mute, volume, speed, subtitles, audio, fullscreen, area)
 				}
 			})
 		}

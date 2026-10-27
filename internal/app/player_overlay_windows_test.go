@@ -84,8 +84,8 @@ func runNativePlaybackOverlayComposition() error {
 					x, y  int
 					clear bool
 				}{
-					{10, 10, true}, {bounds.Width - 10, 20, true}, {10, bounds.Height - 40, true},
-					{45, bounds.Height - 45, false},
+					{10, 10, true}, {bounds.Width - 10, 20, true}, {10, bounds.Height - playerOverlayControlHeight - 10, true},
+					{bounds.Width - 10, bounds.Height - 45, false},
 				}
 				var err error
 				for _, check := range checks {
@@ -96,7 +96,7 @@ func runNativePlaybackOverlayComposition() error {
 						break
 					}
 					if !check.clear && (g < 45 || g > 130) {
-						err = fmt.Errorf("control backplate green=%d, want translucent blend rather than opaque black", g)
+						err = fmt.Errorf("control fade green=%d, want translucent blend rather than opaque black", g)
 						break
 					}
 				}
