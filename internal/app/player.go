@@ -97,18 +97,20 @@ func formatClock(value float64) string {
 }
 
 type Player struct {
-	mu          sync.Mutex
-	url         string
-	active      bool
-	position    float64
-	duration    float64
-	paused      bool
-	viewport    ui.Rect
-	started     time.Time
-	process     *playerProcess
-	startCancel context.CancelFunc
-	generation  uint64
-	surface     uintptr
+	mu             sync.Mutex
+	url            string
+	active         bool
+	position       float64
+	duration       float64
+	paused         bool
+	viewport       ui.Rect
+	started        time.Time
+	process        *playerProcess
+	startCancel    context.CancelFunc
+	generation     uint64
+	surface        uintptr
+	onDoubleClick  func()
+	topMarginRatio float64
 }
 
 func NewPlayer() *Player { return &Player{} }
@@ -178,6 +180,9 @@ func (p *Player) StartContext(ctx context.Context, streamURL string, parent uint
 	p.url = streamURL
 	p.position, p.duration, p.paused = resumeAt, duration, false
 	p.started = time.Now()
+	if p.topMarginRatio > 0 {
+		process.setTopMarginRatio(p.topMarginRatio)
+	}
 	return nil
 }
 
@@ -189,8 +194,32 @@ func (p *Player) PrepareSurface(parent uintptr) error {
 	}
 	p.mu.Lock()
 	p.surface = surface
+	fn := p.onDoubleClick
 	p.mu.Unlock()
+	if fn != nil {
+		setPlayerSurfaceDoubleClick(surface, fn)
+	}
 	return nil
+}
+
+func (p *Player) SetOnDoubleClick(fn func()) {
+	p.mu.Lock()
+	p.onDoubleClick = fn
+	surface := p.surface
+	p.mu.Unlock()
+	if surface != 0 {
+		setPlayerSurfaceDoubleClick(surface, fn)
+	}
+}
+
+func (p *Player) SetTopMarginRatio(ratio float64) {
+	p.mu.Lock()
+	p.topMarginRatio = ratio
+	process := p.process
+	p.mu.Unlock()
+	if process != nil {
+		process.setTopMarginRatio(ratio)
+	}
 }
 
 func (p *Player) ShowSurface() {

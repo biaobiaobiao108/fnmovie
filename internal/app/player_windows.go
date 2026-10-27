@@ -42,6 +42,8 @@ var (
 	procGetPlayerClientRect = user32Player.NewProc("GetClientRect")
 	procGetPlayerParent     = user32Player.NewProc("GetParent")
 	procClientToScreen      = user32Player.NewProc("ClientToScreen")
+	procSetWindowLongPtrW   = user32Player.NewProc("SetWindowLongPtrW")
+	procCallWindowProcW     = user32Player.NewProc("CallWindowProcW")
 	procGetPlayerModule     = syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW")
 	procReadProcessMemory   = syscall.NewLazyDLL("kernel32.dll").NewProc("ReadProcessMemory")
 )
@@ -182,6 +184,7 @@ type playerProcess struct {
 	trackListObserved bool
 	stopOnce          sync.Once
 	viewport          ui.Rect
+	topMarginRatio    float64
 	resumeAt          float64
 }
 
@@ -269,6 +272,7 @@ func (p *playerProcess) resetSession(api *mpvAPI, ctx, host uintptr, resumeAt fl
 	p.done, p.loaded, p.events = make(chan struct{}), make(chan struct{}), make(chan struct{}, 1)
 	p.pointerEvents, p.pointerDone, p.resumeAt = make(chan struct{}, 1), nil, resumeAt
 	p.stopOnce, p.loadOnce = sync.Once{}, sync.Once{}
+	p.topMarginRatio = 0
 	p.stateMu.Lock()
 	p.exitStatus = ""
 	p.positionBits, p.durationBits, p.positionSeen = 0, 0, false
@@ -433,6 +437,9 @@ func (p *playerProcess) eventLoop() {
 					}
 				}
 			case mpvEventFileLoaded:
+				if p.topMarginRatio > 0 {
+					p.command("set", "video-margin-ratio-top", strconv.FormatFloat(p.topMarginRatio, 'f', 6, 64))
+				}
 				if p.resumeAt > 0 {
 					if code := p.command("seek", strconv.FormatFloat(p.resumeAt, 'f', 2, 64), "absolute", "exact"); code < 0 {
 						log.Printf("libmpv resume seek failed: %s", mpvError(p.api, code))
@@ -743,6 +750,108 @@ func (p *playerProcess) setViewport(rect ui.Rect) {
 	fitPlayerSurface(p.host)
 }
 
+func (p *playerProcess) setTopMarginRatio(ratio float64) {
+	p.commandMu.Lock()
+	p.topMarginRatio = ratio
+	ctx := p.ctx
+	api := p.api
+	p.commandMu.Unlock()
+	if ctx != 0 && api != nil {
+		p.command("set", "video-margin-ratio-top", strconv.FormatFloat(ratio, 'f', 6, 64))
+	}
+}
+
+type playerSurfaceState struct {
+	originalProc  uintptr
+	onDoubleClick func()
+	lastClickTime time.Time
+	lastClickX    int16
+	lastClickY    int16
+	mu            sync.Mutex
+}
+
+var (
+	playerSurfaces               sync.Map // uintptr -> *playerSurfaceState
+	playerSurfaceWndProcInitOnce sync.Once
+	playerSurfaceWndProcCallback uintptr
+)
+
+func absDiff(a, b int16) int16 {
+	d := a - b
+	if d < 0 {
+		return -d
+	}
+	return d
+}
+
+func playerSurfaceWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
+	val, ok := playerSurfaces.Load(hwnd)
+	if !ok {
+		return 0
+	}
+	state := val.(*playerSurfaceState)
+	original := state.originalProc
+
+	switch msg {
+	case 0x0203: // WM_LBUTTONDBLCLK
+		state.mu.Lock()
+		state.lastClickTime = time.Time{}
+		fn := state.onDoubleClick
+		state.mu.Unlock()
+		if fn != nil {
+			fn()
+		}
+	case 0x0201: // WM_LBUTTONDOWN
+		state.mu.Lock()
+		now := time.Now()
+		x := int16(lParam & 0xffff)
+		y := int16((lParam >> 16) & 0xffff)
+		isDbl := !state.lastClickTime.IsZero() &&
+			now.Sub(state.lastClickTime) <= 450*time.Millisecond &&
+			absDiff(x, state.lastClickX) <= 6 &&
+			absDiff(y, state.lastClickY) <= 6
+		if isDbl {
+			state.lastClickTime = time.Time{}
+			fn := state.onDoubleClick
+			state.mu.Unlock()
+			if fn != nil {
+				fn()
+			}
+		} else {
+			state.lastClickTime = now
+			state.lastClickX = x
+			state.lastClickY = y
+			state.mu.Unlock()
+		}
+	}
+
+	res, _, _ := procCallWindowProcW.Call(original, hwnd, uintptr(msg), wParam, lParam)
+	return res
+}
+
+func initPlayerSurfaceSubclass(host uintptr) {
+	playerSurfaceWndProcInitOnce.Do(func() {
+		playerSurfaceWndProcCallback = syscall.NewCallback(playerSurfaceWndProc)
+	})
+	original, _, _ := procSetWindowLongPtrW.Call(host, ^uintptr(3), playerSurfaceWndProcCallback)
+	if original != 0 {
+		state := &playerSurfaceState{originalProc: original}
+		playerSurfaces.Store(host, state)
+	}
+}
+
+func setPlayerSurfaceDoubleClick(host uintptr, fn func()) {
+	if host == 0 {
+		return
+	}
+	if val, ok := playerSurfaces.Load(host); ok {
+		state := val.(*playerSurfaceState)
+		state.mu.Lock()
+		state.onDoubleClick = fn
+		state.mu.Unlock()
+	}
+}
+
 // Reuse MyGo's registered surface class for libmpv, but keep the swap chain in
 // an owned popup. A nested surface is composited behind MyGo's DComp target.
 func createPlayerSurface(parent uintptr) (uintptr, error) {
@@ -760,6 +869,7 @@ func createPlayerSurface(parent uintptr) (uintptr, error) {
 	if host == 0 {
 		return 0, fmt.Errorf("创建独立视频绘制区域失败：%w", err)
 	}
+	initPlayerSurfaceSubclass(host)
 	fitPlayerSurface(host)
 	return host, nil
 }
@@ -797,6 +907,12 @@ func showPlayerSurface(host uintptr) {
 
 func destroyPlayerSurface(host uintptr) {
 	if host != 0 {
+		if val, ok := playerSurfaces.LoadAndDelete(host); ok {
+			state := val.(*playerSurfaceState)
+			if state.originalProc != 0 {
+				procSetWindowLongPtrW.Call(host, ^uintptr(3), state.originalProc)
+			}
+		}
 		procDestroyPlayerWindow.Call(host)
 	}
 }
@@ -820,6 +936,20 @@ func setPlayerWindowButtonsCutout(hwnd, owner uintptr, enabled bool) {
 	scale := windowScale(owner)
 	cutWidth := int32(math.Round(46 * 3 * scale))
 	cutHeight := int32(math.Round(float64(movieTitleBarHeight) * scale))
+	if caption := findMyGoCaptionButtons(owner); caption != 0 {
+		var capRect [4]int32
+		if ok, _, _ := procGetWindowRect.Call(caption, uintptr(unsafe.Pointer(&capRect[0]))); ok != 0 {
+			w := capRect[2] - capRect[0]
+			h := capRect[3] - capRect[1]
+			if w > 0 && h > 0 {
+				cutWidth = w
+				cutHeight = h
+			}
+		}
+	}
+	if client[3] <= cutHeight+2 {
+		cutHeight = client[3]
+	}
 	if cutWidth <= 0 || cutHeight <= 0 || client[2] <= cutWidth || client[3] < cutHeight {
 		return
 	}

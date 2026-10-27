@@ -12,7 +12,7 @@ import (
 
 const playerOverlayHideDelay = 2500 * time.Millisecond
 const (
-	playerOverlayHeaderHeight = 64
+	playerOverlayHeaderHeight = movieTitleBarHeight
 	// Keep the progress and transport comfortably inside the transparent overlay.
 	playerOverlayControlHeight = 118
 	playerOverlayFadeDuration  = 180 * time.Millisecond
@@ -146,6 +146,11 @@ func (a *appState) syncPlayerOverlay() {
 	}
 	if a.player != nil {
 		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
+		topRatio := 0.0
+		if !a.window.IsFullScreen() && height > 0 {
+			topRatio = float64(movieTitleBarHeight) / float64(height)
+		}
+		a.player.SetTopMarginRatio(topRatio)
 		a.player.SetViewport(ui.Rect{W: float32(width), H: float32(height)})
 		a.player.SetCaptionButtonCutout(!a.window.IsFullScreen(), a.window.NativeHandle())
 	}
@@ -532,16 +537,36 @@ func (a *appState) playerMenuView(c *ui.Context) {
 
 func (a *appState) playerHeaderView(c *ui.Context) {
 	a.advancePlayerOverlayAnimation(c)
-	c.Root().Background(ui.RGB(16, 19, 23))
+	isFullScreen := a.window != nil && a.window.IsFullScreen()
+	if isFullScreen {
+		c.Root().Background(ui.Transparent)
+		ui.Box(c).Absolute().Fill().PassThrough().LinearGradient(ui.LinearGradient{
+			Angle: 0,
+			Stops: []ui.GradientStop{
+				{Color: ui.RGBA(0, 0, 0, 0.65), At: 0},
+				{Color: ui.RGBA(0, 0, 0, 0), At: 1},
+			},
+		})
+	} else {
+		c.Root().Background(ui.RGB(16, 19, 23))
+		ui.Box(c).Absolute().Fill().Background(ui.RGB(16, 19, 23))
+	}
 	c.SetTheme(playerOverlayTheme())
-	ui.Box(c).Absolute().Fill().Background(ui.RGB(16, 19, 23))
-	ui.Row(c).Absolute().Top(10).Left(20).Right(148).Height(40).Gap(10).AlignItems(ui.Center).DragWindow().Children(func() {
-		playerOverlayIconButton(c, "back", "返回影片库", 38, 17).OnClick(a.stopPlayback)
+	rightMargin := float32(148)
+	if isFullScreen {
+		rightMargin = 20
+	}
+	row := ui.Row(c).Absolute().Fill().Padding(0, rightMargin, 0, 20).Gap(10).AlignItems(ui.Center).DragWindow()
+	if row.DoubleClicked() {
+		a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
+	}
+	row.Children(func() {
+		playerOverlayIconButton(c, "back", "返回影片库", 36, 16).OnClick(a.stopPlayback)
 		title := strings.TrimSpace(a.playback.Title)
 		if title == "" {
 			title = "正在播放"
 		}
-		ui.Text(c, title).Grow(1).MinWidth(0).FontSize(14.5).Bold().TextColor(ui.RGBA(255, 255, 255, 0.94)).SingleLine()
+		ui.Text(c, title).Grow(1).MinWidth(0).FontSize(14).Bold().TextColor(ui.RGBA(255, 255, 255, 0.94)).SingleLine()
 		if errorMessage := strings.TrimSpace(a.playback.Error); errorMessage != "" {
 			ui.Text(c, errorMessage).Shrink(0).FontSize(11).TextColor(playerOverlayAccent()).SingleLine()
 		}

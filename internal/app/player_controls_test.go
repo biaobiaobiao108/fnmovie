@@ -243,3 +243,18 @@ func TestNormalizeSelectedTracksFallsBackToOneSelectedTrack(t *testing.T) {
 		t.Fatalf("fallback selection = [%v, %v], want only first track selected", tracks[0].Selected, tracks[1].Selected)
 	}
 }
+
+func TestPlayerDoubleClickCallback(t *testing.T) {
+	player := NewPlayer()
+	called := false
+	player.SetOnDoubleClick(func() {
+		called = true
+	})
+	if player.onDoubleClick == nil {
+		t.Fatal("onDoubleClick should be set on player")
+	}
+	player.onDoubleClick()
+	if !called {
+		t.Fatal("onDoubleClick was not invoked")
+	}
+}

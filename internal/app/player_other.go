@@ -26,6 +26,7 @@ func (p *playerProcess) seekTo(float64) (uint64, error) {
 func (p *playerProcess) position() (float64, float64, bool) { return 0, 0, false }
 func (p *playerProcess) snapshot() PlayerSnapshot           { return PlayerSnapshot{} }
 func (p *playerProcess) setViewport(ui.Rect)                {}
+func (p *playerProcess) setTopMarginRatio(float64)          {}
 func (p *playerProcess) pointerActivity() <-chan struct{}   { return nil }
 func windowScale(uintptr) float64                           { return 1 }
 func createPlayerSurface(uintptr) (uintptr, error) {
@@ -34,6 +35,7 @@ func createPlayerSurface(uintptr) (uintptr, error) {
 func showPlayerSurface(uintptr)                           {}
 func hidePlayerSurface(uintptr)                           {}
 func setPlayerWindowButtonsCutout(uintptr, uintptr, bool) {}
+func setPlayerSurfaceDoubleClick(uintptr, func())         {}
 func findMyGoCaptionButtons(uintptr) uintptr              { return 0 }
 func placePlayerOverlayAboveSurface(uintptr, uintptr)     {}
 func destroyPlayerSurface(uintptr)                        {}

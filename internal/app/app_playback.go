@@ -33,6 +33,15 @@ func (a *appState) startPlayback(item MediaItem) {
 		nativeHandle = a.window.NativeHandle()
 	}
 	requestPlayer := NewPlayer()
+	requestPlayer.SetOnDoubleClick(func() {
+		if a.window != nil {
+			a.window.Update(func() {
+				if a.window != nil && a.playback.Active {
+					a.togglePlayerFullscreen(false)
+				}
+			})
+		}
+	})
 	if err := requestPlayer.PrepareSurface(nativeHandle); err != nil {
 		a.cancelPlaybackLoading()
 		a.status = "播放器绘制区域创建失败：" + err.Error()
