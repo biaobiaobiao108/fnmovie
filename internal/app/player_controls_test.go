@@ -44,7 +44,9 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 				tester := ui.NewTester(a.playerTransport, width, playerOverlayControlHeight)
 				area, ok := tester.Find("播放控件区域")
 				fade, fadeOK := tester.Find("播放沉浸渐隐")
-				if !ok || area.Y < 0 || area.Y+area.H > playerOverlayControlHeight ||
+				expectedGutter := float32(max(16, (width-1760)/2))
+				if !ok || area.X != expectedGutter || area.X+area.W > float32(width)-expectedGutter+0.5 ||
+					area.Y < 0 || area.Y+area.H > playerOverlayControlHeight ||
 					!fadeOK || fade.W != float32(width) || fade.H != playerOverlayControlHeight {
 					t.Fatalf("transparent transport or its fade is clipped: area=%+v fade=%+v", area, fade)
 				}
@@ -64,10 +66,9 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 				if !progressOK || math.Abs(float64(progress.X+progress.W/2)-float64(width)/2) > 0.5 {
 					t.Fatalf("progress rail is not centered: %+v (found=%v)", progress, progressOK)
 				}
-				info, infoOK := tester.Find("影片信息")
 				operations, operationsOK := tester.Find("影片操作")
-				if !infoOK || !operationsOK || info.X >= play.X || operations.X <= play.X+play.W || operations.X+operations.W > area.X+area.W+0.5 {
-					t.Fatalf("movie info and options should flank the centered transport: info=%+v play=%+v options=%+v area=%+v", info, play, operations, area)
+				if !operationsOK || operations.X <= play.X+play.W || operations.X+operations.W > area.X+area.W+0.5 {
+					t.Fatalf("movie options should stay beside the centered transport: play=%+v options=%+v area=%+v", play, operations, area)
 				}
 				if _, ok := tester.Find("音量"); !ok {
 					t.Fatal("volume slider is missing its accessible label")
@@ -94,19 +95,22 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 	}
 }
 
-func TestPlayerHeaderKeepsBackControlAndDetailsStayInBottomPanel(t *testing.T) {
+func TestPlayerHeaderShowsTitleAndKeepsPlaybackDetailsOutOfTransport(t *testing.T) {
 	const title = "春日影"
-	a := &appState{playback: PlaybackState{Title: title}}
+	const quality = "4K HDR"
+	a := &appState{playback: PlaybackState{Title: title, Quality: quality}}
 	header := ui.NewTester(a.playerHeaderView, 1280, playerOverlayHeaderHeight)
 	back, hasBack := header.Find("返回影片库")
-	if !hasBack || back.Y < 0 || back.Y+back.H > playerOverlayHeaderHeight || header.HasText(title) {
-		t.Fatalf("header should keep only the back control: back=%+v texts=%v", back, header.Texts())
+	titleBounds, hasTitle := header.Find(title)
+	if !hasBack || !hasTitle || back.Y < 0 || back.Y+back.H > playerOverlayHeaderHeight ||
+		titleBounds.X < back.X+back.W || titleBounds.Y < 0 || titleBounds.Y+titleBounds.H > playerOverlayHeaderHeight ||
+		header.HasText(quality) {
+		t.Fatalf("header should show the title after back navigation and omit quality: back=%+v title=%+v texts=%v", back, titleBounds, header.Texts())
 	}
 	transport := ui.NewTester(a.playerTransport, 1280, playerOverlayControlHeight)
-	name, hasTitle := transport.Find(title)
 	play, hasPlay := transport.Find("播放或暂停")
-	if !hasTitle || !hasPlay || name.X >= play.X || name.Y < 0 || name.Y+name.H > playerOverlayControlHeight {
-		t.Fatalf("title should sit in the left movie-info column beside the centered controls: title=%+v play=%+v", name, play)
+	if !hasPlay || transport.HasText(title) || transport.HasText(quality) {
+		t.Fatalf("bottom transport should leave the title in the top bar and omit quality: play=%+v texts=%v", play, transport.Texts())
 	}
 }
 

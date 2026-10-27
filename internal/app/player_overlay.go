@@ -521,8 +521,16 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	a.advancePlayerOverlayAnimation(c)
 	c.Root().Background(ui.Transparent)
 	c.SetTheme(playerOverlayTheme())
-	ui.Row(c).Absolute().Top(10).Left(20).Height(40).AlignItems(ui.Center).DragWindow().Children(func() {
+	ui.Row(c).Absolute().Top(10).Left(20).Right(148).Height(40).Gap(10).AlignItems(ui.Center).DragWindow().Children(func() {
 		playerOverlayIconButton(c, "back", "返回影片库", 38, 17).OnClick(a.stopPlayback)
+		title := strings.TrimSpace(a.playback.Title)
+		if title == "" {
+			title = "正在播放"
+		}
+		ui.Text(c, title).Grow(1).MinWidth(0).FontSize(14.5).Bold().TextColor(ui.RGBA(255, 255, 255, 0.94)).SingleLine()
+		if errorMessage := strings.TrimSpace(a.playback.Error); errorMessage != "" {
+			ui.Text(c, errorMessage).Shrink(0).FontSize(11).TextColor(playerOverlayAccent()).SingleLine()
+		}
 	})
 }
 
@@ -555,7 +563,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 	c.SetTheme(playerOverlayTheme())
 	maxPosition := maxFloat(1, a.playback.Duration)
 	width, _ := c.Size()
-	gutter := float32(max(28, (int(width)-1440)/2))
+	gutter := float32(max(16, (int(width)-1760)/2))
 	ui.Box(c).Label("播放沉浸渐隐").Absolute().Fill().PassThrough().LinearGradient(ui.LinearGradient{
 		Angle: 180,
 		Stops: []ui.GradientStop{
@@ -575,33 +583,12 @@ func (a *appState) playerTransport(c *ui.Context) {
 		})
 
 		// Three equal columns keep the transport centered regardless of the
-		// width of the movie details or the track and volume controls.
+		// width of the track and volume controls.
 		ui.Row(c).Label("播放控制栏").Height(48).AlignItems(ui.Center).Gap(10).Children(func() {
-			ui.Column(c).Label("影片信息").Grow(1).Basis(0).MinWidth(0).Gap(2).Children(func() {
-				title := strings.TrimSpace(a.playback.Title)
-				if title == "" {
-					title = "正在播放"
-				}
-				ui.Text(c, title).FontSize(13.5).Bold().TextColor(ui.RGBA(255, 255, 255, 0.94)).SingleLine()
-				status := strings.TrimSpace(a.playback.Quality)
-				if a.playback.Paused {
-					if status != "" {
-						status += " · "
-					}
-					status += "已暂停"
-				}
-				if status == "" {
-					status = "正在播放"
-				}
-				color := ui.RGBA(255, 255, 255, 0.56)
-				if a.playback.Error != "" {
-					status, color = a.playback.Error, playerOverlayAccent()
-				}
-				ui.Text(c, status).FontSize(11).TextColor(color).SingleLine()
-			})
+			ui.Box(c).Grow(1).Basis(0).MinWidth(0)
 
 			ui.Row(c).Label("居中播放操作").Grow(1).Basis(0).Gap(10).Center().Children(func() {
-				playerOverlayIconButton(c, "seek-back-10", "快退 10 秒", 42, 22).OnClick(func() {
+				playerOverlayIconButton(c, "seek-back-10", "快退 10 秒", 42, 24).OnClick(func() {
 					a.requestPlayerSeekRelative(-10)
 					a.markPlayerOverlayActivity()
 				})
@@ -614,7 +601,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 					a.markPlayerOverlayActivity()
 				})
 
-				playerOverlayIconButton(c, "seek-forward-10", "快进 10 秒", 42, 22).OnClick(func() {
+				playerOverlayIconButton(c, "seek-forward-10", "快进 10 秒", 42, 24).OnClick(func() {
 					a.requestPlayerSeekRelative(10)
 					a.markPlayerOverlayActivity()
 				})
@@ -836,8 +823,8 @@ func playerOverlayIconButton(c *ui.Context, name, label string, size, iconSize f
 		if strings.HasPrefix(name, "seek-") {
 			ui.Box(c).Size(iconSize, iconSize).Children(func() {
 				ui.Icon(c, playerOverlayIcons[name]).Absolute().Top(0).Left(0).Size(iconSize, iconSize)
-				ui.Text(c, "10").Absolute().Left(0).Right(0).Bottom(2).TextAlign(ui.Center).
-					FontSize(7).Bold().TextColor(ui.RGB(255, 255, 255)).SingleLine()
+				ui.Text(c, "10").Absolute().Left(0).Right(0).Top(iconSize * 0.28).TextAlign(ui.Center).
+					FontSize(8.5).Bold().TextColor(ui.RGB(255, 255, 255)).SingleLine()
 			})
 			return
 		}
