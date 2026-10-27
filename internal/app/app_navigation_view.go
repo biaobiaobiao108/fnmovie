@@ -45,6 +45,9 @@ func (a *appState) sidebar(c *ui.Context) {
 			selected := a.section == "library" && a.libraryID == library.ID
 			button := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0).Background(ui.Color{}).TextColor(t.TextMuted).
 				Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
+			if c.Vibrancy() {
+				button.Opacity(sidebarRowOpacity(button.Bounds(), a.sidebarList.Bounds(c), &a.sidebarScroll))
+			}
 			if selected {
 				button.Background(movieColors.selected).TextColor(t.Accent)
 			} else if button.Hovered() {
@@ -74,7 +77,9 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 		}).Grow(1)
 		bindSmoothScroll(list, &a.sidebarScroll)
-		bindSoftScrollEdges(list, &a.sidebarScroll, background)
+		if !c.Vibrancy() {
+			bindSoftScrollEdges(list, &a.sidebarScroll, background)
+		}
 		if a.loggedIn {
 			exitBtn := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0).
 				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
@@ -103,6 +108,20 @@ func (a *appState) sidebar(c *ui.Context) {
 			}
 		}
 	})
+}
+
+func sidebarRowOpacity(row, viewport ui.Rect, scroll *ui.ScrollState) float32 {
+	if row.H <= 0 || viewport.H <= 0 {
+		return 1
+	}
+	visible := row.H
+	if scroll.Y > 1 {
+		visible -= max(0, viewport.Y-row.Y)
+	}
+	if scroll.MaxY-scroll.Y > 1 {
+		visible -= max(0, row.Y+row.H-(viewport.Y+viewport.H))
+	}
+	return max(0, min(1, visible/row.H))
 }
 
 func (a *appState) globalSearchField(c *ui.Context) {

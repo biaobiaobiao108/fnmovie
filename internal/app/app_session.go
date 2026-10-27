@@ -234,11 +234,13 @@ func (a *appState) loadLibrary() {
 		return
 	}
 	if a.section == "home" && strings.TrimSpace(a.query) == "" {
+		a.cancelCatalogRequests()
 		a.loadHomeHeroes(false)
 		a.loadContinueWatching(false)
 		return
 	}
 	if a.section == "library" && strings.TrimSpace(a.libraryID) == "" && strings.TrimSpace(a.query) == "" {
+		a.cancelCatalogRequests()
 		a.items = nil
 		a.status = "无法读取所选影视库：服务器没有返回有效的影视库标识"
 		a.window.Invalidate()

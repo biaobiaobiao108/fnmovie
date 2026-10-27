@@ -38,6 +38,60 @@ func TestSidebarVirtualizesAndKeepsItsPlaceAcrossPageChanges(t *testing.T) {
 	assertBoundedRows(t, tester, "库条目-")
 }
 
+func TestVibrantSidebarFadesRowsWithoutPaintingAnEdgeBand(t *testing.T) {
+	a := &appState{section: "movies", catalogs: map[string]*CatalogState{}}
+	for i := range 100 {
+		a.libraries = append(a.libraries, MediaLibrary{ID: fmt.Sprintf("lib-%d", i), Name: fmt.Sprintf("库条目-%d", i)})
+	}
+	var viewport ui.Rect
+	tester := ui.NewTester(func(c *ui.Context) {
+		a.view(c)
+		viewport = a.sidebarList.Bounds(c)
+	}, 1280, 800)
+	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tester.SetVibrancy(true)
+	tester.Frame()
+	if viewport.W <= 0 || viewport.H <= 0 {
+		t.Fatal("sidebar list viewport was not laid out")
+	}
+	x, y := int(viewport.X+viewport.W-2), int(viewport.Y+2)
+	before := tester.Image().RGBAAt(x, y)
+	tester.Scroll(80, 400, 0, 18)
+	if a.sidebarScroll.Y <= 0 {
+		t.Fatal("sidebar did not scroll")
+	}
+	if after := tester.Image().RGBAAt(x, y); after != before {
+		t.Fatalf("scroll painted a band over the transparent sidebar: before=%+v after=%+v", before, after)
+	}
+	imageAfterScroll := tester.Image()
+	tester.Frame()
+	settled := tester.Image()
+	for py := int(viewport.Y); py < int(viewport.Y+18); py++ {
+		for px := int(viewport.X); px < int(viewport.X+viewport.W); px++ {
+			if imageAfterScroll.RGBAAt(px, py) != settled.RGBAAt(px, py) {
+				t.Fatal("sidebar edge opacity lagged behind the final scroll position")
+			}
+		}
+	}
+}
+
+func TestSidebarRowOpacityTracksVisibleArea(t *testing.T) {
+	viewport := ui.Rect{Y: 100, H: 200}
+	scroll := ui.ScrollState{Y: 50, MaxY: 100}
+	for _, tt := range []struct {
+		row  ui.Rect
+		want float32
+	}{
+		{ui.Rect{Y: 82, H: 36}, 0.5},
+		{ui.Rect{Y: 120, H: 36}, 1},
+		{ui.Rect{Y: 282, H: 36}, 0.5},
+	} {
+		if got := sidebarRowOpacity(tt.row, viewport, &scroll); got != tt.want {
+			t.Fatalf("row %+v opacity=%v, want %v", tt.row, got, tt.want)
+		}
+	}
+}
+
 func TestSeriesVirtualizesEpisodesAndPreservesAnchorDuringMetadataUpdates(t *testing.T) {
 	series := MediaItem{ID: "series", Title: "长剧集", IsSeries: true, Seasons: []MediaSeason{{ID: "season", Title: "第一季"}}}
 	a := &appState{selected: &series, selectedSeasonID: "season", catalogs: map[string]*CatalogState{}}

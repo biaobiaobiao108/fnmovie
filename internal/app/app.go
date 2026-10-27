@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	_ "embed"
 	"errors"
 	"log"
@@ -88,11 +89,14 @@ func Run() {
 		}
 	})
 	mygo.App.OnBeforeQuit(func(*mygo.QuitEvent) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 		app.resetHome()
 		app.home.Closed = true
 		app.closeDetail()
 		app.closePerson()
-		app.stopPlaybackAndWait()
+		app.stopPlaybackAndWait(ctx)
+		app.playbackProgressReporter.close(ctx)
 		app.posters.Close()
 	})
 	if err := mygo.App.Run(); err != nil {

@@ -139,6 +139,8 @@ type playbackUIState struct {
 	playbackCancel               context.CancelFunc
 	playbackRequest              uint64
 	playbackTrackCancel          context.CancelFunc
+	playbackProgressReporter     *playbackProgressReporter
+	playbackProgressSession      *playbackProgressSession
 }
 
 type personUIState struct {

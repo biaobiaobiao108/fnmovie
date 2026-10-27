@@ -134,12 +134,24 @@ func (a *appState) startPlayback(item MediaItem) {
 			a.playbackCancel = nil
 			a.seekSliderPosition = stream.ResumeAt
 			a.seekFeedback = seekFeedback{}
+			if a.playbackProgressReporter == nil {
+				a.playbackProgressReporter = newPlaybackProgressReporter()
+			}
+			var session *playbackProgressSession
+			session = a.playbackProgressReporter.newSession(server, item, func(err error) {
+				a.window.Update(func() {
+					if a.server == server && a.playbackProgressSession == session && a.player == requestPlayer {
+						a.status = "进度同步失败：" + err.Error()
+					}
+				})
+			})
+			a.playbackProgressSession = session
 			a.window.Invalidate()
 			a.createPlayerOverlay()
 			a.startPlayerOverlayMonitor()
 			trackCtx, trackCancel := context.WithCancel(context.Background())
 			a.playbackTrackCancel = trackCancel
-			go a.trackPlayback(trackCtx, item, server, requestPlayer)
+			go a.trackPlayback(trackCtx, item, requestPlayer, session)
 		})
 	}()
 }
@@ -158,7 +170,7 @@ func (a *appState) cancelPlaybackLoading() {
 	}
 }
 
-func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Server, player *Player) {
+func (a *appState) trackPlayback(ctx context.Context, item MediaItem, player *Player, progress *playbackProgressSession) {
 	ticker := time.NewTicker(250 * time.Millisecond)
 	defer ticker.Stop()
 	lastProgress := time.Now()
@@ -204,15 +216,7 @@ func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Se
 		})
 		if time.Since(lastProgress) >= 30*time.Second {
 			lastProgress = time.Now()
-			go func() {
-				if err := server.UpdateProgressContext(ctx, item.ID, item.MediaID, position, duration); err != nil && ctx.Err() == nil {
-					a.window.Update(func() {
-						if ctx.Err() == nil && a.player == player {
-							a.status = "进度同步失败：" + err.Error()
-						}
-					})
-				}
-			}()
+			progress.periodic(position, duration)
 		}
 	}
 	if ctx.Err() != nil {
@@ -236,13 +240,20 @@ func (a *appState) trackPlayback(ctx context.Context, item MediaItem, server *Se
 }
 
 func (a *appState) stopPlayback() {
-	server, item, position, duration := a.closePlayer()
+	server, item, position, duration, progress := a.closePlayer()
 	if server != nil && item != nil && !a.home.Closed && a.selectedPerson == nil {
 		a.resumeDetailLoading()
 	}
 	if server != nil && item != nil {
+		if progress == nil {
+			if a.playbackProgressReporter == nil {
+				a.playbackProgressReporter = newPlaybackProgressReporter()
+			}
+			progress = a.playbackProgressReporter.newSession(server, *item, nil)
+		}
+		done := progress.finish(position, duration, playbackProgressTimeout)
 		go func() {
-			if err := server.UpdateProgress(item.ID, item.MediaID, position, duration); err != nil {
+			if err := <-done; err != nil {
 				a.window.Update(func() {
 					if a.server == server {
 						a.status = "进度同步失败：" + err.Error()
@@ -261,22 +272,36 @@ func (a *appState) stopPlayback() {
 	}
 }
 
-func (a *appState) stopPlaybackAndWait() {
-	server, item, position, duration := a.closePlayer()
-	if server == nil || item == nil {
-		return
+func (a *appState) stopPlaybackAndWait(ctx context.Context) {
+	server, item, position, duration, progress := a.closePlayer()
+	var done <-chan error
+	if server != nil && item != nil {
+		if progress == nil {
+			if a.playbackProgressReporter == nil {
+				a.playbackProgressReporter = newPlaybackProgressReporter()
+			}
+			progress = a.playbackProgressReporter.newSession(server, *item, nil)
+		}
+		done = progress.finish(position, duration, 3*time.Second)
+	} else if a.playbackProgressReporter != nil {
+		done = a.playbackProgressReporter.flush()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	_ = server.UpdateProgressContext(ctx, item.ID, item.MediaID, position, duration)
+	if done != nil {
+		select {
+		case <-done:
+		case <-ctx.Done():
+		}
+	}
 }
 
-func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64) {
+func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64, *playbackProgressSession) {
 	a.cancelPlaybackLoading()
 	if a.playbackTrackCancel != nil {
 		a.playbackTrackCancel()
 		a.playbackTrackCancel = nil
 	}
+	progress := a.playbackProgressSession
+	a.playbackProgressSession = nil
 	var server *Server
 	var item *MediaItem
 	var position, duration float64
@@ -296,5 +321,5 @@ func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64) {
 	a.playback = PlaybackState{}
 	a.syncWindowTitle()
 	a.posters.SetPlayback(false)
-	return server, item, position, duration
+	return server, item, position, duration, progress
 }
