@@ -118,7 +118,6 @@ func (a *appState) startPlayback(item MediaItem) {
 				return
 			}
 			a.player = requestPlayer
-			a.window.SetWindowButtonsTheme(mygo.ThemeDark)
 			a.posters.SetPlayback(true)
 			a.cancelDetailRequests()
 			if a.personCancel != nil {
@@ -126,6 +125,7 @@ func (a *appState) startPlayback(item MediaItem) {
 				a.personCancel = nil
 			}
 			requestPlayer.ShowSurface()
+			a.window.SetWindowButtonsTheme(mygo.ThemeDark)
 			a.playerProxy = proxy
 			a.playingItem = &item
 			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
@@ -316,15 +316,20 @@ func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64, *playba
 	}
 	a.clearPlaybackTaskbarProgress()
 	a.closePlayerOverlay()
+	if a.player != nil {
+		// Cover the native buttons with video while returning their theme to the
+		// light app surface, avoiding a visible color flash during player exit.
+		if a.window != nil {
+			a.player.SetCaptionButtonCutout(false, a.window.NativeHandle())
+			a.window.SetWindowButtonsTheme(mygo.ThemeSystem)
+		}
+	}
 	a.player.Stop()
 	a.player.ReleaseSurface()
 	a.playerProxy.Close()
 	a.playerProxy = nil
 	a.playingItem = nil
 	a.playback = PlaybackState{}
-	if a.window != nil {
-		a.window.SetWindowButtonsTheme(mygo.ThemeSystem)
-	}
 	a.syncWindowTitle()
 	a.posters.SetPlayback(false)
 	return server, item, position, duration, progress
