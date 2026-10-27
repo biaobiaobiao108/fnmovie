@@ -460,9 +460,7 @@ func (a *appState) castSection(c *ui.Context, item MediaItem) {
 
 func (a *appState) personView(c *ui.Context, person CastMember) {
 	t := c.Theme()
-	_, height := c.Size()
-	portraitHeight := min(400, max(280, int(height)-220))
-	portraitWidth := portraitHeight * 2 / 3
+	portraitWidth, portraitHeight := detailPosterSize(c)
 	profile := a.imageForURL(person.Profile, portraitWidth, portraitHeight)
 
 	ui.Row(c.Key("person-detail-layout:"+person.ID)).Grow(1).Fill().Padding(24, 56, 34, 56).

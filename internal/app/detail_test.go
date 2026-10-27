@@ -205,6 +205,10 @@ func TestMovieAndSeriesShareDetailAnchors(t *testing.T) {
 			poster, posterOK := tester.Find("影片海报")
 			title, titleOK := tester.Find(item.Title)
 			credits, creditsOK := tester.Find("详情演职人员")
+			minimumPosterHeight := map[int]float32{640: 430, 800: 580, 1080: 680}[size[1]]
+			if !posterOK || poster.H < minimumPosterHeight || poster.Y < movieTitleBarHeight || play.Y+play.H > float32(size[1]) {
+				t.Fatalf("poster and actions should fill the viewport without clipping: size=%v poster=%+v play=%+v", size, poster, play)
+			}
 			if !posterOK || !titleOK || play.Y < poster.Y+poster.H {
 				t.Fatalf("actions must be below the poster: poster=%+v play=%+v", poster, play)
 			}
@@ -508,6 +512,22 @@ func TestPersonImmersiveLayoutAtMinimumWindow(t *testing.T) {
 	}
 	if tester.HasText("首页") || !tester.HasText("演职人员") {
 		t.Fatal("minimum-size actor page should remain immersive")
+	}
+}
+
+func TestPersonPortraitScalesWithWindow(t *testing.T) {
+	for _, size := range [][3]int{{960, 640, 430}, {1280, 800, 580}, {1920, 1080, 680}} {
+		person := CastMember{ID: "person", Name: "演员", Job: "演员"}
+		a := &appState{selectedPerson: &person, personItems: []MediaItem{{ID: "work", Title: "代表作品"}}, catalogs: map[string]*CatalogState{}}
+		tester := ui.NewTester(a.view, size[0], size[1])
+		portrait, ok := tester.Find("演员头像")
+		work, workOK := tester.Find("代表作品")
+		if !ok || portrait.H < float32(size[2]) || portrait.Y < movieTitleBarHeight || portrait.Y+portrait.H > float32(size[1]) {
+			t.Fatalf("portrait does not fit the window: size=%v portrait=%+v", size, portrait)
+		}
+		if !workOK || work.X <= portrait.X+portrait.W || work.Y+work.H > float32(size[1]) {
+			t.Fatalf("works should remain visible beside the portrait: size=%v portrait=%+v work=%+v", size, portrait, work)
+		}
 	}
 }
 

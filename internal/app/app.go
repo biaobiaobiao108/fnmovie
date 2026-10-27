@@ -229,7 +229,7 @@ func bindSoftScrollEdges(element ui.Element, state *ui.ScrollState, background u
 
 func detailPosterSize(c *ui.Context) (int, int) {
 	width, _ := c.Size()
-	posterWidth := min(max(250, min(360, int(float64(width)*0.26))), int((detailViewportHeight(c)-78)*2/3))
+	posterWidth := min(max(280, min(460, int(float64(width)*0.31))), int((detailViewportHeight(c)-54)*2/3))
 	return posterWidth, posterWidth * 3 / 2
 }
 
