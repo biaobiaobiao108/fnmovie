@@ -195,9 +195,13 @@ func (p *Player) PrepareSurface(parent uintptr) error {
 	p.mu.Lock()
 	p.surface = surface
 	fn := p.onDoubleClick
+	vp := p.viewport
 	p.mu.Unlock()
 	if fn != nil {
 		setPlayerSurfaceDoubleClick(surface, fn)
+	}
+	if vp.W > 0 && vp.H > 0 {
+		setPlayerSurfaceViewport(surface, vp)
 	}
 	return nil
 }
@@ -219,6 +223,20 @@ func (p *Player) SetTopMarginRatio(ratio float64) {
 	p.mu.Unlock()
 	if process != nil {
 		process.setTopMarginRatio(ratio)
+	}
+}
+
+func (p *Player) SetViewport(rect ui.Rect) {
+	p.mu.Lock()
+	p.viewport = rect
+	surface := p.surface
+	process := p.process
+	p.mu.Unlock()
+	if surface != 0 {
+		setPlayerSurfaceViewport(surface, rect)
+	}
+	if process != nil {
+		process.setViewport(rect)
 	}
 }
 
@@ -389,15 +407,6 @@ func (p *Player) Position() (float64, float64) {
 		position += time.Since(p.started).Seconds()
 	}
 	return position, p.duration
-}
-
-func (p *Player) SetViewport(rect ui.Rect) {
-	p.mu.Lock()
-	p.viewport = rect
-	if p.process != nil {
-		p.process.setViewport(rect)
-	}
-	p.mu.Unlock()
 }
 
 func (p *Player) PointerActivity() <-chan struct{} {

@@ -452,13 +452,64 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 
 func (a *appState) playerView(c *ui.Context) {
 	a.playerShortcuts(c)
-	area := ui.Box(c).Fill().Background(ui.Hex("#101317"))
-	if area.DoubleClicked() {
-		a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
+	isFullScreen := a.window != nil && a.window.IsFullScreen()
+	if isFullScreen {
+		videoArea := ui.Box(c.Key("player-video-host")).Fill().Background(ui.Hex("#101317"))
+		if videoArea.DoubleClicked() {
+			a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
+		}
+		videoArea.DrawOver(func(_ *ui.Painter, rect ui.Rect) {
+			a.player.SetViewport(rect)
+		})
+	} else {
+		ui.Column(c.Key("player-window-layout")).Fill().Children(func() {
+			titleBar := c.TitleBar()
+			leftPadding := float32(16)
+			if titleBar.Left > 0 {
+				leftPadding = titleBar.Left + 8
+			}
+			rightPadding := float32(148)
+			if titleBar.Right > 0 {
+				rightPadding = titleBar.Right + 8
+			}
+			ui.Row(c.Key("player-window-titlebar")).
+				Height(movieTitleBarHeight).
+				FillWidth().
+				Padding(0, rightPadding, 0, leftPadding).
+				Background(movieColors.sidebar).
+				BorderWidth(0, 0, 1, 0).
+				BorderColor(c.Theme().Border).
+				AlignItems(ui.Center).
+				Gap(10).
+				DragWindow().
+				Children(func() {
+					backBtn := actionButton(c, "").Size(32, 30).Padding(0).Radius(8).BorderWidth(0).
+						Background(ui.Transparent).TextColor(c.Theme().TextMuted).Label("返回")
+					if backBtn.Hovered() {
+						backBtn.Background(c.Theme().SurfaceHover)
+					}
+					backBtn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(16, 16) })
+					if backBtn.Clicked() {
+						a.stopPlayback()
+					}
+
+					title := a.playback.Title
+					if title == "" {
+						title = "正在播放"
+					}
+					ui.Text(c, title).FontSize(13).Bold().TextColor(c.Theme().Text).MaxLines(1)
+					ui.Spacer(c)
+				})
+
+			videoArea := ui.Box(c.Key("player-video-host")).Grow(1).FillWidth().Background(ui.Hex("#101317"))
+			if videoArea.DoubleClicked() {
+				a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
+			}
+			videoArea.DrawOver(func(_ *ui.Painter, rect ui.Rect) {
+				a.player.SetViewport(rect)
+			})
+		})
 	}
-	area.DrawOver(func(_ *ui.Painter, rect ui.Rect) {
-		a.player.SetViewport(rect)
-	})
 	if !a.player.Running() {
 		ui.Column(c).Absolute().Fill().Center().Gap(8).Children(func() {
 			if a.playback.Error != "" {

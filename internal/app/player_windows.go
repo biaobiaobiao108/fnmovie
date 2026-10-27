@@ -769,6 +769,7 @@ type playerSurfaceState struct {
 	lastClickTime time.Time
 	lastClickX    int16
 	lastClickY    int16
+	viewport      ui.Rect
 	mu            sync.Mutex
 }
 
@@ -851,6 +852,19 @@ func setPlayerSurfaceDoubleClick(host uintptr, fn func()) {
 		state.mu.Lock()
 		state.onDoubleClick = fn
 		state.mu.Unlock()
+	}
+}
+
+func setPlayerSurfaceViewport(host uintptr, rect ui.Rect) {
+	if host == 0 {
+		return
+	}
+	if val, ok := playerSurfaces.Load(host); ok {
+		state := val.(*playerSurfaceState)
+		state.mu.Lock()
+		state.viewport = rect
+		state.mu.Unlock()
+		fitPlayerSurface(host)
 	}
 }
 
@@ -986,12 +1000,40 @@ func fitPlayerSurface(host uintptr) {
 	if ok, _, _ := procGetPlayerClientRect.Call(parent, uintptr(unsafe.Pointer(&rect[0]))); ok != 0 {
 		var origin playerPoint
 		procClientToScreen.Call(parent, uintptr(unsafe.Pointer(&origin)))
+		scale := windowScale(parent)
+
+		targetX := origin.x
+		targetY := origin.y
+		targetW := rect[2]
+		targetH := rect[3]
+
+		if val, ok := playerSurfaces.Load(host); ok {
+			state := val.(*playerSurfaceState)
+			state.mu.Lock()
+			vp := state.viewport
+			state.mu.Unlock()
+			if vp.W > 0 && vp.H > 0 {
+				leftOffset := int32(math.Round(float64(vp.X) * scale))
+				topOffset := int32(math.Round(float64(vp.Y) * scale))
+				targetX = origin.x + leftOffset
+				targetY = origin.y + topOffset
+				targetW = int32(math.Round(float64(vp.W) * scale))
+				targetH = int32(math.Round(float64(vp.H) * scale))
+				if targetX+targetW > origin.x+rect[2] {
+					targetW = origin.x + rect[2] - targetX
+				}
+				if targetY+targetH > origin.y+rect[3] {
+					targetH = origin.y + rect[3] - targetY
+				}
+			}
+		}
+
 		var childBounds [4]int32
 		procGetWindowRect.Call(host, uintptr(unsafe.Pointer(&childBounds[0])))
-		if childBounds[0] == origin.x && childBounds[1] == origin.y && childBounds[2]-childBounds[0] == rect[2] && childBounds[3]-childBounds[1] == rect[3] {
+		if childBounds[0] == targetX && childBounds[1] == targetY && childBounds[2]-childBounds[0] == targetW && childBounds[3]-childBounds[1] == targetH {
 			return
 		}
-		procSetWindowPos.Call(host, 0, uintptr(origin.x), uintptr(origin.y), uintptr(rect[2]), uintptr(rect[3]), 0x0010|0x0004|0x0200)
+		procSetWindowPos.Call(host, 0, uintptr(targetX), uintptr(targetY), uintptr(targetW), uintptr(targetH), 0x0010|0x0004|0x0200)
 	}
 }
 

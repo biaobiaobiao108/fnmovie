@@ -84,7 +84,11 @@ func (a *appState) createPlayerOverlay() {
 	a.playerOverlayOpacity = 0
 	a.overlayMu.Unlock()
 	a.playerOverlayWindow.ShowInactive()
-	a.playerHeaderWindow.ShowInactive()
+	if a.window != nil && a.window.IsFullScreen() {
+		a.playerHeaderWindow.ShowInactive()
+	} else {
+		a.playerHeaderWindow.Hide()
+	}
 	a.syncPlayerOverlay()
 	a.animatePlayerOverlay(playerOverlayTargetOpacity)
 }
@@ -155,19 +159,27 @@ func (a *appState) syncPlayerOverlay() {
 	}
 	if a.player != nil {
 		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
-		topRatio := 0.0
-		if !a.window.IsFullScreen() && height > 0 {
-			topRatio = float64(movieTitleBarHeight) / float64(height)
+		vp := ui.Rect{X: 0, Y: 0, W: float32(width), H: float32(height)}
+		if !a.window.IsFullScreen() && height > movieTitleBarHeight {
+			vp.Y = float32(movieTitleBarHeight)
+			vp.H = float32(height - movieTitleBarHeight)
 		}
-		a.player.SetTopMarginRatio(topRatio)
-		a.player.SetViewport(ui.Rect{W: float32(width), H: float32(height)})
-		a.player.SetCaptionButtonCutout(!a.window.IsFullScreen(), a.window.NativeHandle())
+		a.player.SetTopMarginRatio(0)
+		a.player.SetViewport(vp)
+		a.player.SetCaptionButtonCutout(false, 0)
 	}
 	if a.playerHeaderWindow != nil {
-		setPlayerWindowButtonsCutout(a.playerHeaderWindow.NativeHandle(), a.window.NativeHandle(), !a.window.IsFullScreen())
+		setPlayerWindowButtonsCutout(a.playerHeaderWindow.NativeHandle(), a.window.NativeHandle(), false)
 	}
 	if a.window != nil && !a.window.IsFullScreen() {
 		a.window.SetWindowButtonsTheme(mygo.ThemeLight)
+		if a.playerHeaderWindow != nil {
+			a.playerHeaderWindow.Hide()
+		}
+	} else if a.window != nil && a.window.IsFullScreen() {
+		if a.playerHeaderWindow != nil && a.playerOverlayVisible {
+			a.playerHeaderWindow.ShowInactive()
+		}
 	}
 	if a.player != nil {
 		video := a.player.surface
@@ -290,7 +302,9 @@ func (a *appState) showPlayerOverlay() {
 	a.overlayMu.Unlock()
 	if !wasVisible {
 		a.playerOverlayWindow.ShowInactive()
-		a.playerHeaderWindow.ShowInactive()
+		if a.window != nil && a.window.IsFullScreen() {
+			a.playerHeaderWindow.ShowInactive()
+		}
 		if a.playerMenuWindow != nil {
 			a.playerMenuWindow.ShowInactive()
 		}
@@ -316,9 +330,7 @@ func (a *appState) hidePlayerOverlay(returnFocus bool) {
 		a.playerOverlayAnimationStart = time.Time{}
 		a.overlayMu.Unlock()
 		a.playerOverlayWindow.Hide()
-		if a.window == nil || a.window.IsFullScreen() {
-			a.playerHeaderWindow.Hide()
-		}
+		a.playerHeaderWindow.Hide()
 		if a.playerMenuWindow != nil {
 			a.playerMenuWindow.Hide()
 		}
@@ -355,11 +367,7 @@ func (a *appState) setPlayerOverlayOpacity(alpha float64) {
 		a.playerOverlayContent.SetOpacity(a.playerOverlayWindow, alpha)
 	}
 	if a.playerHeaderContent != nil && a.playerHeaderWindow != nil {
-		headerOpacity := alpha
-		if a.window != nil && !a.window.IsFullScreen() {
-			headerOpacity = 1
-		}
-		a.playerHeaderContent.SetOpacity(a.playerHeaderWindow, headerOpacity)
+		a.playerHeaderContent.SetOpacity(a.playerHeaderWindow, alpha)
 	}
 	if a.playerMenuContent != nil && a.playerMenuWindow != nil {
 		a.playerMenuContent.SetOpacity(a.playerMenuWindow, alpha)
@@ -400,9 +408,7 @@ func (a *appState) advancePlayerOverlayAnimation(c *ui.Context) {
 			// window actually had keyboard focus.
 			ownedFocus := a.playerOverlayHasFocus()
 			a.playerOverlayWindow.Hide()
-			if a.window.IsFullScreen() {
-				a.playerHeaderWindow.Hide()
-			}
+			a.playerHeaderWindow.Hide()
 			if a.playerMenuWindow != nil {
 				a.playerMenuWindow.Hide()
 			}
@@ -550,55 +556,25 @@ func (a *appState) playerMenuView(c *ui.Context) {
 
 func (a *appState) playerHeaderView(c *ui.Context) {
 	a.advancePlayerOverlayAnimation(c)
-	isFullScreen := a.window != nil && a.window.IsFullScreen()
-	if isFullScreen {
-		c.Root().Background(ui.Transparent)
-		c.SetTheme(playerOverlayTheme())
-		ui.Box(c).Absolute().Fill().PassThrough().LinearGradient(ui.LinearGradient{
-			Angle: 0,
-			Stops: []ui.GradientStop{
-				{Color: ui.RGBA(0, 0, 0, 0.65), At: 0},
-				{Color: ui.RGBA(0, 0, 0, 0), At: 1},
-			},
-		})
-	} else {
-		c.Root().Background(movieColors.sidebar)
-		c.SetTheme(movieTheme())
-		ui.Box(c).Absolute().Fill().Background(movieColors.sidebar).
-			BorderWidth(0, 0, 1, 0).BorderColor(movieColors.border)
-	}
-	rightMargin := float32(148)
-	if isFullScreen {
-		rightMargin = 20
-	}
-	row := ui.Row(c).Absolute().Fill().Padding(0, rightMargin, 0, 16).Gap(10).AlignItems(ui.Center).DragWindow()
+	c.Root().Background(ui.Transparent)
+	c.SetTheme(playerOverlayTheme())
+	ui.Box(c).Absolute().Fill().PassThrough().LinearGradient(ui.LinearGradient{
+		Angle: 0,
+		Stops: []ui.GradientStop{
+			{Color: ui.RGBA(0, 0, 0, 0.65), At: 0},
+			{Color: ui.RGBA(0, 0, 0, 0), At: 1},
+		},
+	})
+	row := ui.Row(c).Absolute().Fill().Padding(0, 20, 0, 16).Gap(10).AlignItems(ui.Center)
 	row.Children(func() {
-		if isFullScreen {
-			playerOverlayIconButton(c, "back", "返回影片库", 36, 16).OnClick(a.stopPlayback)
-		} else {
-			btn := actionButton(c, "").Size(34, 30).Padding(0).Radius(8).BorderWidth(0).
-				Background(ui.Color{}).TextColor(movieColors.text).Label("返回影片库")
-			if btn.Hovered() {
-				btn.Background(movieColors.surfaceHover)
-			}
-			btn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(17, 17) })
-			btn.OnClick(a.stopPlayback)
-		}
+		playerOverlayIconButton(c, "back", "返回影片库", 36, 16).OnClick(a.stopPlayback)
 		title := strings.TrimSpace(a.playback.Title)
 		if title == "" {
 			title = "正在播放"
 		}
-		textColor := movieColors.text
-		if isFullScreen {
-			textColor = ui.RGBA(255, 255, 255, 0.94)
-		}
-		ui.Text(c, title).Grow(1).MinWidth(0).FontSize(13.5).Bold().TextColor(textColor).SingleLine()
+		ui.Text(c, title).Grow(1).MinWidth(0).FontSize(13.5).Bold().TextColor(ui.RGBA(255, 255, 255, 0.94)).SingleLine()
 		if errorMessage := strings.TrimSpace(a.playback.Error); errorMessage != "" {
-			errColor := movieColors.danger
-			if isFullScreen {
-				errColor = playerOverlayAccent()
-			}
-			ui.Text(c, errorMessage).Shrink(0).FontSize(11).TextColor(errColor).SingleLine()
+			ui.Text(c, errorMessage).Shrink(0).FontSize(11).TextColor(playerOverlayAccent()).SingleLine()
 		}
 	})
 }

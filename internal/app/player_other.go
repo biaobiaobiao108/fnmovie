@@ -36,6 +36,7 @@ func showPlayerSurface(uintptr)                            {}
 func hidePlayerSurface(uintptr)                            {}
 func setPlayerWindowButtonsCutout(uintptr, uintptr, bool)  {}
 func setPlayerSurfaceDoubleClick(uintptr, func())          {}
+func setPlayerSurfaceViewport(uintptr, ui.Rect)            {}
 func setupPlayerHeaderWindowDrag(uintptr, uintptr, func()) {}
 func cleanupPlayerHeaderWindowDrag(uintptr)                {}
 func findMyGoCaptionButtons(uintptr) uintptr               { return 0 }

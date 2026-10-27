@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -475,30 +476,6 @@ func checkNativeSeekFeedback(a *appState, onUI func(func())) error {
 	return nil
 }
 
-func hasCaptionButtonCutout(hwnd, owner uintptr) bool {
-	var client [4]int32
-	if ok, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetClientRect").Call(hwnd, uintptr(unsafe.Pointer(&client[0]))); ok == 0 {
-		return false
-	}
-	scale := windowScale(owner)
-	cutWidth := int32(46 * 3 * scale)
-	cutHeight := int32(float64(movieTitleBarHeight) * scale)
-	gdi := syscall.NewLazyDLL("gdi32.dll")
-	region, _, _ := gdi.NewProc("CreateRectRgn").Call(0, 0, 0, 0)
-	if region == 0 {
-		return false
-	}
-	defer gdi.NewProc("DeleteObject").Call(region)
-	kind, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetWindowRgn").Call(hwnd, region)
-	if kind == 0 {
-		return false
-	}
-	pointInRegion := gdi.NewProc("PtInRegion")
-	button, _, _ := pointInRegion.Call(region, uintptr(client[2]-cutWidth/2), uintptr(cutHeight/2))
-	content, _, _ := pointInRegion.Call(region, uintptr(client[2]/2), uintptr(client[3]/2))
-	return button == 0 && content != 0
-}
-
 func isNativeWindowAbove(user *syscall.LazyDLL, candidate, anchor uintptr) bool {
 	getWindow := user.NewProc("GetWindow")
 	for hwnd, i := anchor, 0; hwnd != 0 && i < 1000; i++ {
@@ -526,7 +503,12 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 		getClient.Call(hwnd, uintptr(unsafe.Pointer(&client[0])))
 		var origin playerPoint
 		clientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&origin)))
-		return [4]int32{origin.x, origin.y, origin.x + client[2], origin.y + client[3]}
+		scale := windowScale(hwnd)
+		top := origin.y
+		if a.window != nil && !a.window.IsFullScreen() {
+			top += int32(math.Round(float64(movieTitleBarHeight) * scale))
+		}
+		return [4]int32{origin.x, top, origin.x + client[2], origin.y + client[3]}
 	}
 	waitForBounds := func() error {
 		deadline := time.Now().Add(2 * time.Second)
@@ -557,9 +539,6 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 	}
 	if err := waitForBounds(); err != nil {
 		return err
-	}
-	if !hasCaptionButtonCutout(video, main) || !hasCaptionButtonCutout(a.playerHeaderWindow.NativeHandle(), main) {
-		return fmt.Errorf("video or header popup does not expose MyGo's native caption controls")
 	}
 	captionButtons := findMyGoCaptionButtons(main)
 	captionParent, _, _ := user.NewProc("GetParent").Call(captionButtons)
@@ -599,7 +578,7 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 	onUI(func() {
 		restoreWindowFocus(a.window)
 		a.showPlayerOverlay()
-		if !isNativeWindowAbove(user, a.playerHeaderWindow.NativeHandle(), video) {
+		if a.window != nil && a.window.IsFullScreen() && !isNativeWindowAbove(user, a.playerHeaderWindow.NativeHandle(), video) {
 			zErr = fmt.Errorf("playback header is behind video")
 			return
 		}
