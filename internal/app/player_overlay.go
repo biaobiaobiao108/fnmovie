@@ -84,10 +84,8 @@ func (a *appState) createPlayerOverlay() {
 	a.playerOverlayOpacity = 0
 	a.overlayMu.Unlock()
 	a.playerOverlayWindow.ShowInactive()
-	if a.window != nil && a.window.IsFullScreen() {
+	if a.playerHeaderWindow != nil {
 		a.playerHeaderWindow.ShowInactive()
-	} else {
-		a.playerHeaderWindow.Hide()
 	}
 	a.syncPlayerOverlay()
 	a.animatePlayerOverlay(playerOverlayTargetOpacity)
@@ -160,25 +158,16 @@ func (a *appState) syncPlayerOverlay() {
 	if a.player != nil {
 		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
 		vp := ui.Rect{X: 0, Y: 0, W: float32(width), H: float32(height)}
-		if !a.window.IsFullScreen() && height > movieTitleBarHeight {
-			vp.Y = float32(movieTitleBarHeight)
-			vp.H = float32(height - movieTitleBarHeight)
-		}
 		a.player.SetTopMarginRatio(0)
 		a.player.SetViewport(vp)
 		a.player.SetCaptionButtonCutout(false, 0)
 	}
 	if a.playerHeaderWindow != nil {
 		setPlayerWindowButtonsCutout(a.playerHeaderWindow.NativeHandle(), a.window.NativeHandle(), false)
-	}
-	if a.window != nil && !a.window.IsFullScreen() {
-		a.window.SetWindowButtonsTheme(mygo.ThemeLight)
-		if a.playerHeaderWindow != nil {
-			a.playerHeaderWindow.Hide()
-		}
-	} else if a.window != nil && a.window.IsFullScreen() {
-		if a.playerHeaderWindow != nil && a.playerOverlayVisible {
+		if a.playerOverlayVisible {
 			a.playerHeaderWindow.ShowInactive()
+		} else {
+			a.playerHeaderWindow.Hide()
 		}
 	}
 	if a.player != nil {
@@ -302,7 +291,7 @@ func (a *appState) showPlayerOverlay() {
 	a.overlayMu.Unlock()
 	if !wasVisible {
 		a.playerOverlayWindow.ShowInactive()
-		if a.window != nil && a.window.IsFullScreen() {
+		if a.playerHeaderWindow != nil {
 			a.playerHeaderWindow.ShowInactive()
 		}
 		if a.playerMenuWindow != nil {
@@ -558,14 +547,7 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	a.advancePlayerOverlayAnimation(c)
 	c.Root().Background(ui.Transparent)
 	c.SetTheme(playerOverlayTheme())
-	ui.Box(c).Absolute().Fill().PassThrough().LinearGradient(ui.LinearGradient{
-		Angle: 0,
-		Stops: []ui.GradientStop{
-			{Color: ui.RGBA(0, 0, 0, 0.65), At: 0},
-			{Color: ui.RGBA(0, 0, 0, 0), At: 1},
-		},
-	})
-	row := ui.Row(c).Absolute().Fill().Padding(0, 20, 0, 16).Gap(10).AlignItems(ui.Center)
+	row := ui.Row(c).Absolute().Fill().Padding(0, 20, 0, 16).Gap(10).AlignItems(ui.Center).DragWindow()
 	row.Children(func() {
 		playerOverlayIconButton(c, "back", "返回影片库", 36, 16).OnClick(a.stopPlayback)
 		title := strings.TrimSpace(a.playback.Title)
