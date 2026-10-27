@@ -452,7 +452,7 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 
 func (a *appState) playerView(c *ui.Context) {
 	a.playerShortcuts(c)
-	area := ui.Box(c).Fill().Background(ui.Hex("#000000"))
+	area := ui.Box(c).Fill().Background(ui.Hex("#101317"))
 	area.DrawOver(func(_ *ui.Painter, rect ui.Rect) {
 		a.player.SetViewport(rect)
 	})

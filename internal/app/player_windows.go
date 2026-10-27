@@ -921,3 +921,21 @@ func findMyGoSurface(parent uintptr) uintptr {
 	procEnumChildWindows.Call(parent, callback, 0)
 	return result
 }
+
+func findMyGoCaptionButtons(parent uintptr) uintptr {
+	if parent == 0 {
+		return 0
+	}
+	var buttons uintptr
+	callback := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
+		className := make([]uint16, 64)
+		length, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&className[0])), uintptr(len(className)))
+		if length > 0 && syscall.UTF16ToString(className[:length]) == "MyGoCaption" {
+			buttons = hwnd
+			return 0
+		}
+		return 1
+	})
+	procEnumChildWindows.Call(parent, callback, 0)
+	return buttons
+}

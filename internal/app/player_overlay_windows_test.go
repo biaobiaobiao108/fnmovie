@@ -81,21 +81,26 @@ func runNativePlaybackOverlayComposition() error {
 				dc, _, _ := getDC.Call(0)
 				defer release.Call(0, dc)
 				checks := []struct {
-					x, y  int
-					clear bool
+					x, y   int
+					header bool
+					clear  bool
 				}{
-					{10, 10, true}, {bounds.Width - 10, 20, true}, {10, bounds.Height - playerOverlayControlHeight - 10, true},
-					{bounds.Width - 10, bounds.Height - 45, false},
+					{10, 10, true, false}, {bounds.Width - 10, 20, false, true}, {10, bounds.Height - playerOverlayControlHeight - 10, false, true},
+					{bounds.Width - 10, bounds.Height - 45, false, false},
 				}
 				var err error
 				for _, check := range checks {
 					color, _, _ := getPixel.Call(dc, uintptr(float64(bounds.X+check.x)*scale), uintptr(float64(bounds.Y+check.y)*scale))
 					r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
+					if check.header && (absInt(r-16) > 3 || absInt(g-19) > 3 || absInt(b-23) > 3) {
+						err = fmt.Errorf("player titlebar RGB(%d,%d,%d), want the matched dark titlebar surface", r, g, b)
+						break
+					}
 					if check.clear && (absInt(r-24) > 3 || absInt(g-164) > 3 || absInt(b-98) > 3) {
 						err = fmt.Errorf("transparent margin (%d,%d) = RGB(%d,%d,%d), want video background", check.x, check.y, r, g, b)
 						break
 					}
-					if !check.clear && (g < 45 || g > 130) {
+					if !check.header && !check.clear && (g < 45 || g > 130) {
 						err = fmt.Errorf("control fade green=%d, want translucent blend rather than opaque black", g)
 						break
 					}
@@ -295,7 +300,19 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 	}))
 	defer server.Close()
 	onUI := func(fn func()) { done := make(chan struct{}); a.window.Update(func() { fn(); close(done) }); <-done }
-	finish := func(err error) { onUI(func() { a.closePlayer(); _ = os.Chdir(cwd); result <- err; mygo.App.Quit() }) }
+	finish := func(err error) {
+		onUI(func() {
+			a.closePlayer()
+			caption := findMyGoCaptionButtons(a.window.NativeHandle())
+			parent, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetParent").Call(caption)
+			if err == nil && (caption == 0 || parent != a.window.NativeHandle()) {
+				err = fmt.Errorf("MyGo caption controls were not restored to the main window")
+			}
+			_ = os.Chdir(cwd)
+			result <- err
+			mygo.App.Quit()
+		})
+	}
 	if err := checkNativeSeriesCast(a, onUI); err != nil {
 		finish(err)
 		return
@@ -541,8 +558,13 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 	if err := waitForBounds(); err != nil {
 		return err
 	}
-	if hasCaptionButtonCutout(video, main) || hasCaptionButtonCutout(a.playerHeaderWindow.NativeHandle(), main) {
-		return fmt.Errorf("video or header popup cuts a hole under the player caption controls")
+	if !hasCaptionButtonCutout(video, main) || !hasCaptionButtonCutout(a.playerHeaderWindow.NativeHandle(), main) {
+		return fmt.Errorf("video or header popup does not expose MyGo's native caption controls")
+	}
+	captionButtons := findMyGoCaptionButtons(main)
+	captionParent, _, _ := user.NewProc("GetParent").Call(captionButtons)
+	if captionButtons == 0 || captionParent != main {
+		return fmt.Errorf("MyGo's native caption controls are not attached to the main window")
 	}
 	client := clientScreenRect(main)
 	scale := windowScale(main)
@@ -552,8 +574,8 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 	var className [64]uint16
 	length, _, _ := user.NewProc("GetClassNameW").Call(hit, uintptr(unsafe.Pointer(&className[0])), uintptr(len(className)))
 	captionRoot, _, _ := user.NewProc("GetAncestor").Call(hit, 2) // GA_ROOT
-	if captionRoot != a.playerHeaderWindow.NativeHandle() {
-		return fmt.Errorf("player caption buttons are not above video: hit=%x class=%q root=%x header=%x", hit, syscall.UTF16ToString(className[:length]), captionRoot, a.playerHeaderWindow.NativeHandle())
+	if captionRoot != main || hit != captionButtons || syscall.UTF16ToString(className[:length]) != "MyGoCaption" {
+		return fmt.Errorf("MyGo's single native caption control set is not exposed above video: hit=%x class=%q root=%x main=%x caption=%x", hit, syscall.UTF16ToString(className[:length]), captionRoot, main, captionButtons)
 	}
 
 	// Move and resize the owner and wait for the popup to match its client area.
@@ -642,14 +664,14 @@ func checkNativeVideoFrames(a *appState, onUI func(func()), duration time.Durati
 					return
 				}
 			}
-			// The caption controls sit over the video without punching a black
-			// hole in the top-right corner.
+			// The native MyGo caption controls share a matched dark titlebar
+			// band, so the video aperture does not appear as a black square.
 			captionX := bounds.X + bounds.Width - 130
 			captionY := bounds.Y + movieTitleBarHeight/2
 			color, _, _ := getPixel.Call(dc, uintptr(float64(captionX)*scale), uintptr(float64(captionY)*scale))
 			r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
-			if absInt(r-24) > 12 || absInt(g-80) > 12 || absInt(b-164) > 12 {
-				frameErr = fmt.Errorf("video frame %d missing beneath caption controls: RGB(%d,%d,%d)", frame, r, g, b)
+			if absInt(r-16) > 3 || absInt(g-19) > 3 || absInt(b-23) > 3 {
+				frameErr = fmt.Errorf("player titlebar %d does not match the caption aperture: RGB(%d,%d,%d)", frame, r, g, b)
 			}
 		})
 		if frameErr != nil {

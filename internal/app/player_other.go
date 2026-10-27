@@ -34,5 +34,6 @@ func createPlayerSurface(uintptr) (uintptr, error) {
 func showPlayerSurface(uintptr)                           {}
 func hidePlayerSurface(uintptr)                           {}
 func setPlayerWindowButtonsCutout(uintptr, uintptr, bool) {}
+func findMyGoCaptionButtons(uintptr) uintptr              { return 0 }
 func placePlayerOverlayAboveSurface(uintptr, uintptr)     {}
 func destroyPlayerSurface(uintptr)                        {}
