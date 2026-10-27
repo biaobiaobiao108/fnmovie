@@ -92,8 +92,8 @@ func runNativePlaybackOverlayComposition() error {
 				for _, check := range checks {
 					color, _, _ := getPixel.Call(dc, uintptr(float64(bounds.X+check.x)*scale), uintptr(float64(bounds.Y+check.y)*scale))
 					r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
-					if check.header && (absInt(r-16) > 3 || absInt(g-19) > 3 || absInt(b-23) > 3) {
-						err = fmt.Errorf("player titlebar RGB(%d,%d,%d), want the matched dark titlebar surface", r, g, b)
+					if check.header && (absInt(r-int(movieColors.sidebar.R)) > 3 || absInt(g-int(movieColors.sidebar.G)) > 3 || absInt(b-int(movieColors.sidebar.B)) > 3) {
+						err = fmt.Errorf("player titlebar RGB(%d,%d,%d), want the matched titlebar surface", r, g, b)
 						break
 					}
 					if check.clear && (absInt(r-24) > 3 || absInt(g-164) > 3 || absInt(b-98) > 3) {
@@ -664,13 +664,13 @@ func checkNativeVideoFrames(a *appState, onUI func(func()), duration time.Durati
 					return
 				}
 			}
-			// The native MyGo caption controls share a matched dark titlebar
-			// band, so the video aperture does not appear as a black square.
+			// The native MyGo caption controls share a matched titlebar
+			// band, so the video aperture does not appear as an unmatched square.
 			captionX := bounds.X + bounds.Width - 130
 			captionY := bounds.Y + movieTitleBarHeight/2
 			color, _, _ := getPixel.Call(dc, uintptr(float64(captionX)*scale), uintptr(float64(captionY)*scale))
 			r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
-			if absInt(r-16) > 3 || absInt(g-19) > 3 || absInt(b-23) > 3 {
+			if absInt(r-int(movieColors.sidebar.R)) > 3 || absInt(g-int(movieColors.sidebar.G)) > 3 || absInt(b-int(movieColors.sidebar.B)) > 3 {
 				frameErr = fmt.Errorf("player titlebar %d does not match the caption aperture: RGB(%d,%d,%d)", frame, r, g, b)
 			}
 		})

@@ -44,6 +44,8 @@ var (
 	procClientToScreen      = user32Player.NewProc("ClientToScreen")
 	procSetWindowLongPtrW   = user32Player.NewProc("SetWindowLongPtrW")
 	procCallWindowProcW     = user32Player.NewProc("CallWindowProcW")
+	procReleaseCapture      = user32Player.NewProc("ReleaseCapture")
+	procSendMessageW        = user32Player.NewProc("SendMessageW")
 	procGetPlayerModule     = syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW")
 	procReadProcessMemory   = syscall.NewLazyDLL("kernel32.dll").NewProc("ReadProcessMemory")
 )
@@ -849,6 +851,107 @@ func setPlayerSurfaceDoubleClick(host uintptr, fn func()) {
 		state.mu.Lock()
 		state.onDoubleClick = fn
 		state.mu.Unlock()
+	}
+}
+
+type playerHeaderState struct {
+	originalProc  uintptr
+	owner         uintptr
+	onDoubleClick func()
+	lastClickTime time.Time
+	lastClickX    int16
+	lastClickY    int16
+	mu            sync.Mutex
+}
+
+var (
+	playerHeaders               sync.Map // uintptr -> *playerHeaderState
+	playerHeaderWndProcInitOnce sync.Once
+	playerHeaderWndProcCallback uintptr
+)
+
+func playerHeaderWndProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
+	val, ok := playerHeaders.Load(hwnd)
+	if !ok {
+		return 0
+	}
+	state := val.(*playerHeaderState)
+	original := state.originalProc
+	owner := state.owner
+
+	switch msg {
+	case 0x00A1: // WM_NCLBUTTONDOWN
+		if owner != 0 {
+			procReleaseCapture.Call()
+			var pt playerPoint
+			procGetCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
+			lParamPos := uintptr(uint32(pt.x)) | (uintptr(uint32(pt.y)) << 16)
+			res, _, _ := procSendMessageW.Call(owner, 0x00A1, 2 /* HTCAPTION */, lParamPos)
+			return res
+		}
+	case 0x00A3, 0x0203: // WM_NCLBUTTONDBLCLK, WM_LBUTTONDBLCLK
+		state.mu.Lock()
+		state.lastClickTime = time.Time{}
+		fn := state.onDoubleClick
+		state.mu.Unlock()
+		if fn != nil {
+			fn()
+		}
+		return 0
+	case 0x0201: // WM_LBUTTONDOWN
+		state.mu.Lock()
+		now := time.Now()
+		x := int16(lParam & 0xffff)
+		y := int16((lParam >> 16) & 0xffff)
+		isDbl := !state.lastClickTime.IsZero() &&
+			now.Sub(state.lastClickTime) <= 450*time.Millisecond &&
+			absDiff(x, state.lastClickX) <= 6 &&
+			absDiff(y, state.lastClickY) <= 6
+		if isDbl {
+			state.lastClickTime = time.Time{}
+			fn := state.onDoubleClick
+			state.mu.Unlock()
+			if fn != nil {
+				fn()
+			}
+			return 0
+		}
+		state.lastClickTime = now
+		state.lastClickX = x
+		state.lastClickY = y
+		state.mu.Unlock()
+	}
+
+	res, _, _ := procCallWindowProcW.Call(original, hwnd, uintptr(msg), wParam, lParam)
+	return res
+}
+
+func setupPlayerHeaderWindowDrag(header, owner uintptr, onDoubleClick func()) {
+	if header == 0 || owner == 0 {
+		return
+	}
+	playerHeaderWndProcInitOnce.Do(func() {
+		playerHeaderWndProcCallback = syscall.NewCallback(playerHeaderWndProc)
+	})
+	original, _, _ := procSetWindowLongPtrW.Call(header, ^uintptr(3), playerHeaderWndProcCallback)
+	if original != 0 {
+		state := &playerHeaderState{
+			originalProc:  original,
+			owner:         owner,
+			onDoubleClick: onDoubleClick,
+		}
+		playerHeaders.Store(header, state)
+	}
+}
+
+func cleanupPlayerHeaderWindowDrag(header uintptr) {
+	if header != 0 {
+		if val, ok := playerHeaders.LoadAndDelete(header); ok {
+			state := val.(*playerHeaderState)
+			if state.originalProc != 0 {
+				procSetWindowLongPtrW.Call(header, ^uintptr(3), state.originalProc)
+			}
+		}
 	}
 }
 

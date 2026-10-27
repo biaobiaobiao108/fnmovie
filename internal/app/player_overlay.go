@@ -60,6 +60,15 @@ func (a *appState) createPlayerOverlay() {
 		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: a.playerHeaderContent,
 	})
+	setupPlayerHeaderWindowDrag(a.playerHeaderWindow.NativeHandle(), a.window.NativeHandle(), func() {
+		if a.window != nil {
+			a.window.Update(func() {
+				if a.window != nil && a.playback.Active {
+					a.togglePlayerFullscreen(false)
+				}
+			})
+		}
+	})
 	a.playerSeekFeedbackWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: "跳转状态", X: bounds.X, Y: bounds.Y, Width: playerSeekFeedbackWidth, Height: playerSeekFeedbackHeight,
 		Parent: a.window, Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
@@ -156,6 +165,9 @@ func (a *appState) syncPlayerOverlay() {
 	}
 	if a.playerHeaderWindow != nil {
 		setPlayerWindowButtonsCutout(a.playerHeaderWindow.NativeHandle(), a.window.NativeHandle(), !a.window.IsFullScreen())
+	}
+	if a.window != nil && !a.window.IsFullScreen() {
+		a.window.SetWindowButtonsTheme(mygo.ThemeLight)
 	}
 	if a.player != nil {
 		video := a.player.surface
@@ -414,6 +426,7 @@ func (a *appState) closePlayerOverlay() {
 		a.playerOverlayWindow = nil
 	}
 	if a.playerHeaderWindow != nil {
+		cleanupPlayerHeaderWindowDrag(a.playerHeaderWindow.NativeHandle())
 		a.playerHeaderWindow.Destroy()
 		a.playerHeaderWindow = nil
 	}
@@ -540,6 +553,7 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	isFullScreen := a.window != nil && a.window.IsFullScreen()
 	if isFullScreen {
 		c.Root().Background(ui.Transparent)
+		c.SetTheme(playerOverlayTheme())
 		ui.Box(c).Absolute().Fill().PassThrough().LinearGradient(ui.LinearGradient{
 			Angle: 0,
 			Stops: []ui.GradientStop{
@@ -548,27 +562,43 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 			},
 		})
 	} else {
-		c.Root().Background(ui.RGB(16, 19, 23))
-		ui.Box(c).Absolute().Fill().Background(ui.RGB(16, 19, 23))
+		c.Root().Background(movieColors.sidebar)
+		c.SetTheme(movieTheme())
+		ui.Box(c).Absolute().Fill().Background(movieColors.sidebar).
+			BorderWidth(0, 0, 1, 0).BorderColor(movieColors.border)
 	}
-	c.SetTheme(playerOverlayTheme())
 	rightMargin := float32(148)
 	if isFullScreen {
 		rightMargin = 20
 	}
-	row := ui.Row(c).Absolute().Fill().Padding(0, rightMargin, 0, 20).Gap(10).AlignItems(ui.Center).DragWindow()
-	if row.DoubleClicked() {
-		a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
-	}
+	row := ui.Row(c).Absolute().Fill().Padding(0, rightMargin, 0, 16).Gap(10).AlignItems(ui.Center).DragWindow()
 	row.Children(func() {
-		playerOverlayIconButton(c, "back", "返回影片库", 36, 16).OnClick(a.stopPlayback)
+		if isFullScreen {
+			playerOverlayIconButton(c, "back", "返回影片库", 36, 16).OnClick(a.stopPlayback)
+		} else {
+			btn := actionButton(c, "").Size(34, 30).Padding(0).Radius(8).BorderWidth(0).
+				Background(ui.Color{}).TextColor(movieColors.text).Label("返回影片库")
+			if btn.Hovered() {
+				btn.Background(movieColors.surfaceHover)
+			}
+			btn.Children(func() { ui.Icon(c, playerOverlayIcons["back"]).Size(17, 17) })
+			btn.OnClick(a.stopPlayback)
+		}
 		title := strings.TrimSpace(a.playback.Title)
 		if title == "" {
 			title = "正在播放"
 		}
-		ui.Text(c, title).Grow(1).MinWidth(0).FontSize(14).Bold().TextColor(ui.RGBA(255, 255, 255, 0.94)).SingleLine()
+		textColor := movieColors.text
+		if isFullScreen {
+			textColor = ui.RGBA(255, 255, 255, 0.94)
+		}
+		ui.Text(c, title).Grow(1).MinWidth(0).FontSize(13.5).Bold().TextColor(textColor).SingleLine()
 		if errorMessage := strings.TrimSpace(a.playback.Error); errorMessage != "" {
-			ui.Text(c, errorMessage).Shrink(0).FontSize(11).TextColor(playerOverlayAccent()).SingleLine()
+			errColor := movieColors.danger
+			if isFullScreen {
+				errColor = playerOverlayAccent()
+			}
+			ui.Text(c, errorMessage).Shrink(0).FontSize(11).TextColor(errColor).SingleLine()
 		}
 	})
 }

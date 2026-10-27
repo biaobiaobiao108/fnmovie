@@ -32,10 +32,12 @@ func windowScale(uintptr) float64                           { return 1 }
 func createPlayerSurface(uintptr) (uintptr, error) {
 	return 0, errors.New("embedded mpv playback is only supported on Windows")
 }
-func showPlayerSurface(uintptr)                           {}
-func hidePlayerSurface(uintptr)                           {}
-func setPlayerWindowButtonsCutout(uintptr, uintptr, bool) {}
-func setPlayerSurfaceDoubleClick(uintptr, func())         {}
-func findMyGoCaptionButtons(uintptr) uintptr              { return 0 }
-func placePlayerOverlayAboveSurface(uintptr, uintptr)     {}
-func destroyPlayerSurface(uintptr)                        {}
+func showPlayerSurface(uintptr)                            {}
+func hidePlayerSurface(uintptr)                            {}
+func setPlayerWindowButtonsCutout(uintptr, uintptr, bool)  {}
+func setPlayerSurfaceDoubleClick(uintptr, func())          {}
+func setupPlayerHeaderWindowDrag(uintptr, uintptr, func()) {}
+func cleanupPlayerHeaderWindowDrag(uintptr)                {}
+func findMyGoCaptionButtons(uintptr) uintptr               { return 0 }
+func placePlayerOverlayAboveSurface(uintptr, uintptr)      {}
+func destroyPlayerSurface(uintptr)                         {}

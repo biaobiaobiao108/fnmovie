@@ -134,7 +134,7 @@ func (a *appState) startPlayback(item MediaItem) {
 				a.personCancel = nil
 			}
 			requestPlayer.ShowSurface()
-			a.window.SetWindowButtonsTheme(mygo.ThemeDark)
+			a.window.SetWindowButtonsTheme(mygo.ThemeLight)
 			a.playerProxy = proxy
 			a.playingItem = &item
 			a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
