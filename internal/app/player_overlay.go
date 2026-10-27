@@ -596,9 +596,7 @@ func playerCaptionButton(c *ui.Context, iconName, label string) ui.Element {
 		}
 	}
 	b.Background(b.AnimateColor("caption-background", background, ui.Animation{Duration: 100 * time.Millisecond}))
-	b.Children(func() {
-		ui.Icon(c, playerOverlayIcons[iconName]).Size(12, 12).Shadow(0, 1, 2, 0, ui.RGBA(0, 0, 0, 0.65))
-	})
+	b.Children(func() { ui.Icon(c, playerOverlayIcons[iconName]).Size(12, 12) })
 	return b
 }
 
