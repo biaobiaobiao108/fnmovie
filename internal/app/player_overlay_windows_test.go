@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
@@ -46,15 +47,20 @@ func runNativePlaybackOverlayComposition() error {
 	result := make(chan error, 1)
 	mygo.App.WhenReady(func() {
 		a := &appState{player: NewPlayer(), playback: PlaybackState{Active: true, Title: "透明控件验证", Duration: 7200, Position: 1200, Volume: 80, Speed: 1}}
-		a.window = mygo.NewWindow(mygo.WindowOptions{Title: "FnMovie overlay test", Width: 1000, Height: 650, AlwaysOnTop: true, Content: ui.View(func(c *ui.Context) {
-			a.advancePlayerFullscreen(c)
-			a.advancePlayerOverlayAnimation(c)
-			if a.player.Running() {
-				a.playerView(c)
-				return
-			}
-			ui.Box(c).Fill().Background(ui.RGB(24, 164, 98))
-		})})
+		a.window = mygo.NewWindow(mygo.WindowOptions{
+			Title: "FnMovie overlay test", Width: 1000, Height: 650, AlwaysOnTop: true,
+			TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: movieTitleBarHeight,
+			Vibrancy: mygo.VibrancySidebar, BackgroundColor: movieWindowBackground,
+			Content: ui.View(func(c *ui.Context) {
+				a.advancePlayerFullscreen(c)
+				a.advancePlayerOverlayAnimation(c)
+				if a.player.Running() {
+					a.playerView(c)
+					return
+				}
+				ui.Box(c).Fill().Background(ui.RGB(24, 164, 98))
+			}),
+		})
 		a.createPlayerOverlay()
 		a.window.Focus()
 		go func() {
@@ -89,7 +95,7 @@ func runNativePlaybackOverlayComposition() error {
 						err = fmt.Errorf("transparent margin (%d,%d) = RGB(%d,%d,%d), want video background", check.x, check.y, r, g, b)
 						break
 					}
-					if !check.clear && (g < 55 || g > 130) {
+					if !check.clear && (g < 45 || g > 130) {
 						err = fmt.Errorf("control backplate green=%d, want translucent blend rather than opaque black", g)
 						break
 					}
@@ -324,6 +330,23 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
+	var running bool
+	onUI(func() {
+		running = a.player.Running()
+	})
+	if !running {
+		finish(fmt.Errorf("playback state active but libmpv is not running: status=%s", a.status))
+		return
+	}
+	time.Sleep(800 * time.Millisecond)
+	if err := checkNativeVideoFrames(a, onUI, 5*time.Second); err != nil {
+		finish(fmt.Errorf("video was not visible before fullscreen: %w", err))
+		return
+	}
+	if err := checkNativePlayerWindowLifecycle(a, onUI); err != nil {
+		finish(err)
+		return
+	}
 	if err := checkNativeFullscreen(a, onUI); err != nil {
 		finish(err)
 		return
@@ -340,6 +363,7 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 	onUI(func() {
 		restoreWindowFocus(a.window)
 		foregroundBefore, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetForegroundWindow").Call()
+		a.player.ShowSurface()
 		a.hidePlayerOverlay(false)
 		a.showPlayerOverlay()
 		foreground, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetForegroundWindow").Call()
@@ -432,6 +456,169 @@ func checkNativeSeekFeedback(a *appState, onUI func(func())) error {
 		}
 	}
 	return nil
+}
+
+func hasCaptionButtonCutout(hwnd, owner uintptr) bool {
+	var client [4]int32
+	if ok, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetClientRect").Call(hwnd, uintptr(unsafe.Pointer(&client[0]))); ok == 0 {
+		return false
+	}
+	scale := windowScale(owner)
+	cutWidth := int32(46 * 3 * scale)
+	cutHeight := int32(float64(movieTitleBarHeight) * scale)
+	gdi := syscall.NewLazyDLL("gdi32.dll")
+	region, _, _ := gdi.NewProc("CreateRectRgn").Call(0, 0, 0, 0)
+	if region == 0 {
+		return false
+	}
+	defer gdi.NewProc("DeleteObject").Call(region)
+	kind, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetWindowRgn").Call(hwnd, region)
+	if kind == 0 {
+		return false
+	}
+	pointInRegion := gdi.NewProc("PtInRegion")
+	button, _, _ := pointInRegion.Call(region, uintptr(client[2]-cutWidth/2), uintptr(cutHeight/2))
+	content, _, _ := pointInRegion.Call(region, uintptr(client[2]/2), uintptr(client[3]/2))
+	return button == 0 && content != 0
+}
+
+func isNativeWindowAbove(user *syscall.LazyDLL, candidate, anchor uintptr) bool {
+	getWindow := user.NewProc("GetWindow")
+	for hwnd, i := anchor, 0; hwnd != 0 && i < 1000; i++ {
+		hwnd, _, _ = getWindow.Call(hwnd, 3) // GW_HWNDPREV: window above in z-order
+		if hwnd == candidate {
+			return true
+		}
+	}
+	return false
+}
+
+func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
+	user := syscall.NewLazyDLL("user32.dll")
+	getRect, getClient := user.NewProc("GetWindowRect"), user.NewProc("GetClientRect")
+	clientToScreen, setWindowPos := user.NewProc("ClientToScreen"), user.NewProc("SetWindowPos")
+	showWindow, isVisible := user.NewProc("ShowWindow"), user.NewProc("IsWindowVisible")
+	getLong := user.NewProc("GetWindowLongPtrW")
+	readWindowRect := func(hwnd uintptr) [4]int32 {
+		var rect [4]int32
+		getRect.Call(hwnd, uintptr(unsafe.Pointer(&rect[0])))
+		return rect
+	}
+	clientScreenRect := func(hwnd uintptr) [4]int32 {
+		var client [4]int32
+		getClient.Call(hwnd, uintptr(unsafe.Pointer(&client[0])))
+		var origin playerPoint
+		clientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&origin)))
+		return [4]int32{origin.x, origin.y, origin.x + client[2], origin.y + client[3]}
+	}
+	waitForBounds := func() error {
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			ready := false
+			onUI(func() {
+				want, got := clientScreenRect(a.window.NativeHandle()), readWindowRect(a.player.surface)
+				ready = want == got
+			})
+			if ready {
+				return nil
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		var want, got [4]int32
+		onUI(func() {
+			want, got = clientScreenRect(a.window.NativeHandle()), readWindowRect(a.player.surface)
+		})
+		return fmt.Errorf("video popup did not follow owner client bounds: want=%v got=%v", want, got)
+	}
+	main, video := a.window.NativeHandle(), a.player.surface
+	if owner, _, _ := user.NewProc("GetParent").Call(video); owner != main {
+		return fmt.Errorf("video popup owner mismatch: owner=%x main=%x", owner, main)
+	}
+	style, _, _ := getLong.Call(video, ^uintptr(19)) // GWL_EXSTYLE (-20)
+	if style&0x08000000 == 0 {
+		return fmt.Errorf("video popup can activate and steal playback shortcuts: exstyle=%x", style)
+	}
+	if err := waitForBounds(); err != nil {
+		return err
+	}
+	if !hasCaptionButtonCutout(video, main) || !hasCaptionButtonCutout(a.playerHeaderWindow.NativeHandle(), main) {
+		return fmt.Errorf("video or header popup covers MyGo's titlebar buttons")
+	}
+	client := clientScreenRect(main)
+	scale := windowScale(main)
+	captionPoint := playerPoint{x: client[2] - int32(23*scale), y: client[1] + int32(float64(movieTitleBarHeight)*scale/2)}
+	pointValue := uintptr(uint32(captionPoint.x)) | uintptr(uint32(captionPoint.y))<<32
+	hit, _, _ := user.NewProc("WindowFromPoint").Call(pointValue)
+	var className [64]uint16
+	length, _, _ := user.NewProc("GetClassNameW").Call(hit, uintptr(unsafe.Pointer(&className[0])), uintptr(len(className)))
+	if syscall.UTF16ToString(className[:length]) != "MyGoCaption" {
+		return fmt.Errorf("native window close button is covered: hit=%x class=%q", hit, syscall.UTF16ToString(className[:length]))
+	}
+
+	// Move and resize the owner and wait for the popup to match its client area.
+	mainRect := readWindowRect(main)
+	if ok, _, _ := setWindowPos.Call(main, 0, uintptr(mainRect[0]+16), uintptr(mainRect[1]+12), 0, 0, 0x0001|0x0002|0x0004|0x0010); ok == 0 {
+		return fmt.Errorf("could not move the native test window")
+	}
+	if err := waitForBounds(); err != nil {
+		return err
+	}
+	mainRect = readWindowRect(main)
+	if ok, _, _ := setWindowPos.Call(main, 0, uintptr(mainRect[0]), uintptr(mainRect[1]), uintptr(mainRect[2]-mainRect[0]+24), uintptr(mainRect[3]-mainRect[1]+18), 0x0004|0x0010); ok == 0 {
+		return fmt.Errorf("could not resize the native test window")
+	}
+	if err := waitForBounds(); err != nil {
+		return err
+	}
+
+	// The transport, header and menus are separate owned surfaces above video.
+	var zErr error
+	onUI(func() {
+		restoreWindowFocus(a.window)
+		a.showPlayerOverlay()
+		if !isNativeWindowAbove(user, a.playerHeaderWindow.NativeHandle(), video) {
+			zErr = fmt.Errorf("playback header is behind video")
+			return
+		}
+		if !isNativeWindowAbove(user, a.playerOverlayWindow.NativeHandle(), video) {
+			zErr = fmt.Errorf("playback controls are not above video")
+			return
+		}
+		a.openPlayerOverlayMenu("subtitle")
+		if a.playerMenuWindow == nil {
+			zErr = fmt.Errorf("playback menu is behind video")
+		} else {
+			if !isNativeWindowAbove(user, a.playerMenuWindow.NativeHandle(), video) {
+				zErr = fmt.Errorf("playback menu is behind video")
+			}
+		}
+		a.closePlayerOverlayMenu()
+	})
+	if zErr != nil {
+		return zErr
+	}
+
+	// Owned surfaces hide with a minimized owner and are shown again on restore.
+	var minimizedVisible, shownWhileMinimized uintptr
+	onUI(func() {
+		showWindow.Call(main, 6) // SW_MINIMIZE
+		minimizedVisible, _, _ = isVisible.Call(video)
+		a.player.ShowSurface()
+		shownWhileMinimized, _, _ = isVisible.Call(video)
+	})
+	if minimizedVisible != 0 || shownWhileMinimized != 0 {
+		return fmt.Errorf("video popup remained visible while owner was minimized: before-show=%d after-show=%d", minimizedVisible, shownWhileMinimized)
+	}
+	onUI(func() { showWindow.Call(main, 9) }) // SW_RESTORE
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		visible, _, _ := isVisible.Call(video)
+		if visible != 0 {
+			return waitForBounds()
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return fmt.Errorf("video popup did not return after restoring owner")
 }
 
 func checkNativeVideoFrames(a *appState, onUI func(func()), duration time.Duration) error {

@@ -1,7 +1,7 @@
 # MyGo playback overlay adapter
 
 This package is the compatibility boundary for the player's per-pixel
-transparent controls. MyGo v0.6 exposes content attachment through
+transparent controls. MyGo exposes content attachment through
 `mygo.Content`, whose method signature includes `internal/surface.Conn`. Go's
 `internal` import rule means this adapter must remain under the
 `github.com/egoist/mygo` module path. The Windows presenter also wraps the

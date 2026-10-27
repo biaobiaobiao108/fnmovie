@@ -42,9 +42,14 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 			t.Run(fmt.Sprintf("width_%d_speed_%g", width, speed), func(t *testing.T) {
 				a := &appState{player: NewPlayer(), playback: PlaybackState{Duration: 7200, Volume: 80, Speed: speed}}
 				tester := ui.NewTester(a.playerTransport, width, playerOverlayControlHeight)
-				panel, ok := tester.Find("播放控制栏")
+				panel, ok := tester.Find("播放控件面板")
 				if !ok || panel.Y < 6 || panel.Y+panel.H > playerOverlayControlHeight-6 {
-					t.Fatalf("transport border clipped by its window: %+v", panel)
+					t.Fatalf("transport panel clipped by its window: %+v", panel)
+				}
+				axis, axisOK := tester.Find("播放时间轴")
+				controls, controlsOK := tester.Find("播放控制栏")
+				if !axisOK || !controlsOK || axis.X <= panel.X || axis.Y <= panel.Y || axis.Y+axis.H >= controls.Y || controls.Y+controls.H >= panel.Y+panel.H {
+					t.Fatalf("timeline and controls should share one inset panel: axis=%+v controls=%+v panel=%+v", axis, controls, panel)
 				}
 				play, ok := tester.Find("播放或暂停")
 				if !ok {
@@ -57,18 +62,60 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 				if !progressOK || math.Abs(float64(progress.X+progress.W/2)-float64(width)/2) > 0.5 {
 					t.Fatalf("progress rail is not centered: %+v (found=%v)", progress, progressOK)
 				}
+				info, infoOK := tester.Find("影片信息")
+				operations, operationsOK := tester.Find("影片操作")
+				if !infoOK || !operationsOK || info.X >= play.X || operations.X <= play.X+play.W || operations.X+operations.W > panel.X+panel.W {
+					t.Fatalf("movie info and options should flank the centered transport: info=%+v play=%+v options=%+v", info, play, operations)
+				}
+				if _, ok := tester.Find("音量"); !ok {
+					t.Fatal("volume slider is missing its accessible label")
+				}
 				back, backOK := tester.Find("快退 10 秒")
 				forward, forwardOK := tester.Find("快进 10 秒")
 				if !backOK || !forwardOK || math.Abs(float64(back.X+back.W/2+forward.X+forward.W/2)-float64(width)) > 0.5 {
 					t.Fatalf("seek controls not symmetric: back=%+v forward=%+v", back, forward)
 				}
 				mute, muteOK := tester.Find("静音")
+				volume, volumeOK := tester.Find("音量")
+				speed, speedOK := tester.Find("播放速度")
+				subtitles, subtitlesOK := tester.Find("字幕")
+				audio, audioOK := tester.Find("音轨")
 				fullscreen, fullscreenOK := tester.Find("切换全屏")
-				if !muteOK || !fullscreenOK || mute.X+mute.W >= back.X || fullscreen.X <= forward.X+forward.W || fullscreen.X+fullscreen.W > float32(width-32) {
-					t.Fatalf("side controls overlap or overflow: mute=%+v fullscreen=%+v", mute, fullscreen)
+				if !muteOK || !volumeOK || !speedOK || !subtitlesOK || !audioOK || !fullscreenOK ||
+					mute.X <= forward.X+forward.W || volume.X <= mute.X+mute.W || speed.X <= volume.X+volume.W ||
+					subtitles.X <= speed.X+speed.W || audio.X <= subtitles.X+subtitles.W ||
+					fullscreen.X <= audio.X+audio.W || fullscreen.X+fullscreen.W > panel.X+panel.W {
+					t.Fatalf("right-side movie controls overlap or overflow: mute=%+v volume=%+v speed=%+v subtitles=%+v audio=%+v fullscreen=%+v panel=%+v", mute, volume, speed, subtitles, audio, fullscreen, panel)
 				}
 			})
 		}
+	}
+}
+
+func TestPlayerHeaderKeepsBackControlAndDetailsStayInBottomPanel(t *testing.T) {
+	const title = "春日影"
+	a := &appState{playback: PlaybackState{Title: title}}
+	header := ui.NewTester(a.playerHeaderView, 1280, playerOverlayHeaderHeight)
+	back, hasBack := header.Find("返回影片库")
+	if !hasBack || back.Y < 0 || back.Y+back.H > playerOverlayHeaderHeight || header.HasText(title) {
+		t.Fatalf("header should keep only the back control: back=%+v texts=%v", back, header.Texts())
+	}
+	transport := ui.NewTester(a.playerTransport, 1280, playerOverlayControlHeight)
+	name, hasTitle := transport.Find(title)
+	play, hasPlay := transport.Find("播放或暂停")
+	if !hasTitle || !hasPlay || name.X >= play.X || name.Y < 0 || name.Y+name.H > playerOverlayControlHeight {
+		t.Fatalf("title should sit in the left movie-info column beside the centered controls: title=%+v play=%+v", name, play)
+	}
+}
+
+func TestPlayerOverlayThemeUsesMutedMovieAccent(t *testing.T) {
+	theme := playerOverlayTheme()
+	want := movieColors.accent.Mix(ui.RGB(255, 255, 255), 0.38)
+	if theme.Accent != want || theme.Background != ui.Transparent || theme.Surface != ui.Transparent {
+		t.Fatalf("player overlay theme should use the movie accent on a transparent dark surface: %+v", theme)
+	}
+	if theme.TextMuted.A >= 255 {
+		t.Fatalf("secondary player text should be subdued, got alpha %d", theme.TextMuted.A)
 	}
 }
 

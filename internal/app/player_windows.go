@@ -31,12 +31,17 @@ var (
 	procGetWindowRect       = user32Player.NewProc("GetWindowRect")
 	procGetCursorPos        = user32Player.NewProc("GetCursorPos")
 	procSetWindowPos        = user32Player.NewProc("SetWindowPos")
+	procGetPlayerWindow     = user32Player.NewProc("GetWindow")
+	procGetForegroundWindow = user32Player.NewProc("GetForegroundWindow")
+	procGetAncestor         = user32Player.NewProc("GetAncestor")
 	procIsWindow            = user32Player.NewProc("IsWindow")
+	procIsIconic            = user32Player.NewProc("IsIconic")
 	procCreatePlayerWindow  = user32Player.NewProc("CreateWindowExW")
 	procDestroyPlayerWindow = user32Player.NewProc("DestroyWindow")
 	procShowPlayerWindow    = user32Player.NewProc("ShowWindow")
 	procGetPlayerClientRect = user32Player.NewProc("GetClientRect")
 	procGetPlayerParent     = user32Player.NewProc("GetParent")
+	procClientToScreen      = user32Player.NewProc("ClientToScreen")
 	procGetPlayerModule     = syscall.NewLazyDLL("kernel32.dll").NewProc("GetModuleHandleW")
 	procReadProcessMemory   = syscall.NewLazyDLL("kernel32.dll").NewProc("ReadProcessMemory")
 )
@@ -106,6 +111,8 @@ type mpvNode struct {
 	format int32
 	pad    int32
 }
+
+type playerPoint struct{ x, y int32 }
 
 const (
 	mpvFormatFlag  = 3
@@ -736,17 +743,19 @@ func (p *playerProcess) setViewport(rect ui.Rect) {
 	fitPlayerSurface(p.host)
 }
 
-// Reuse MyGo's registered surface class, but leave this child out of MyGo's
-// renderer registry. Its default window procedure has no second swap chain.
+// Reuse MyGo's registered surface class for libmpv, but keep the swap chain in
+// an owned popup. A nested surface is composited behind MyGo's DComp target.
 func createPlayerSurface(parent uintptr) (uintptr, error) {
-	parent = findMyGoSurface(parent)
-	if parent == 0 {
+	if findMyGoSurface(parent) == 0 {
 		return 0, fmt.Errorf("无法找到 MyGo 原生绘制区域")
 	}
 	class, _ := syscall.UTF16PtrFromString("MyGoSurface")
 	module, _, _ := procGetPlayerModule.Call(0)
-	host, _, err := procCreatePlayerWindow.Call(0, uintptr(unsafe.Pointer(class)), 0,
-		0x40000000|0x02000000|0x04000000, 0, 0, 0, 0, parent, 0, module, 0)
+	// Do not nest the libmpv swap chain under MyGo's DirectComposition surface:
+	// DWM draws that surface above child HWND swap chains. An owned popup uses
+	// the normal HWND composition path and follows the app window's z-order.
+	host, _, err := procCreatePlayerWindow.Call(0x00000080|0x08000000, uintptr(unsafe.Pointer(class)), 0,
+		0x80000000|0x04000000, 0, 0, 0, 0, parent, 0, module, 0)
 	runtime.KeepAlive(class)
 	if host == 0 {
 		return 0, fmt.Errorf("创建独立视频绘制区域失败：%w", err)
@@ -762,21 +771,27 @@ func fitPlayerSurface(host uintptr) {
 	parent, _, _ := procGetPlayerParent.Call(host)
 	var rect [4]int32
 	if ok, _, _ := procGetPlayerClientRect.Call(parent, uintptr(unsafe.Pointer(&rect[0]))); ok != 0 {
-		var current, parentBounds, childBounds [4]int32
-		procGetPlayerClientRect.Call(host, uintptr(unsafe.Pointer(&current[0])))
-		procGetWindowRect.Call(parent, uintptr(unsafe.Pointer(&parentBounds[0])))
+		var origin playerPoint
+		procClientToScreen.Call(parent, uintptr(unsafe.Pointer(&origin)))
+		var childBounds [4]int32
 		procGetWindowRect.Call(host, uintptr(unsafe.Pointer(&childBounds[0])))
-		if current[2] == rect[2] && current[3] == rect[3] && parentBounds[0] == childBounds[0] && parentBounds[1] == childBounds[1] {
+		if childBounds[0] == origin.x && childBounds[1] == origin.y && childBounds[2]-childBounds[0] == rect[2] && childBounds[3]-childBounds[1] == rect[3] {
 			return
 		}
-		procSetWindowPos.Call(host, 0, 0, 0, uintptr(rect[2]), uintptr(rect[3]), 0x0010|0x0004)
+		procSetWindowPos.Call(host, 0, uintptr(origin.x), uintptr(origin.y), uintptr(rect[2]), uintptr(rect[3]), 0x0010|0x0004|0x0200)
 	}
 }
 
 func showPlayerSurface(host uintptr) {
 	if host != 0 {
+		owner, _, _ := procGetPlayerParent.Call(host)
+		if minimized, _, _ := procIsIconic.Call(owner); minimized != 0 {
+			hidePlayerSurface(host)
+			return
+		}
 		fitPlayerSurface(host)
-		procShowPlayerWindow.Call(host, 5)
+		procSetWindowPos.Call(host, 0, 0, 0, 0, 0, 0x0010|0x0001|0x0002) // HWND_TOP, preserve bounds, no activation
+		procShowPlayerWindow.Call(host, 4)                               // SW_SHOWNOACTIVATE
 	}
 }
 
@@ -784,6 +799,95 @@ func destroyPlayerSurface(host uintptr) {
 	if host != 0 {
 		procDestroyPlayerWindow.Call(host)
 	}
+}
+
+func hidePlayerSurface(host uintptr) {
+	if host != 0 {
+		procShowPlayerWindow.Call(host, 0)
+	}
+}
+
+// Preserve MyGo's native caption buttons above the video and header popups.
+// The transparent hole keeps both their drawing and mouse hit testing intact.
+func setPlayerWindowButtonsCutout(hwnd, owner uintptr, enabled bool) {
+	if hwnd == 0 {
+		return
+	}
+	var client [4]int32
+	if ok, _, _ := procGetPlayerClientRect.Call(hwnd, uintptr(unsafe.Pointer(&client[0]))); ok == 0 {
+		return
+	}
+	scale := windowScale(owner)
+	cutWidth := int32(math.Round(46 * 3 * scale))
+	cutHeight := int32(math.Round(float64(movieTitleBarHeight) * scale))
+	if cutWidth <= 0 || cutHeight <= 0 || client[2] <= cutWidth || client[3] < cutHeight {
+		return
+	}
+	gdi := syscall.NewLazyDLL("gdi32.dll")
+	createRegion := gdi.NewProc("CreateRectRgn")
+	pointInRegion := gdi.NewProc("PtInRegion")
+	combineRegion := gdi.NewProc("CombineRgn")
+	deleteObject := gdi.NewProc("DeleteObject")
+	getWindowRegion := syscall.NewLazyDLL("user32.dll").NewProc("GetWindowRgn")
+	setWindowRegion := syscall.NewLazyDLL("user32.dll").NewProc("SetWindowRgn")
+	current, _, _ := createRegion.Call(0, 0, 0, 0)
+	if current != 0 {
+		kind, _, _ := getWindowRegion.Call(hwnd, current)
+		buttonX, buttonY := uintptr(client[2]-cutWidth/2), uintptr(cutHeight/2)
+		centerX, centerY := uintptr(client[2]/2), uintptr(client[3]/2)
+		buttonVisible, _, _ := pointInRegion.Call(current, buttonX, buttonY)
+		centerVisible, _, _ := pointInRegion.Call(current, centerX, centerY)
+		deleteObject.Call(current)
+		if enabled && kind != 0 && buttonVisible == 0 && centerVisible != 0 || !enabled && kind == 0 {
+			return
+		}
+	}
+	if !enabled {
+		setWindowRegion.Call(hwnd, 0, 1)
+		return
+	}
+	whole, _, _ := createRegion.Call(0, 0, uintptr(client[2]), uintptr(client[3]))
+	hole, _, _ := createRegion.Call(uintptr(client[2]-cutWidth), 0, uintptr(client[2]), uintptr(cutHeight))
+	if whole == 0 || hole == 0 {
+		if whole != 0 {
+			deleteObject.Call(whole)
+		}
+		if hole != 0 {
+			deleteObject.Call(hole)
+		}
+		return
+	}
+	if result, _, _ := combineRegion.Call(whole, whole, hole, 4); result == 0 { // RGN_DIFF
+		deleteObject.Call(whole)
+		deleteObject.Call(hole)
+		return
+	}
+	deleteObject.Call(hole)
+	if accepted, _, _ := setWindowRegion.Call(hwnd, whole, 1); accepted == 0 {
+		deleteObject.Call(whole)
+	}
+}
+
+func placePlayerOverlayAboveSurface(video, overlay uintptr) {
+	if video == 0 || overlay == 0 {
+		return
+	}
+	owner, _, _ := procGetPlayerParent.Call(video)
+	foreground, _, _ := procGetForegroundWindow.Call()
+	rootOwner, _, _ := procGetAncestor.Call(foreground, 3) // GA_ROOTOWNER
+	if rootOwner != owner {
+		return // never raise playback overlays over an unrelated foreground app
+	}
+	// Pointer activity reaches this function frequently. Keep the first overlay
+	// above the video without issuing redundant Z-order updates each time.
+	hwnd, _, _ := procGetPlayerWindow.Call(video, 3)
+	for i := 0; hwnd != 0 && i < 1000; i++ {
+		if hwnd == overlay {
+			return
+		}
+		hwnd, _, _ = procGetPlayerWindow.Call(hwnd, 3)
+	}
+	procSetWindowPos.Call(overlay, 0, 0, 0, 0, 0, 0x0010|0x0001|0x0002) // HWND_TOP, no activation
 }
 
 func (p *playerProcess) pointerActivity() <-chan struct{} { return p.pointerEvents }

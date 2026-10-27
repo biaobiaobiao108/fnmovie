@@ -199,6 +199,18 @@ func (p *Player) ShowSurface() {
 	showPlayerSurface(p.surface)
 }
 
+func (p *Player) HideSurface() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	hidePlayerSurface(p.surface)
+}
+
+func (p *Player) SetWindowButtonsVisible(visible bool, owner uintptr) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	setPlayerWindowButtonsCutout(p.surface, owner, visible)
+}
+
 func (p *Player) ReleaseSurface() {
 	p.mu.Lock()
 	surface := p.surface

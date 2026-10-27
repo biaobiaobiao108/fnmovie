@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"time"
+
+	"github.com/egoist/mygo"
 )
 
 func (a *appState) startPlayback(item MediaItem) {
@@ -116,6 +118,7 @@ func (a *appState) startPlayback(item MediaItem) {
 				return
 			}
 			a.player = requestPlayer
+			a.window.SetWindowButtonsTheme(mygo.ThemeDark)
 			a.posters.SetPlayback(true)
 			a.cancelDetailRequests()
 			if a.personCancel != nil {
@@ -319,6 +322,9 @@ func (a *appState) closePlayer() (*Server, *MediaItem, float64, float64, *playba
 	a.playerProxy = nil
 	a.playingItem = nil
 	a.playback = PlaybackState{}
+	if a.window != nil {
+		a.window.SetWindowButtonsTheme(mygo.ThemeSystem)
+	}
 	a.syncWindowTitle()
 	a.posters.SetPlayback(false)
 	return server, item, position, duration, progress
