@@ -100,12 +100,12 @@ func TestPlayerHeaderShowsTitleAndKeepsPlaybackDetailsOutOfTransport(t *testing.
 	const quality = "4K HDR"
 	a := &appState{playback: PlaybackState{Title: title, Quality: quality}}
 	header := ui.NewTester(a.playerHeaderView, 1280, playerOverlayHeaderHeight)
-	back, hasBack := header.Find("关闭播放器")
+	closeButton, hasCloseButton := header.Find("关闭播放器")
 	titleBounds, hasTitle := header.Find(title)
-	if !hasBack || !hasTitle || back.Y < 0 || back.Y+back.H > playerOverlayHeaderHeight ||
-		titleBounds.X < back.X+back.W || titleBounds.Y < 0 || titleBounds.Y+titleBounds.H > playerOverlayHeaderHeight ||
+	if !hasCloseButton || !hasTitle || closeButton.Y < 0 || closeButton.Y+closeButton.H > playerOverlayHeaderHeight ||
+		titleBounds.X+titleBounds.W > closeButton.X || titleBounds.Y < 0 || titleBounds.Y+titleBounds.H > playerOverlayHeaderHeight ||
 		header.HasText(quality) {
-		t.Fatalf("header should show the title after back navigation and omit quality: back=%+v title=%+v texts=%v", back, titleBounds, header.Texts())
+		t.Fatalf("header should place the close button to the right of the title and omit quality: close=%+v title=%+v texts=%v", closeButton, titleBounds, header.Texts())
 	}
 	transport := ui.NewTester(a.playerTransport, 1280, playerOverlayControlHeight)
 	play, hasPlay := transport.Find("播放或暂停")

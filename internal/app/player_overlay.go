@@ -559,7 +559,6 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	c.SetTheme(playerOverlayTheme())
 	row := ui.Row(c).Absolute().Fill().Padding(0, 20, 0, 16).Gap(10).AlignItems(ui.Center).DragWindow()
 	row.Children(func() {
-		playerOverlayIconButton(c, "close", "关闭播放器", 36, 16).OnClick(a.stopPlayback)
 		title := strings.TrimSpace(a.playback.Title)
 		if title == "" {
 			title = "正在播放"
@@ -568,6 +567,7 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 		if errorMessage := strings.TrimSpace(a.playback.Error); errorMessage != "" {
 			ui.Text(c, errorMessage).Shrink(0).FontSize(11).TextColor(playerOverlayAccent()).SingleLine()
 		}
+		playerOverlayIconButton(c, "close", "关闭播放器", 36, 16).OnClick(a.stopPlayback)
 	})
 }
 

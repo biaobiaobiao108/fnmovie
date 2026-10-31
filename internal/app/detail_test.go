@@ -496,7 +496,7 @@ func TestPlayerOverlayViews(t *testing.T) {
 	}, 1280, 64)
 
 	if _, ok := headerTester.Find("关闭播放器"); !ok {
-		t.Fatalf("player header back button missing")
+		t.Fatalf("player header close button missing")
 	}
 	for _, label := range []string{"最小化窗口", "最大化窗口", "还原窗口", "关闭窗口"} {
 		if _, ok := headerTester.Find(label); ok {
