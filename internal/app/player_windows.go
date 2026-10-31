@@ -987,7 +987,7 @@ func createPlayerSurface(parent uintptr) (uintptr, error) {
 	module, _, _ := procGetPlayerModule.Call(0)
 	// Do not nest the libmpv swap chain under MyGo's DirectComposition surface:
 	// DWM draws that surface above child HWND swap chains. An owned popup uses
-	// the normal HWND composition path and follows the app window's z-order.
+	// the normal HWND composition path and follows the host window's z-order.
 	host, _, err := procCreatePlayerWindow.Call(0x00000080|0x08000000, uintptr(unsafe.Pointer(class)), 0,
 		0x80000000|0x04000000, 0, 0, 0, 0, parent, 0, module, 0)
 	runtime.KeepAlive(class)

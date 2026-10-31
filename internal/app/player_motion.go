@@ -22,28 +22,28 @@ func (a *appState) fullscreenFade() float64 {
 }
 
 func (a *appState) requestPlayerFullscreen(target, reduceMotion bool) {
-	if a.window == nil {
+	if a.playbackWindow() == nil {
 		return
 	}
 	a.cancelPlayerFullscreen()
-	if a.window.IsFullScreen() == target {
+	if a.playbackWindow().IsFullScreen() == target {
 		return
 	}
 	a.closePlayerOverlayMenu()
 	if reduceMotion {
-		a.window.SetFullScreen(target)
+		a.playbackWindow().SetFullScreen(target)
 		a.syncPlayerOverlay()
 		return
 	}
-	a.fullscreenMotion = playerFullscreenMotion{started: time.Now(), target: target, alpha: 1, originalOpacity: a.window.Opacity()}
-	a.window.Invalidate()
+	a.fullscreenMotion = playerFullscreenMotion{started: time.Now(), target: target, alpha: 1, originalOpacity: a.playbackWindow().Opacity()}
+	a.playbackWindow().Invalidate()
 }
 
 func (a *appState) togglePlayerFullscreen(reduceMotion bool) {
-	if a.window == nil {
+	if a.playbackWindow() == nil {
 		return
 	}
-	target := !a.window.IsFullScreen()
+	target := !a.playbackWindow().IsFullScreen()
 	if !a.fullscreenMotion.started.IsZero() {
 		target = !a.fullscreenMotion.target
 	}
@@ -54,13 +54,13 @@ func (a *appState) togglePlayerFullscreen(reduceMotion bool) {
 // fade back in. No per-frame video resize, screenshots, timers or goroutines.
 func (a *appState) advancePlayerFullscreen(c *ui.Context) {
 	m := &a.fullscreenMotion
-	if m.started.IsZero() || a.window == nil {
+	if m.started.IsZero() || a.playbackWindow() == nil {
 		return
 	}
 	if c.Preferences().ReduceMotion {
 		target := m.target
 		a.cancelPlayerFullscreen()
-		a.window.SetFullScreen(target)
+		a.playbackWindow().SetFullScreen(target)
 		a.syncPlayerOverlay()
 		return
 	}
@@ -70,14 +70,14 @@ func (a *appState) advancePlayerFullscreen(c *ui.Context) {
 	if m.fadingIn {
 		m.alpha = eased
 	}
-	a.window.SetOpacity(m.alpha * m.originalOpacity)
+	a.playbackWindow().SetOpacity(m.alpha * m.originalOpacity)
 	a.setPlayerOverlayOpacity(a.playerOverlayOpacity)
 	if progress >= 1 {
 		if m.fadingIn {
 			a.cancelPlayerFullscreen()
 			return
 		}
-		a.window.SetFullScreen(m.target)
+		a.playbackWindow().SetFullScreen(m.target)
 		a.syncPlayerOverlay()
 		m.started, m.fadingIn = c.Now(), true
 	}
@@ -90,8 +90,8 @@ func (a *appState) cancelPlayerFullscreen() {
 	}
 	opacity := a.fullscreenMotion.originalOpacity
 	a.fullscreenMotion = playerFullscreenMotion{}
-	if a.window != nil {
-		a.window.SetOpacity(opacity)
+	if a.playbackWindow() != nil {
+		a.playbackWindow().SetOpacity(opacity)
 	}
 	a.setPlayerOverlayOpacity(a.playerOverlayOpacity)
 }

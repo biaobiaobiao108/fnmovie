@@ -28,14 +28,14 @@ func windowTitleForPlayback(playback PlaybackState) string {
 }
 
 func (a *appState) syncWindowTitle() {
-	if a.window == nil {
+	if a.playerWindow == nil {
 		return
 	}
 	title := windowTitleForPlayback(a.playback)
-	if a.window.Title() != title {
+	if a.playerWindow.Title() != title {
 		// Keep the native title current for task switching and accessibility,
 		// even while the title bar itself is hidden.
-		a.window.SetTitle(title)
+		a.playerWindow.SetTitle(title)
 	}
 }
 
@@ -113,12 +113,6 @@ func (a *appState) view(c *ui.Context) {
 	if a.loggedIn && a.searchPending && c.Now().Sub(a.searchChangedAt) >= 300*time.Millisecond {
 		a.searchPending = false
 		a.loadLibrary()
-	}
-	a.advancePlayerFullscreen(c)
-	if a.playback.Active {
-		a.advancePlayerOverlayAnimation(c)
-		a.playerView(c)
-		return
 	}
 	secondary := a.selectedPerson != nil || a.selected != nil
 	host := ui.Box(c.Key("navigation-host")).Fill()

@@ -15,7 +15,11 @@ func (a *appState) logout() {
 		a.loginCancel = nil
 	}
 	a.busy = false
-	a.cancelPlaybackLoading()
+	if a.playback.Active || a.playbackLoading {
+		a.stopPlayback()
+	} else {
+		a.cancelPlaybackLoading()
+	}
 	a.closePerson()
 	if a.libraryCancel != nil {
 		a.libraryCancel()

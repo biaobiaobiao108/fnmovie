@@ -342,7 +342,7 @@ func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
 }
 
 func (a *appState) detailSynopsisDialog(c *ui.Context) {
-	if a.selected == nil || a.playback.Active {
+	if a.selected == nil {
 		a.detailSynopsisOpen = false
 		return
 	}

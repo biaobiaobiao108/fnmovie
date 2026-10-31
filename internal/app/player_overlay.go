@@ -39,10 +39,10 @@ var playerOverlayIcons = map[string]*ui.SVG{
 }
 
 func (a *appState) createPlayerOverlay() {
-	if a.window == nil || a.playerOverlayWindow != nil {
+	if a.playbackWindow() == nil || a.playerOverlayWindow != nil {
 		return
 	}
-	bounds := a.window.ContentBounds()
+	bounds := a.playbackWindow().ContentBounds()
 	a.playerOverlayContent = overlay.View(a.playerOverlayView)
 	a.playerHeaderContent = overlay.View(a.playerHeaderView)
 	a.playerSeekFeedbackContent = overlay.View(a.playerSeekFeedbackView)
@@ -50,20 +50,20 @@ func (a *appState) createPlayerOverlay() {
 	headerHeight := min(playerOverlayHeaderHeight, bounds.Height-controlHeight)
 	a.playerOverlayWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: "播放控件", X: bounds.X, Y: bounds.Y + bounds.Height - controlHeight, Width: bounds.Width, Height: controlHeight,
-		Parent: a.window, Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
+		Parent: a.playbackWindow(), Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
 		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: a.playerOverlayContent,
 	})
 	a.playerHeaderWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: "播放信息", X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: headerHeight,
-		Parent: a.window, Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
+		Parent: a.playbackWindow(), Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
 		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: a.playerHeaderContent,
 	})
-	setupPlayerHeaderWindowDrag(a.playerHeaderWindow.NativeHandle(), a.window.NativeHandle(), func() {
-		if a.window != nil {
-			a.window.Update(func() {
-				if a.window != nil && a.playback.Active {
+	setupPlayerHeaderWindowDrag(a.playerHeaderWindow.NativeHandle(), a.playbackWindow().NativeHandle(), func() {
+		if a.playbackWindow() != nil {
+			a.playbackWindow().Update(func() {
+				if a.playbackWindow() != nil && a.playback.Active {
 					a.togglePlayerFullscreen(false)
 				}
 			})
@@ -71,7 +71,7 @@ func (a *appState) createPlayerOverlay() {
 	})
 	a.playerSeekFeedbackWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: "跳转状态", X: bounds.X, Y: bounds.Y, Width: playerSeekFeedbackWidth, Height: playerSeekFeedbackHeight,
-		Parent: a.window, Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
+		Parent: a.playbackWindow(), Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
 		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: a.playerSeekFeedbackContent,
 	})
@@ -92,15 +92,15 @@ func (a *appState) createPlayerOverlay() {
 }
 
 func (a *appState) registerPlayerOverlayHooks() {
-	if a.playerOverlayHooks || a.window == nil {
+	if a.playerOverlayHooks || a.playbackWindow() == nil {
 		return
 	}
 	a.playerOverlayHooks = true
-	a.window.OnResize(a.syncPlayerOverlay)
-	a.window.OnMove(a.syncPlayerOverlay)
-	a.window.OnEnterFullScreen(a.syncPlayerOverlay)
-	a.window.OnLeaveFullScreen(a.syncPlayerOverlay)
-	a.window.OnMinimize(func() {
+	a.playbackWindow().OnResize(a.syncPlayerOverlay)
+	a.playbackWindow().OnMove(a.syncPlayerOverlay)
+	a.playbackWindow().OnEnterFullScreen(a.syncPlayerOverlay)
+	a.playbackWindow().OnLeaveFullScreen(a.syncPlayerOverlay)
+	a.playbackWindow().OnMinimize(func() {
 		a.cancelPlayerFullscreen()
 		if a.player != nil {
 			a.player.HideSurface()
@@ -111,7 +111,7 @@ func (a *appState) registerPlayerOverlayHooks() {
 		}
 		a.syncPlayerSeekFeedbackVisibility()
 	})
-	a.window.OnRestore(func() {
+	a.playbackWindow().OnRestore(func() {
 		a.syncPlayerOverlay()
 		if a.playback.Active {
 			if a.player != nil {
@@ -123,10 +123,10 @@ func (a *appState) registerPlayerOverlayHooks() {
 }
 
 func (a *appState) syncPlayerOverlay() {
-	if a.window == nil || a.playerOverlayWindow == nil {
+	if a.playbackWindow() == nil || a.playerOverlayWindow == nil {
 		return
 	}
-	bounds := a.window.ContentBounds()
+	bounds := a.playbackWindow().ContentBounds()
 	controlBounds := bounds
 	controlBounds.Height = min(a.playerOverlayContentHeight(), bounds.Height)
 	controlBounds.Y += bounds.Height - controlBounds.Height
@@ -156,14 +156,14 @@ func (a *appState) syncPlayerOverlay() {
 		a.playerMenuWindow.Invalidate()
 	}
 	if a.player != nil {
-		width, height := a.window.ContentBounds().Width, a.window.ContentBounds().Height
+		width, height := a.playbackWindow().ContentBounds().Width, a.playbackWindow().ContentBounds().Height
 		vp := ui.Rect{X: 0, Y: 0, W: float32(width), H: float32(height)}
 		a.player.SetTopMarginRatio(0)
 		a.player.SetViewport(vp)
 		a.player.SetCaptionButtonCutout(false, 0)
 	}
 	if a.playerHeaderWindow != nil {
-		setPlayerWindowButtonsCutout(a.playerHeaderWindow.NativeHandle(), a.window.NativeHandle(), false)
+		setPlayerWindowButtonsCutout(a.playerHeaderWindow.NativeHandle(), a.playbackWindow().NativeHandle(), false)
 		if a.playerOverlayVisible {
 			a.playerHeaderWindow.ShowInactive()
 		} else {
@@ -185,7 +185,7 @@ func (a *appState) syncPlayerOverlay() {
 	if a.playerOverlayWindow != nil {
 		overlayHandle = a.playerOverlayWindow.NativeHandle()
 	}
-	updatePlayerOverlayShapes(a.window.NativeHandle(), headerHandle, overlayHandle)
+	updatePlayerOverlayShapes(a.playbackWindow().NativeHandle(), headerHandle, overlayHandle)
 }
 
 func playerSeekFeedbackBounds(bounds mygo.Rectangle) mygo.Rectangle {
@@ -198,10 +198,10 @@ func playerSeekFeedbackBounds(bounds mygo.Rectangle) mygo.Rectangle {
 }
 
 func (a *appState) syncPlayerSeekFeedbackVisibility() {
-	if a.playerSeekFeedbackWindow == nil || a.window == nil {
+	if a.playerSeekFeedbackWindow == nil || a.playbackWindow() == nil {
 		return
 	}
-	visible := playerSeekFeedbackShouldShow(a.seekFeedback, a.window.IsMinimized())
+	visible := playerSeekFeedbackShouldShow(a.seekFeedback, a.playbackWindow().IsMinimized())
 	if visible == a.playerSeekFeedbackVisible {
 		if visible {
 			a.playerSeekFeedbackWindow.Invalidate()
@@ -251,8 +251,8 @@ func (a *appState) startPlayerOverlayMonitor() {
 			case <-done:
 				return
 			case <-activity:
-				if a.window != nil {
-					a.window.Update(func() {
+				if a.playbackWindow() != nil {
+					a.playbackWindow().Update(func() {
 						select {
 						case <-done:
 							return
@@ -265,8 +265,8 @@ func (a *appState) startPlayerOverlayMonitor() {
 				a.overlayMu.Lock()
 				hide := a.playerOverlayVisible && !a.playerOverlayPinned && !a.playerOverlaySeeking && now.Sub(a.playerOverlayLastInput) >= playerOverlayHideDelay
 				a.overlayMu.Unlock()
-				if hide && a.window != nil {
-					a.window.Update(func() {
+				if hide && a.playbackWindow() != nil {
+					a.playbackWindow().Update(func() {
 						select {
 						case <-done:
 							return
@@ -288,7 +288,7 @@ func (a *appState) startPlayerOverlayMonitor() {
 }
 
 func (a *appState) showPlayerOverlay() {
-	if a.playerOverlayWindow == nil || a.window == nil || a.window.IsMinimized() {
+	if a.playerOverlayWindow == nil || a.playbackWindow() == nil || a.playbackWindow().IsMinimized() {
 		return
 	}
 	a.syncPlayerOverlay()
@@ -345,10 +345,10 @@ func (a *appState) animatePlayerOverlay(target float64) {
 	a.playerOverlayAnimationFrom = a.playerOverlayOpacity
 	a.playerOverlayAnimationTarget = target
 	a.overlayMu.Unlock()
-	// The main window also drives the fade when an owned surface is hidden or
-	// temporarily awaiting its first frame after a native fullscreen change.
-	if a.window != nil {
-		a.window.Invalidate()
+	// The player window drives the fade while the owned surfaces are hidden or
+	// temporarily awaiting their first frame after a native fullscreen change.
+	if a.playbackWindow() != nil {
+		a.playbackWindow().Invalidate()
 	}
 	if a.playerOverlayWindow != nil {
 		a.playerOverlayWindow.Invalidate()
@@ -395,8 +395,8 @@ func (a *appState) advancePlayerOverlayAnimation(c *ui.Context) {
 	if progress < 1 {
 		c.AnimationFrame()
 	}
-	if hide && a.window != nil {
-		a.window.Update(func() {
+	if hide && a.playbackWindow() != nil {
+		a.playbackWindow().Update(func() {
 			if transition != a.playerOverlayTransition || a.playerOverlayVisible || a.playerOverlayWindow == nil {
 				return
 			}
@@ -410,7 +410,7 @@ func (a *appState) advancePlayerOverlayAnimation(c *ui.Context) {
 				a.playerMenuWindow.Hide()
 			}
 			if ownedFocus {
-				restoreWindowFocus(a.window)
+				restoreWindowFocus(a.playbackWindow())
 			}
 		})
 	}
@@ -437,8 +437,8 @@ func (a *appState) closePlayerOverlay() {
 		a.playerSeekFeedbackWindow.Destroy()
 		a.playerSeekFeedbackWindow = nil
 	}
-	if ownedFocus && a.window != nil {
-		restoreWindowFocus(a.window)
+	if ownedFocus && a.playbackWindow() != nil {
+		restoreWindowFocus(a.playbackWindow())
 	}
 	a.overlayMu.Lock()
 	a.playerOverlayVisible, a.playerOverlayPinned, a.playerOverlaySeeking = false, false, false
@@ -451,6 +451,7 @@ func (a *appState) closePlayerOverlay() {
 	a.seekDragging = false
 	a.seekFeedback = seekFeedback{}
 	a.volumeDragging = false
+	a.playerOverlayHooks = false
 }
 
 func (a *appState) playerOverlayHasFocus() bool {
@@ -600,7 +601,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 	width, _ := c.Size()
 	gutter := float32(max(16, (int(width)-1760)/2))
 	var cornerRadius float32
-	if a.window != nil && !a.window.IsFullScreen() {
+	if a.playbackWindow() != nil && !a.playbackWindow().IsFullScreen() {
 		cornerRadius = 8
 	}
 	ui.Box(c).Label("播放沉浸渐隐").Absolute().Fill().PassThrough().Radius(0, 0, cornerRadius, cornerRadius).Clip().LinearGradient(ui.LinearGradient{
@@ -670,12 +671,12 @@ func (a *appState) playerTransport(c *ui.Context) {
 				a.playerOptionButton(c, "subtitle")
 				a.playerOptionButton(c, "audio")
 				fullscreenIcon := "fullscreen"
-				if a.window != nil && a.window.IsFullScreen() {
+				if a.playbackWindow() != nil && a.playbackWindow().IsFullScreen() {
 					fullscreenIcon = "window"
 				}
 				reduceMotion := c.Preferences().ReduceMotion
 				playerOverlayIconButton(c, fullscreenIcon, "切换全屏", 34, 19).OnClick(func() {
-					if a.window != nil {
+					if a.playbackWindow() != nil {
 						a.togglePlayerFullscreen(reduceMotion)
 					}
 					a.markPlayerOverlayActivity()
@@ -756,14 +757,14 @@ func (a *appState) openPlayerOverlayMenu(option string) {
 		a.playerMenuTracks = nil
 	}
 	a.setPlayerOverlayPinned(true)
-	if a.window == nil || a.playerOverlayWindow == nil {
+	if a.playbackWindow() == nil || a.playerOverlayWindow == nil {
 		return
 	}
-	bounds := playerMenuBounds(a.window.ContentBounds())
+	bounds := playerMenuBounds(a.playbackWindow().ContentBounds())
 	a.playerMenuContent = overlay.View(a.playerMenuView)
 	a.playerMenuWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: "播放选项", X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height,
-		Parent: a.window, Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
+		Parent: a.playbackWindow(), Frameless: true, SkipTaskbar: true, Transparent: true, Hidden: true, DisableShadow: true,
 		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: a.playerMenuContent,
 	})
@@ -937,8 +938,8 @@ func (a *appState) closePlayerOverlayMenu() {
 	}
 	a.setPlayerOverlayPinned(false)
 	a.markPlayerOverlayActivity()
-	if ownedFocus && a.window != nil {
-		restoreWindowFocus(a.window)
+	if ownedFocus && a.playbackWindow() != nil {
+		restoreWindowFocus(a.playbackWindow())
 	}
 }
 
@@ -951,7 +952,7 @@ func (a *appState) seekDisplayPosition() float64 {
 
 func (a *appState) playerShortcuts(c *ui.Context) {
 	keys := [...]ui.Key{ui.KeySpace, ui.KeyLeft, ui.KeyRight, ui.KeyUp, ui.KeyDown, ui.KeyM, ui.KeyF, ui.KeyEscape}
-	fullscreen := a.window != nil && a.window.IsFullScreen()
+	fullscreen := a.playbackWindow() != nil && a.playbackWindow().IsFullScreen()
 	for _, key := range keys {
 		if c.Shortcut(0, key) {
 			if key == ui.KeyEscape && a.playerOverlayMenu != "" {
@@ -1034,11 +1035,11 @@ func (a *appState) performPlayerAction(action playerAction) {
 		a.player.ToggleMute()
 		a.playback.Muted = !a.playback.Muted
 	case playerToggleFull:
-		if a.window != nil {
+		if a.playbackWindow() != nil {
 			a.togglePlayerFullscreen(false)
 		}
 	case playerExitFull:
-		if a.window != nil {
+		if a.playbackWindow() != nil {
 			a.requestPlayerFullscreen(false, false)
 		}
 	case playerReturn:

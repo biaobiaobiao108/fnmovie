@@ -201,7 +201,7 @@ func (a *appState) loadContinueWatching(force bool) {
 }
 
 func (a *appState) syncHomeLifecycle() {
-	visible := a.window != nil && a.section == "home" && strings.TrimSpace(a.query) == "" && a.selected == nil && a.selectedPerson == nil && !a.playback.Active && !a.home.Closed && a.loggedIn
+	visible := a.window != nil && a.section == "home" && strings.TrimSpace(a.query) == "" && a.selected == nil && a.selectedPerson == nil && !a.home.Closed && a.loggedIn
 	if !visible && a.home.DetailCancel != nil {
 		a.home.DetailCancel()
 		a.home.DetailCancel = nil
@@ -299,7 +299,7 @@ func (a *appState) openContinueDetail(record ContinueWatchingItem) {
 		item, err := server.ContinueWatchingDetailContext(ctx, record)
 		a.window.Update(func() {
 			defer cancel()
-			if ctx.Err() != nil || a.server != server || a.home.Generation != generation || a.home.DetailRequest != request || a.home.Closed || a.section != "home" || a.selected != nil || a.selectedPerson != nil || a.playback.Active {
+			if ctx.Err() != nil || a.server != server || a.home.Generation != generation || a.home.DetailRequest != request || a.home.Closed || a.section != "home" || a.selected != nil || a.selectedPerson != nil {
 				return
 			}
 			a.home.DetailCancel = nil

@@ -104,6 +104,9 @@ type taskbarUIState struct {
 
 type playbackUIState struct {
 	playerProxy                  *PlaybackProxy
+	playerWindow                 *mygo.Window
+	playerWindowRequest          uint64
+	playbackLoadingPlayer        *Player
 	playback                     PlaybackState
 	playingItem                  *MediaItem
 	playerOverlayWindow          *mygo.Window

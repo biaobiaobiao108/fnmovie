@@ -19,7 +19,7 @@ func playbackTaskbarValue(playback PlaybackState) (float64, bool) {
 }
 
 func (a *appState) syncPlaybackTaskbarProgress() {
-	if a.window == nil {
+	if a.playbackWindow() == nil {
 		return
 	}
 	value, active := playbackTaskbarValue(a.playback)
@@ -32,15 +32,15 @@ func (a *appState) syncPlaybackTaskbarProgress() {
 	if a.taskbarProgressSet && (delta < 0.000001 || delta < 0.005 && now.Sub(a.taskbarProgressUpdatedAt) < time.Second) {
 		return
 	}
-	a.window.SetProgressBar(mygo.ProgressBar{State: mygo.ProgressNormal, Value: value})
+	a.playbackWindow().SetProgressBar(mygo.ProgressBar{State: mygo.ProgressNormal, Value: value})
 	a.taskbarProgress = value
 	a.taskbarProgressUpdatedAt = now
 	a.taskbarProgressSet = true
 }
 
 func (a *appState) clearPlaybackTaskbarProgress() {
-	if a.taskbarProgressSet && a.window != nil {
-		a.window.SetProgressBar(mygo.ProgressBar{})
+	if a.taskbarProgressSet && a.playbackWindow() != nil {
+		a.playbackWindow().SetProgressBar(mygo.ProgressBar{})
 	}
 	a.taskbarProgress = 0
 	a.taskbarProgressUpdatedAt = time.Time{}

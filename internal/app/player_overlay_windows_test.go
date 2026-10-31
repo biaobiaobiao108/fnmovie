@@ -53,22 +53,20 @@ func runNativePlaybackOverlayComposition() error {
 			TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: movieTitleBarHeight,
 			Vibrancy: mygo.VibrancySidebar, BackgroundColor: movieWindowBackground,
 			Content: ui.View(func(c *ui.Context) {
-				a.advancePlayerFullscreen(c)
-				a.advancePlayerOverlayAnimation(c)
-				if a.player.Running() {
-					a.playerView(c)
-					return
+				if a.playerWindow == nil {
+					a.advancePlayerFullscreen(c)
+					a.advancePlayerOverlayAnimation(c)
 				}
 				ui.Box(c).Fill().Background(ui.RGB(24, 164, 98))
 			}),
 		})
 		a.createPlayerOverlay()
-		a.window.Focus()
+		a.playbackWindow().Focus()
 		go func() {
 			time.Sleep(800 * time.Millisecond)
 			a.window.Update(func() {
-				bounds := a.window.ContentBounds()
-				scale := windowScale(a.window.NativeHandle())
+				bounds := a.playbackWindow().ContentBounds()
+				scale := windowScale(a.playbackWindow().NativeHandle())
 				if png, err := a.window.CapturePage(); err == nil {
 					_ = os.MkdirAll("../../out/overlay-check", 0755)
 					_ = os.WriteFile("../../out/overlay-check/main.png", png, 0600)
@@ -141,7 +139,10 @@ func checkNativePlayerMenus(a *appState) error {
 	onUI := func(fn func()) { done := make(chan struct{}); a.window.Update(func() { fn(); close(done) }); <-done }
 	var transportBounds mygo.Rectangle
 	var mainBounds mygo.Rectangle
-	onUI(func() { transportBounds = a.playerOverlayWindow.ContentBounds(); mainBounds = a.window.ContentBounds() })
+	onUI(func() {
+		transportBounds = a.playerOverlayWindow.ContentBounds()
+		mainBounds = a.playbackWindow().ContentBounds()
+	})
 	getDC := syscall.NewLazyDLL("user32.dll").NewProc("GetDC")
 	release := syscall.NewLazyDLL("user32.dll").NewProc("ReleaseDC")
 	getPixel := syscall.NewLazyDLL("gdi32.dll").NewProc("GetPixel")
@@ -159,9 +160,9 @@ func checkNativePlayerMenus(a *appState) error {
 			a.openPlayerOverlayMenu(option)
 			// OS window placement may finish while this test starts. Compare
 			// placement relative to the video, allowing legitimate main-window moves.
-			currentMain, currentTransport := a.window.ContentBounds(), a.playerOverlayWindow.ContentBounds()
+			currentMain, currentTransport := a.playbackWindow().ContentBounds(), a.playerOverlayWindow.ContentBounds()
 			if currentTransport.Width != transportBounds.Width || currentTransport.Height != transportBounds.Height || currentTransport.X-currentMain.X != transportBounds.X-mainBounds.X || currentTransport.Y-currentMain.Y != transportBounds.Y-mainBounds.Y {
-				err = fmt.Errorf("%s menu moved or resized the transport surface: before=%+v after=%+v main=%+v", option, transportBounds, a.playerOverlayWindow.ContentBounds(), a.window.ContentBounds())
+				err = fmt.Errorf("%s menu moved or resized the transport surface: before=%+v after=%+v main=%+v", option, transportBounds, a.playerOverlayWindow.ContentBounds(), a.playbackWindow().ContentBounds())
 			}
 			if a.playerMenuWindow.ContentBounds().Width != playerMenuWidth || a.playerMenuWindow.ContentBounds().Height != playerMenuHeight {
 				err = fmt.Errorf("%s native menu has inconsistent dimensions: %+v", option, a.playerMenuWindow.ContentBounds())
@@ -180,8 +181,8 @@ func checkNativePlayerMenus(a *appState) error {
 					err = fmt.Errorf("%s menu lost its track snapshot: %d", option, len(a.playerMenuTracks))
 					return
 				}
-				bounds := a.window.ContentBounds()
-				scale := windowScale(a.window.NativeHandle())
+				bounds := a.playbackWindow().ContentBounds()
+				scale := windowScale(a.playbackWindow().NativeHandle())
 				dc, _, _ := getDC.Call(0)
 				defer release.Call(0, dc)
 				for y := playerOverlayHeaderHeight + 20; y < bounds.Height-playerOverlayControlHeight; y += 20 {
@@ -221,7 +222,7 @@ func checkNativeFullscreen(a *appState, onUI func(func())) error {
 		for {
 			ready := false
 			onUI(func() {
-				ready = a.fullscreenMotion.started.IsZero() && a.window.IsFullScreen() == target && a.window.Opacity() > 0.99
+				ready = a.fullscreenMotion.started.IsZero() && a.playbackWindow().IsFullScreen() == target && a.playbackWindow().Opacity() > 0.99
 			})
 			if ready {
 				break
@@ -233,7 +234,7 @@ func checkNativeFullscreen(a *appState, onUI func(func())) error {
 		}
 		var err error
 		onUI(func() {
-			main, controls := a.window.ContentBounds(), a.playerOverlayWindow.ContentBounds()
+			main, controls := a.playbackWindow().ContentBounds(), a.playerOverlayWindow.ContentBounds()
 			if controls.Height != playerOverlayControlHeight || controls.Y+controls.Height != main.Y+main.Height {
 				err = fmt.Errorf("fullscreen transition detached controls: main=%+v controls=%+v", main, controls)
 			}
@@ -246,11 +247,11 @@ func checkNativeFullscreen(a *appState, onUI func(func())) error {
 	onUI(func() { a.togglePlayerFullscreen(false); a.togglePlayerFullscreen(false) })
 	var err error
 	onUI(func() {
-		if !a.fullscreenMotion.started.IsZero() || a.window.Opacity() < 0.99 || a.window.IsFullScreen() {
+		if !a.fullscreenMotion.started.IsZero() || a.playbackWindow().Opacity() < 0.99 || a.playbackWindow().IsFullScreen() {
 			err = fmt.Errorf("reversed fullscreen request left stale transition state")
 		}
 		a.requestPlayerFullscreen(true, true)
-		if !a.fullscreenMotion.started.IsZero() || !a.window.IsFullScreen() {
+		if !a.fullscreenMotion.started.IsZero() || !a.playbackWindow().IsFullScreen() {
 			err = fmt.Errorf("reduced-motion fullscreen request was not immediate")
 		}
 		a.requestPlayerFullscreen(false, true)
@@ -303,10 +304,10 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 	onUI := func(fn func()) { done := make(chan struct{}); a.window.Update(func() { fn(); close(done) }); <-done }
 	finish := func(err error) {
 		onUI(func() {
-			a.closePlayer()
-			caption := findMyGoCaptionButtons(a.window.NativeHandle())
+			a.closePlayer(false)
+			caption := findMyGoCaptionButtons(a.playbackWindow().NativeHandle())
 			parent, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetParent").Call(caption)
-			if err == nil && (caption == 0 || parent != a.window.NativeHandle()) {
+			if err == nil && (caption == 0 || parent != a.playbackWindow().NativeHandle()) {
 				err = fmt.Errorf("MyGo caption controls were not restored to the main window")
 			}
 			_ = os.Chdir(cwd)
@@ -348,10 +349,15 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	var running bool
+	var running, separateWindow bool
 	onUI(func() {
 		running = a.player.Running()
+		separateWindow = a.playerWindow != nil && a.playerWindow.NativeHandle() != a.window.NativeHandle()
 	})
+	if !separateWindow {
+		finish(fmt.Errorf("playback did not create a separate top-level window"))
+		return
+	}
 	if !running {
 		finish(fmt.Errorf("playback state active but libmpv is not running: status=%s", a.status))
 		return
@@ -379,7 +385,7 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 	}
 	var focusErr error
 	onUI(func() {
-		restoreWindowFocus(a.window)
+		restoreWindowFocus(a.playbackWindow())
 		foregroundBefore, _, _ := syscall.NewLazyDLL("user32.dll").NewProc("GetForegroundWindow").Call()
 		a.player.ShowSurface()
 		a.hidePlayerOverlay(false)
@@ -388,7 +394,7 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		// Windows may reject activation when another application owns the
 		// foreground lock. Automatic controls must preserve either owner.
 		if foreground != foregroundBefore {
-			focusErr = fmt.Errorf("automatic control display changed foreground focus: before=%x after=%x main=%x controls=%x header=%x", foregroundBefore, foreground, a.window.NativeHandle(), a.playerOverlayWindow.NativeHandle(), a.playerHeaderWindow.NativeHandle())
+			focusErr = fmt.Errorf("automatic control display changed foreground focus: before=%x after=%x main=%x controls=%x header=%x", foregroundBefore, foreground, a.playbackWindow().NativeHandle(), a.playerOverlayWindow.NativeHandle(), a.playerHeaderWindow.NativeHandle())
 		}
 	})
 	if focusErr != nil {
@@ -405,8 +411,8 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 			finalErr = fmt.Errorf("playback unexpectedly stopped: active=%t running=%t position=%v status=%s", a.playback.Active, a.player.Running(), a.playback.Position, a.status)
 			return
 		}
-		bounds := a.window.ContentBounds()
-		scale := windowScale(a.window.NativeHandle())
+		bounds := a.playbackWindow().ContentBounds()
+		scale := windowScale(a.playbackWindow().NativeHandle())
 		user := syscall.NewLazyDLL("user32.dll")
 		dc, _, _ := user.NewProc("GetDC").Call(0)
 		color, _, _ := syscall.NewLazyDLL("gdi32.dll").NewProc("GetPixel").Call(dc, uintptr(float64(bounds.X+bounds.Width/2)*scale), uintptr(float64(bounds.Y+bounds.Height/2)*scale))
@@ -510,7 +516,7 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 		for time.Now().Before(deadline) {
 			ready := false
 			onUI(func() {
-				want, got := clientScreenRect(a.window.NativeHandle()), readWindowRect(a.player.surface)
+				want, got := clientScreenRect(a.playbackWindow().NativeHandle()), readWindowRect(a.player.surface)
 				ready = want == got
 			})
 			if ready {
@@ -520,11 +526,14 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 		}
 		var want, got [4]int32
 		onUI(func() {
-			want, got = clientScreenRect(a.window.NativeHandle()), readWindowRect(a.player.surface)
+			want, got = clientScreenRect(a.playbackWindow().NativeHandle()), readWindowRect(a.player.surface)
 		})
 		return fmt.Errorf("video popup did not follow owner client bounds: want=%v got=%v", want, got)
 	}
-	main, video := a.window.NativeHandle(), a.player.surface
+	main, video := a.playbackWindow().NativeHandle(), a.player.surface
+	if a.window == nil || main == a.window.NativeHandle() {
+		return fmt.Errorf("playback surface is still hosted by the main application window")
+	}
 	if owner, _, _ := user.NewProc("GetParent").Call(video); owner != main {
 		return fmt.Errorf("video popup owner mismatch: owner=%x main=%x", owner, main)
 	}
@@ -560,7 +569,7 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 	// The transport, header and menus are separate owned surfaces above video.
 	var zErr error
 	onUI(func() {
-		restoreWindowFocus(a.window)
+		restoreWindowFocus(a.playbackWindow())
 		a.showPlayerOverlay()
 		if !isNativeWindowAbove(user, a.playerHeaderWindow.NativeHandle(), video) {
 			zErr = fmt.Errorf("playback header is behind video")
@@ -615,8 +624,8 @@ func checkNativeVideoFrames(a *appState, onUI func(func()), duration time.Durati
 	for frame := 0; time.Now().Before(deadline); frame++ {
 		var frameErr error
 		onUI(func() {
-			bounds := a.window.ContentBounds()
-			scale := windowScale(a.window.NativeHandle())
+			bounds := a.playbackWindow().ContentBounds()
+			scale := windowScale(a.playbackWindow().NativeHandle())
 			dc, _, _ := getDC.Call(0)
 			defer releaseDC.Call(0, dc)
 			for _, offset := range []int{-40, 0, 40} {

@@ -6,7 +6,7 @@
 
 - Windows 使用 `resources/windows-amd64/player/libmpv-2.dll`，不得启动或重新加入 `mpv.exe`。绑定通过 Windows DLL 导出和 purego 调用。
 - 创建实例时固定 `config=no`、应用配置目录、`wid=MyGoSurface`、`vo=gpu-next`、`gpu-context=d3d11`、`hwdec=auto-safe`、`ao=wasapi`、`audio-channels=auto-safe`。不要启用压缩音频直通、不要强制音轨语言，并保留 libmpv 默认网络缓存。
-- 播放控件使用 MyGo 原生 UI 透明附属窗，设置 `Parent` 和 `SkipTaskbar`。标题/返回位于主窗口客户区顶部，控制位于底部；不要使用全屏控件面板或留下紫色色键。控件显示淡入，闲置 2.5 秒淡出；退出、最小化、缩放和全屏时同步附属窗与 libmpv 生命周期。
+- 播放控件使用 MyGo 原生 UI 透明附属窗，设置 `Parent` 和 `SkipTaskbar`。视频绘制区域位于独立播放器窗口内；标题/返回位于播放器窗口客户区顶部，控制位于底部。不要使用全屏控件面板或留下紫色色键。控件显示淡入，闲置 2.5 秒淡出；退出、最小化、缩放和全屏时同步附属窗与 libmpv 生命周期。
 - 播放、快退、快进按钮组相对播放器区域严格居中，不受两侧控件宽度影响。
 - 自动显现使用 `ShowInactive`；闲置淡出不得无条件抢回主窗口焦点。只有控件实际持有焦点时才恢复播放快捷键。
 - 只有真实位置或尺寸变化时才调整视频和附属窗几何，不随进度刷新或鼠标活动重复定位。瞬闪回归应检查连续视频帧，不能只验证播放结束后的单帧截图。
