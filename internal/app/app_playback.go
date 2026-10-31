@@ -143,6 +143,7 @@ func (a *appState) finishPlayerStartup(ctx context.Context, requestID uint64, se
 	}
 	a.playingItem = &item
 	a.playback = PlaybackState{Active: true, Title: item.Title, URL: stream.URL, Position: stream.ResumeAt, Duration: stream.Duration, Volume: 100, Speed: 1, Quality: stream.Quality}
+	a.sizePlayerWindowForVideo(requestID, player.Snapshot())
 	player.ShowSurface()
 	a.playbackLoadingPlayer = nil
 	a.playerProxy = proxy
@@ -245,6 +246,7 @@ func (a *appState) trackPlayback(ctx context.Context, item MediaItem, player *Pl
 			if ctx.Err() != nil || a.player != player || !a.playback.Active || a.playingItem == nil || a.playingItem.ID != item.ID {
 				return
 			}
+			a.sizePlayerWindowForVideo(a.playerWindowRequest, snapshot)
 			seekWasPending, seekError := a.seekFeedback.Pending, a.seekFeedback.Error
 			a.playback.Position = a.seekFeedback.position(snapshot, a.playback.Position)
 			if seekWasPending != a.seekFeedback.Pending || seekError != a.seekFeedback.Error {

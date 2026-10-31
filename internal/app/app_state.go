@@ -106,6 +106,7 @@ type playbackUIState struct {
 	playerProxy                  *PlaybackProxy
 	playerWindow                 *mygo.Window
 	playerWindowRequest          uint64
+	playerWindowSizedForRequest  uint64
 	playbackLoadingPlayer        *Player
 	playback                     PlaybackState
 	playingItem                  *MediaItem

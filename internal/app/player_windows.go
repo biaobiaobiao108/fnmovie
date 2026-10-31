@@ -409,6 +409,7 @@ func (p *playerProcess) eventLoop() {
 		}
 		// Drain a bounded batch: a seek acknowledgement must not wait behind
 		// startup/reconfiguration events one polling interval at a time.
+		fileLoaded := false
 		for batch := 0; batch < 64; batch++ {
 			eventPtr := p.api.waitEvent(p.ctx, 0)
 			if eventPtr == 0 {
@@ -447,6 +448,7 @@ func (p *playerProcess) eventLoop() {
 					}
 				}
 			case mpvEventFileLoaded:
+				fileLoaded = true
 				if p.topMarginRatio > 0 {
 					p.command("set", "video-margin-ratio-top", strconv.FormatFloat(p.topMarginRatio, 'f', 6, 64))
 				}
@@ -456,10 +458,12 @@ func (p *playerProcess) eventLoop() {
 					}
 					p.resumeAt = 0
 				}
-				p.loadOnce.Do(func() { close(p.loaded) })
 			}
 		}
 		p.refreshState()
+		if fileLoaded {
+			p.loadOnce.Do(func() { close(p.loaded) })
+		}
 	}
 }
 
@@ -491,10 +495,13 @@ func (p *playerProcess) refreshState() {
 	p.stateMu.RUnlock()
 	position := p.getFloat("time-pos", previous.Position)
 	duration := p.getFloat("duration", previous.Duration)
+	videoWidth := p.getInt("dwidth", previous.VideoWidth)
+	videoHeight := p.getInt("dheight", previous.VideoHeight)
 	p.stateMu.Lock()
 	p.positionBits, p.durationBits, p.positionSeen = math.Float64bits(position), math.Float64bits(duration), duration > 0
 	p.state.Loaded = duration > 0
 	p.state.Position, p.state.Duration = position, duration
+	p.state.VideoWidth, p.state.VideoHeight = videoWidth, videoHeight
 	p.state.ObservedAt = observedAt
 	p.state.Seeking = p.getFlag("seeking")
 	p.state.Buffering = p.getFlag("paused-for-cache")
@@ -522,6 +529,14 @@ func (p *playerProcess) getFloat(name string, fallback float64) float64 {
 		return fallback
 	}
 	return value
+}
+
+func (p *playerProcess) getInt(name string, fallback int) int {
+	var value int64
+	if p.getRaw(name, mpvFormatInt64, unsafe.Pointer(&value)) < 0 || value <= 0 || value > int64(^uint(0)>>1) {
+		return fallback
+	}
+	return int(value)
 }
 
 func (p *playerProcess) getFlag(name string) bool {

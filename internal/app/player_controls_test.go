@@ -100,7 +100,7 @@ func TestPlayerHeaderShowsTitleAndKeepsPlaybackDetailsOutOfTransport(t *testing.
 	const quality = "4K HDR"
 	a := &appState{playback: PlaybackState{Title: title, Quality: quality}}
 	header := ui.NewTester(a.playerHeaderView, 1280, playerOverlayHeaderHeight)
-	back, hasBack := header.Find("返回影片库")
+	back, hasBack := header.Find("关闭播放器")
 	titleBounds, hasTitle := header.Find(title)
 	if !hasBack || !hasTitle || back.Y < 0 || back.Y+back.H > playerOverlayHeaderHeight ||
 		titleBounds.X < back.X+back.W || titleBounds.Y < 0 || titleBounds.Y+titleBounds.H > playerOverlayHeaderHeight ||

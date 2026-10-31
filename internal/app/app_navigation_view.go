@@ -464,7 +464,7 @@ func (a *appState) playerView(c *ui.Context) {
 			if a.playback.Error != "" {
 				ui.Text(c, "播放已停止").FontSize(18).Bold().TextColor(ui.Hex("#f0e8e6"))
 				ui.Text(c, a.playback.Error).FontSize(11).TextColor(ui.Hex("#d6c8c5")).MaxLines(5)
-				if actionButton(c, "返回影片库").Clicked() {
+				if actionButton(c, "关闭窗口").Clicked() {
 					a.stopPlayback()
 				}
 			} else {

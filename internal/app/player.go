@@ -78,6 +78,8 @@ type PlayerSnapshot struct {
 	Volume             float64
 	Muted              bool
 	Speed              float64
+	VideoWidth         int
+	VideoHeight        int
 	AudioOutput        string
 	AudioParams        string
 	AudioTracks        []PlayerTrack

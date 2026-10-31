@@ -25,6 +25,7 @@ const (
 
 var playerOverlayIcons = map[string]*ui.SVG{
 	"back":            ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>`)),
+	"close":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="m18 6-12 12M6 6l12 12"/></svg>`)),
 	"play":            ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.8c0-1.4 1.5-2.2 2.7-1.5l11.5 6.7c1.2.7 1.2 2.5 0 3.2L9.7 20c-1.2.7-2.7-.2-2.7-1.5V4.8z"/></svg>`)),
 	"pause":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><rect x="5.5" y="4" width="4.5" height="16" rx="1.4"/><rect x="14" y="4" width="4.5" height="16" rx="1.4"/></svg>`)),
 	"volume":          ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H3v6h3l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>`)),
@@ -558,7 +559,7 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	c.SetTheme(playerOverlayTheme())
 	row := ui.Row(c).Absolute().Fill().Padding(0, 20, 0, 16).Gap(10).AlignItems(ui.Center).DragWindow()
 	row.Children(func() {
-		playerOverlayIconButton(c, "back", "返回影片库", 36, 16).OnClick(a.stopPlayback)
+		playerOverlayIconButton(c, "close", "关闭播放器", 36, 16).OnClick(a.stopPlayback)
 		title := strings.TrimSpace(a.playback.Title)
 		if title == "" {
 			title = "正在播放"
