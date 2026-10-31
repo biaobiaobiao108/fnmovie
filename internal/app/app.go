@@ -117,7 +117,7 @@ func (a *appState) view(c *ui.Context) {
 	secondary := a.selectedPerson != nil || a.selected != nil
 	host := ui.Box(c.Key("navigation-host")).Fill()
 	if secondary {
-		host.Background(c.Theme().Background)
+		host.Background(ui.Hex(immersiveDetailBackground))
 	}
 	host.Children(func() {
 		key := "main-shell"

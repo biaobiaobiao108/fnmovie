@@ -6,6 +6,8 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+const immersiveDetailBackground = "#0b0c10"
+
 func (a *appState) secondaryPage(c *ui.Context) {
 	var backdropURL string
 	if a.selectedPerson != nil {
@@ -32,7 +34,7 @@ func (a *appState) secondaryPage(c *ui.Context) {
 		b := palette.AnimateTo("blue", float32(tint.B), ui.Animation{Duration: 440 * time.Millisecond})
 		animatedTint := ui.RGB(uint8(r), uint8(g), uint8(b))
 		palette.Draw(func(p *ui.Painter, rect ui.Rect) {
-			ink := ui.Hex("#0b0c10")
+			ink := ui.Hex(immersiveDetailBackground)
 			p.FillGradient(rect, ui.LinearGradient{
 				Angle: 180, Oklab: true,
 				Stops: []ui.GradientStop{
@@ -64,7 +66,7 @@ func immersiveDetailTheme(tint ui.Color) *ui.Theme {
 		accent = movieColors.accent.Mix(ui.RGB(255, 255, 255), 0.2)
 	}
 	t := *movieTheme()
-	t.Background = ui.Hex("#0b0c10")
+	t.Background = ui.Hex(immersiveDetailBackground)
 	t.Surface = ui.RGBA(255, 255, 255, 0.09)
 	t.SurfaceHover = ui.RGBA(255, 255, 255, 0.14)
 	t.SurfacePressed = ui.RGBA(255, 255, 255, 0.19)

@@ -860,6 +860,18 @@ func playerAppleMenuItem(c *ui.Context, label string, selected bool) ui.Element 
 
 func playerOverlayIconButton(c *ui.Context, name, label string, size, iconSize float32) ui.Element {
 	b := playerOverlayButton(c, label, size, ui.RGBA(255, 255, 255, 0.88))
+	if name == "close" {
+		// The dark scrim keeps the close icon readable over bright video frames.
+		background := ui.RGBA(12, 14, 18, 0.72)
+		border := ui.RGBA(255, 255, 255, 0.24)
+		if b.Pressed() {
+			background, border = ui.RGBA(12, 14, 18, 0.90), ui.RGBA(255, 255, 255, 0.46)
+		} else if b.Hovered() {
+			background, border = ui.RGBA(12, 14, 18, 0.84), ui.RGBA(255, 255, 255, 0.36)
+		}
+		b.Background(b.AnimateColor("player-close-background", background, ui.Animation{Duration: 120 * time.Millisecond})).
+			Border(1, border)
+	}
 	b.Children(func() {
 		if strings.HasPrefix(name, "seek-") {
 			ui.Box(c).Size(iconSize, iconSize).Children(func() {
