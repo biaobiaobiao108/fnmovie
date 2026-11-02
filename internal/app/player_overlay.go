@@ -557,6 +557,17 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	a.advancePlayerOverlayAnimation(c)
 	c.Root().Background(ui.Transparent)
 	c.SetTheme(playerOverlayTheme())
+	var cornerRadius float32
+	if a.playbackWindow() != nil && !a.playbackWindow().IsFullScreen() {
+		cornerRadius = 8
+	}
+	ui.Box(c).Label("播放信息渐隐").Absolute().Fill().PassThrough().Radius(cornerRadius, cornerRadius, 0, 0).Clip().LinearGradient(ui.LinearGradient{
+		Angle: 180,
+		Stops: []ui.GradientStop{
+			{Color: ui.RGBA(0, 0, 0, 0.58), At: 0},
+			{Color: ui.RGBA(0, 0, 0, 0.18), At: 0.62},
+			{Color: ui.RGBA(0, 0, 0, 0), At: 1},
+		}})
 	row := ui.Row(c).Absolute().Fill().Padding(0, 20, 0, 16).Gap(10).AlignItems(ui.Center).DragWindow()
 	row.Children(func() {
 		title := strings.TrimSpace(a.playback.Title)
@@ -567,7 +578,7 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 		if errorMessage := strings.TrimSpace(a.playback.Error); errorMessage != "" {
 			ui.Text(c, errorMessage).Shrink(0).FontSize(11).TextColor(playerOverlayAccent()).SingleLine()
 		}
-		playerOverlayIconButton(c, "close", "关闭播放器", 36, 16).OnClick(a.stopPlayback)
+		playerOverlayIconButton(c, "close", "关闭播放器", 34, 17).OnClick(a.stopPlayback)
 	})
 }
 
@@ -860,18 +871,6 @@ func playerAppleMenuItem(c *ui.Context, label string, selected bool) ui.Element 
 
 func playerOverlayIconButton(c *ui.Context, name, label string, size, iconSize float32) ui.Element {
 	b := playerOverlayButton(c, label, size, ui.RGBA(255, 255, 255, 0.88))
-	if name == "close" {
-		// The dark scrim keeps the close icon readable over bright video frames.
-		background := ui.RGBA(12, 14, 18, 0.72)
-		border := ui.RGBA(255, 255, 255, 0.24)
-		if b.Pressed() {
-			background, border = ui.RGBA(12, 14, 18, 0.90), ui.RGBA(255, 255, 255, 0.46)
-		} else if b.Hovered() {
-			background, border = ui.RGBA(12, 14, 18, 0.84), ui.RGBA(255, 255, 255, 0.36)
-		}
-		b.Background(b.AnimateColor("player-close-background", background, ui.Animation{Duration: 120 * time.Millisecond})).
-			Border(1, border)
-	}
 	b.Children(func() {
 		if strings.HasPrefix(name, "seek-") {
 			ui.Box(c).Size(iconSize, iconSize).Children(func() {

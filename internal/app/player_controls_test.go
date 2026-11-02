@@ -102,10 +102,13 @@ func TestPlayerHeaderShowsTitleAndKeepsPlaybackDetailsOutOfTransport(t *testing.
 	header := ui.NewTester(a.playerHeaderView, 1280, playerOverlayHeaderHeight)
 	closeButton, hasCloseButton := header.Find("关闭播放器")
 	titleBounds, hasTitle := header.Find(title)
+	fade, hasFade := header.Find("播放信息渐隐")
 	if !hasCloseButton || !hasTitle || closeButton.Y < 0 || closeButton.Y+closeButton.H > playerOverlayHeaderHeight ||
+		closeButton.W != 34 || closeButton.H != 34 ||
 		titleBounds.X+titleBounds.W > closeButton.X || titleBounds.Y < 0 || titleBounds.Y+titleBounds.H > playerOverlayHeaderHeight ||
+		!hasFade || fade.W != 1280 || fade.H != playerOverlayHeaderHeight ||
 		header.HasText(quality) {
-		t.Fatalf("header should place the close button to the right of the title and omit quality: close=%+v title=%+v texts=%v", closeButton, titleBounds, header.Texts())
+		t.Fatalf("header should use a compact close control and its own contrast fade: close=%+v title=%+v fade=%+v texts=%v", closeButton, titleBounds, fade, header.Texts())
 	}
 	transport := ui.NewTester(a.playerTransport, 1280, playerOverlayControlHeight)
 	play, hasPlay := transport.Find("播放或暂停")
