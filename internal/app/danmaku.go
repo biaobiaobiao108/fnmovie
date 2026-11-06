@@ -663,7 +663,7 @@ PlayResY: 1080
 
 [V4+ Styles]
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Danmaku,Microsoft YaHei,%d,&H%02XFFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,%d,1,7,0,0,0,1
+Style: Danmaku,Microsoft YaHei,%d,&H%02XFFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,%d,0,7,0,0,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
@@ -703,7 +703,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 				continue
 			}
 			y := danmakuCanvasHeight - lineHeight*0.2 - float64(lane)*lineHeight
-			fmt.Fprintf(&builder, "Dialogue: 0,%s,%s,Danmaku,,0,0,0,,%s{\\an2\\pos(%.0f,%.0f)\\fad(150,180)}%s\n",
+			fmt.Fprintf(&builder, "Dialogue: 0,%s,%s,Danmaku,,0,0,0,,%s{\\an2\\pos(%.0f,%.0f)}%s\n",
 				formatASSTime(start), formatASSTime(start+danmakuStaticSeconds), colorTag, danmakuCanvasWidth/2, y, escapeASSText(text))
 		case comment.Mode == 5:
 			if !opts.ShowTop {
@@ -714,7 +714,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 				continue
 			}
 			y := baseY + float64(lane)*lineHeight
-			fmt.Fprintf(&builder, "Dialogue: 0,%s,%s,Danmaku,,0,0,0,,%s{\\an8\\pos(%.0f,%.0f)\\fad(150,180)}%s\n",
+			fmt.Fprintf(&builder, "Dialogue: 0,%s,%s,Danmaku,,0,0,0,,%s{\\an8\\pos(%.0f,%.0f)}%s\n",
 				formatASSTime(start), formatASSTime(start+danmakuStaticSeconds), colorTag, danmakuCanvasWidth/2, y, escapeASSText(text))
 		default:
 			if !opts.ShowScroll {
@@ -726,8 +726,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 			}
 			y := baseY + float64(lane)*lineHeight
 			startX := danmakuCanvasWidth + gapX
-			endX := -width - gapX
-			fmt.Fprintf(&builder, "Dialogue: 0,%s,%s,Danmaku,,0,0,0,,%s{\\an7\\move(%.0f,%.0f,%.0f,%.0f,0,%d)\\fad(80,120)}%s\n",
+			// Keep a generous off-screen margin: font metrics vary by system and
+			// a too-small estimate makes long comments vanish while still visible.
+			endX := -width - gapX - fontSize*2
+			fmt.Fprintf(&builder, "Dialogue: 0,%s,%s,Danmaku,,0,0,0,,%s{\\an7\\move(%.0f,%.0f,%.0f,%.0f,0,%d)}%s\n",
 				formatASSTime(start), formatASSTime(start+opts.SpeedSeconds), colorTag,
 				startX, y, endX, y, int(opts.SpeedSeconds*1000), escapeASSText(text))
 		}
@@ -780,14 +782,22 @@ func danmakuTextWidth(text string, fontSize float64) float64 {
 	width := 0.0
 	for _, r := range text {
 		switch {
-		case r < 0x80:
-			width += fontSize * 0.56
 		case r == ' ':
-			width += fontSize * 0.3
+			width += fontSize * 0.36
+		case r < 0x80:
+			// Proportional Latin fonts are wider than a flat half-em estimate,
+			// especially for uppercase and digits. Overestimating here keeps
+			// lanes clear and guarantees the text leaves the screen on time.
+			switch {
+			case r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+				width += fontSize * 0.68
+			default:
+				width += fontSize * 0.60
+			}
 		case r >= 0x2E80:
-			width += fontSize
+			width += fontSize * 1.06
 		default:
-			width += fontSize * 0.72
+			width += fontSize * 0.82
 		}
 	}
 	return width

@@ -26,6 +26,7 @@ func (a *appState) playerDanmakuPanel(c *ui.Context) {
 			ui.Button(c.Key("danmaku-toggle"), toggleLabel).Height(28).Padding(0, 10).Radius(8).
 				Background(ui.RGBA(255, 255, 255, 0.10)).TextColor(ui.RGBA(255, 255, 255, 0.90)).
 				OnClick(a.toggleDanmakuEnabled)
+			playerOverlayIconButton(c, "close", "关闭弹幕设置", 28, 15).OnClick(a.closePlayerOverlayMenu)
 		})
 
 		ui.Tabs(c, &a.danmaku.panelTab, "播放设置", "搜索选集")

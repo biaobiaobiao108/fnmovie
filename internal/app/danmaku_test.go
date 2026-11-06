@@ -297,6 +297,9 @@ func TestPlayerDanmakuPanelLayout(t *testing.T) {
 			t.Fatalf("danmaku panel is missing %q: %v", text, tester.Texts())
 		}
 	}
+	if _, ok := tester.Find("关闭弹幕设置"); !ok {
+		t.Fatal("danmaku panel is missing its close button")
+	}
 }
 
 func TestDanmakuShortcutMapping(t *testing.T) {

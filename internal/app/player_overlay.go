@@ -798,10 +798,23 @@ func (a *appState) openPlayerOverlayMenu(option string) {
 		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: a.playerMenuContent,
 	})
+	a.playerMenuWindow.OnBlur(func() {
+		if a.window == nil {
+			return
+		}
+		menuWindow := a.playerMenuWindow
+		a.window.Update(func() {
+			if a.playerOverlayMenu == "" || a.playerMenuWindow != menuWindow {
+				return
+			}
+			a.closePlayerOverlayMenu()
+		})
+	})
 	// A new menu surface contains no previous transport/menu bitmap. It stays
 	// transparent until its own first paint, and never shifts the control bar.
 	a.playerMenuContent.SetOpacity(a.playerMenuWindow, a.playerOverlayOpacity)
 	a.playerMenuWindow.Show()
+	a.playerMenuWindow.Focus()
 	a.syncPlayerOverlay()
 	a.playerOverlayWindow.Invalidate()
 }
