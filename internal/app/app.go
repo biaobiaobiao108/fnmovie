@@ -46,6 +46,7 @@ func Run() {
 	if err != nil {
 		log.Printf("settings: %v", err)
 	}
+	settings.Danmaku = settings.Danmaku.normalized()
 	app := &appState{
 		settings: settings, serverAddress: settings.ServerURL, player: NewPlayer(), posters: NewPosterLoader(),
 		navigationUIState: navigationUIState{section: "home"},

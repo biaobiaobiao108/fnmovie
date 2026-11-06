@@ -15,6 +15,7 @@
 | `internal/app/server.go`、`app_catalog.go`、`app_favorites.go` | 飞牛 API、影视目录与收藏 |
 | `internal/app/*cache*.go`、`app_images.go` | 目录、人物和海报缓存及图片加载 |
 | `internal/app/app_playback.go`、`player*.go`、`playback*.go` | 播放流程、libmpv、控件和播放进度 |
+| `internal/app/danmaku*.go`、`player_danmaku_view.go` | 弹幕服务器、ASS 生成和播放器弹幕面板 |
 | `internal/app/config.go`、`credentials_*.go` | 本地设置与平台凭据 |
 | `internal/app/theme.go`、`motion.go`、`scroll_binding.go` | 界面样式、动画和滚动绑定 |
 | `internal/mygooverlay/` | 播放器原生覆盖层适配 |

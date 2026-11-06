@@ -138,6 +138,7 @@ type playbackUIState struct {
 	seekDragging                 bool
 	seekFeedback                 seekFeedback
 	volumeDragging               bool
+	danmaku                      danmakuUIState
 	playbackLoading              bool
 	playbackLoadingID            string
 	playbackLoadingTitle         string

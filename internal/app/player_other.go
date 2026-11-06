@@ -28,6 +28,7 @@ func (p *playerProcess) snapshot() PlayerSnapshot           { return PlayerSnaps
 func (p *playerProcess) setViewport(ui.Rect)                {}
 func (p *playerProcess) setTopMarginRatio(float64)          {}
 func (p *playerProcess) pointerActivity() <-chan struct{}   { return nil }
+func (p *playerProcess) setDanmakuSubtitle(string) bool     { return false }
 func windowScale(uintptr) float64                           { return 1 }
 func createPlayerSurface(uintptr) (uintptr, error) {
 	return 0, errors.New("embedded mpv playback is only supported on Windows")

@@ -196,6 +196,7 @@ type playerProcess struct {
 	viewport          ui.Rect
 	topMarginRatio    float64
 	resumeAt          float64
+	danmakuTrackID    int
 }
 
 func (p *playerProcess) start(dllPath, streamURL string, parent uintptr, resumeAt float64) error {
@@ -231,6 +232,7 @@ func (p *playerProcess) startContext(playbackCtx context.Context, dllPath, strea
 		{"hwdec", "auto-safe"}, {"ao", "wasapi"}, {"audio-channels", "auto-safe"},
 		{"osc", "no"}, {"osd-level", "0"}, {"input-default-bindings", "no"}, {"input-vo-keyboard", "no"},
 		{"keepaspect", "yes"}, {"force-window", "yes"}, {"wid", strconv.FormatUint(uint64(host), 10)},
+		{"secondary-sub-ass-override", "no"}, {"secondary-sub-visibility", "no"},
 		{"log-file", filepath.Join(configDir, "mpv.log")}, {"msg-level", "all=warn,ao=info,ad=info,vd=info,ffmpeg=info"},
 	}
 	for _, option := range options {
@@ -283,6 +285,7 @@ func (p *playerProcess) resetSession(api *mpvAPI, ctx, host uintptr, resumeAt fl
 	p.pointerEvents, p.pointerDone, p.resumeAt = make(chan struct{}, 1), nil, resumeAt
 	p.stopOnce, p.loadOnce = sync.Once{}, sync.Once{}
 	p.topMarginRatio = 0
+	p.danmakuTrackID = 0
 	p.stateMu.Lock()
 	p.exitStatus = ""
 	p.positionBits, p.durationBits, p.positionSeen = 0, 0, false
@@ -716,6 +719,39 @@ func (p *playerProcess) runningCommand(args ...any) {
 	if code := p.command(args...); code < 0 {
 		log.Printf("libmpv command %q failed: %s", strings.Join(toStrings(args), " "), mpvError(p.api, code))
 	}
+}
+
+// setDanmakuSubtitle mounts the generated ASS document as mpv's secondary
+// subtitle track. The user's own subtitle remains the primary track, so
+// enabling danmaku never silently replaces a subtitle selection. Rewriting
+// the same path replaces the previous danmaku track deterministically instead
+// of relying on sub-reload preserving the secondary selection.
+func (p *playerProcess) setDanmakuSubtitle(path string) bool {
+	if p.danmakuTrackID > 0 {
+		p.runningCommand("sub-remove", p.danmakuTrackID)
+		p.danmakuTrackID = 0
+	}
+	previous := p.getInt("sid", 0)
+	if code := p.command("sub-add", path, "select"); code < 0 {
+		log.Printf("libmpv add danmaku subtitle failed: %s", mpvError(p.api, code))
+		return false
+	}
+	id := p.getInt("sid", 0)
+	if id <= 0 {
+		log.Printf("libmpv add danmaku subtitle returned no track id")
+		return false
+	}
+	if previous > 0 && previous != id {
+		p.command("set", "sid", previous)
+	} else {
+		p.command("set", "sid", "no")
+	}
+	// Re-assert the secondary selection after restoring the primary track:
+	// some mpv builds clear a secondary selection when sid changes.
+	p.command("set", "secondary-sid", id)
+	p.command("set", "secondary-sub-visibility", "yes")
+	p.danmakuTrackID = id
+	return true
 }
 
 func (p *playerProcess) watchPointer(done <-chan struct{}, host uintptr, finished chan<- struct{}) {

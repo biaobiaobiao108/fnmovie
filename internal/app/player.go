@@ -363,6 +363,27 @@ func (p *Player) SelectTrack(kind string, id int) {
 	p.command("set_property", property, value)
 }
 
+// SetDanmakuSubtitle mounts or replaces the generated ASS file on the
+// secondary subtitle track. The primary subtitle selection is preserved.
+func (p *Player) SetDanmakuSubtitle(path string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.process != nil && path != "" {
+		return p.process.setDanmakuSubtitle(path)
+	}
+	return false
+}
+
+// SetDanmakuVisible toggles only the secondary subtitle track used by
+// danmaku, leaving the user's primary subtitles untouched.
+func (p *Player) SetDanmakuVisible(visible bool) {
+	if visible {
+		p.command("set", "secondary-sub-visibility", "yes")
+	} else {
+		p.command("set", "secondary-sub-visibility", "no")
+	}
+}
+
 func playerTrackSelection(kind string, id int) (property string, value any) {
 	property = "sid"
 	if kind == "audio" {

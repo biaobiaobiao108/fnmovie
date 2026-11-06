@@ -21,6 +21,8 @@ const (
 	playerSeekFeedbackHeight   = 56
 	playerMenuWidth            = 300
 	playerMenuHeight           = 330
+	playerDanmakuMenuWidth     = 460
+	playerDanmakuMenuHeight    = 580
 )
 
 var playerOverlayIcons = map[string]*ui.SVG{
@@ -37,6 +39,7 @@ var playerOverlayIcons = map[string]*ui.SVG{
 	"seek-forward-10": ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4.5A8.5 8.5 0 1 1 3.5 13"/><path d="M12 1.5l3 3-3 3"/></svg>`)),
 	"subtitles":       ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 15h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2H7"/><path d="M13 15h2a2 2 0 0 0 2-2v-2a2 2 0 0 0-2-2h-2"/></svg>`)),
 	"audio":           ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10v4"/><path d="M7 6v12"/><path d="M11 3v18"/><path d="M15 8v8"/><path d="M19 5v14"/><path d="M22 10v4"/></svg>`)),
+	"danmaku":         ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.4 8.4 0 0 1-8.5 8.3 9.6 9.6 0 0 1-3.2-.5L4 21l1.3-4.2A8 8 0 0 1 4 11.5 8.4 8.4 0 0 1 12.5 3 8.4 8.4 0 0 1 21 11.5z"/><path d="M8.5 9.5h7"/><path d="M8.5 13h5"/></svg>`)),
 }
 
 func (a *appState) createPlayerOverlay() {
@@ -151,7 +154,7 @@ func (a *appState) syncPlayerOverlay() {
 	a.playerOverlayWindow.Invalidate()
 	a.playerHeaderWindow.Invalidate()
 	if a.playerMenuWindow != nil {
-		if menuBounds := playerMenuBounds(bounds); a.playerMenuWindow.ContentBounds() != menuBounds {
+		if menuBounds := a.playerMenuBounds(bounds); a.playerMenuWindow.ContentBounds() != menuBounds {
 			a.playerMenuWindow.SetContentBounds(menuBounds)
 		}
 		a.playerMenuWindow.Invalidate()
@@ -231,9 +234,13 @@ func (a *appState) playerOverlayContentHeight() int {
 	return playerOverlayControlHeight
 }
 
-func playerMenuBounds(bounds mygo.Rectangle) mygo.Rectangle {
-	width := min(playerMenuWidth, max(1, bounds.Width-40))
-	height := min(playerMenuHeight, max(1, bounds.Height-playerOverlayControlHeight-playerOverlayHeaderHeight))
+func (a *appState) playerMenuBounds(bounds mygo.Rectangle) mygo.Rectangle {
+	width, height := playerMenuWidth, playerMenuHeight
+	if a.playerOverlayMenu == "danmaku" {
+		width, height = playerDanmakuMenuWidth, playerDanmakuMenuHeight
+	}
+	width = min(width, max(1, bounds.Width-40))
+	height = min(height, max(1, bounds.Height-playerOverlayControlHeight-playerOverlayHeaderHeight))
 	return mygo.Rectangle{X: bounds.X + max(0, bounds.Width-width-20), Y: bounds.Y + max(0, bounds.Height-playerOverlayControlHeight-height), Width: width, Height: height}
 }
 
@@ -637,7 +644,9 @@ func (a *appState) playerTransport(c *ui.Context) {
 		// Three equal columns keep the transport centered regardless of the
 		// width of the track and volume controls.
 		ui.Row(c).Label("播放控制栏").Height(48).AlignItems(ui.Center).Gap(10).Children(func() {
-			ui.Box(c).Grow(1).Basis(0).MinWidth(0)
+			ui.Row(c).Label("弹幕快捷入口").Grow(1).Basis(0).MinWidth(0).Gap(6).AlignItems(ui.Center).Children(func() {
+				a.playerOptionButton(c, "danmaku")
+			})
 
 			ui.Row(c).Label("居中播放操作").Grow(1).Basis(0).Gap(10).Center().Children(func() {
 				playerOverlayIconButton(c, "seek-back-10", "快退 10 秒", 42, 24).OnClick(func() {
@@ -714,6 +723,9 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 		disabled = len(a.playback.AudioTracks) == 0
 		iconName = "audio"
 		accessibleLabel = "音轨"
+	case "danmaku":
+		iconName = "danmaku"
+		accessibleLabel = "弹幕"
 	}
 
 	var btn ui.Element
@@ -725,6 +737,9 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 		} else if btn.Hovered() && !disabled {
 			btn.Background(ui.RGBA(255, 255, 255, 0.10)).TextColor(ui.RGB(255, 255, 255))
 		} else if disabled {
+			btn.TextColor(ui.RGBA(255, 255, 255, 0.38))
+		}
+		if option == "danmaku" && a.settings.Danmaku.Disabled && !active && !btn.Hovered() {
 			btn.TextColor(ui.RGBA(255, 255, 255, 0.38))
 		}
 		btn.Children(func() {
@@ -765,6 +780,9 @@ func (a *appState) openPlayerOverlayMenu(option string) {
 		a.playerMenuTracks = append(a.playerMenuTracks[:0], a.playback.SubtitleTracks...)
 	case "audio":
 		a.playerMenuTracks = append(a.playerMenuTracks[:0], a.playback.AudioTracks...)
+	case "danmaku":
+		a.playerMenuTracks = nil
+		a.prepareDanmakuPanel()
 	default:
 		a.playerMenuTracks = nil
 	}
@@ -772,7 +790,7 @@ func (a *appState) openPlayerOverlayMenu(option string) {
 	if a.playbackWindow() == nil || a.playerOverlayWindow == nil {
 		return
 	}
-	bounds := playerMenuBounds(a.playbackWindow().ContentBounds())
+	bounds := a.playerMenuBounds(a.playbackWindow().ContentBounds())
 	a.playerMenuContent = overlay.View(a.playerMenuView)
 	a.playerMenuWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: "播放选项", X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height,
@@ -810,8 +828,14 @@ func (a *appState) playerPopover(c *ui.Context) {
 			title = "音轨选择"
 		case "speed":
 			title = "播放速度"
+		case "danmaku":
+			title = "弹幕"
 		}
 		ui.Text(c, title).Padding(4, 9).FontSize(11).Bold().TextColor(ui.RGBA(255, 255, 255, 0.65))
+		if a.playerOverlayMenu == "danmaku" {
+			a.playerDanmakuPanel(c)
+			return
+		}
 		ui.Scroll(c).Grow(1).FillWidth().MinWidth(0).Children(func() {
 			switch a.playerOverlayMenu {
 			case "subtitle":
@@ -963,7 +987,7 @@ func (a *appState) seekDisplayPosition() float64 {
 }
 
 func (a *appState) playerShortcuts(c *ui.Context) {
-	keys := [...]ui.Key{ui.KeySpace, ui.KeyLeft, ui.KeyRight, ui.KeyUp, ui.KeyDown, ui.KeyM, ui.KeyF, ui.KeyEscape}
+	keys := [...]ui.Key{ui.KeySpace, ui.KeyLeft, ui.KeyRight, ui.KeyUp, ui.KeyDown, ui.KeyM, ui.KeyF, ui.KeyD, ui.KeyEscape}
 	fullscreen := a.playbackWindow() != nil && a.playbackWindow().IsFullScreen()
 	for _, key := range keys {
 		if c.Shortcut(0, key) {
@@ -993,6 +1017,7 @@ const (
 	playerVolumeUp       playerAction = "volume-up"
 	playerVolumeDown     playerAction = "volume-down"
 	playerToggleMute     playerAction = "mute"
+	playerToggleDanmaku  playerAction = "danmaku"
 	playerToggleFull     playerAction = "fullscreen"
 	playerExitFull       playerAction = "exit-fullscreen"
 	playerReturn         playerAction = "return"
@@ -1016,6 +1041,8 @@ func playerShortcutAction(mods ui.Modifiers, key ui.Key, fullscreen bool) player
 		return playerVolumeDown
 	case ui.KeyM:
 		return playerToggleMute
+	case ui.KeyD:
+		return playerToggleDanmaku
 	case ui.KeyF:
 		return playerToggleFull
 	case ui.KeyEscape:
@@ -1046,6 +1073,8 @@ func (a *appState) performPlayerAction(action playerAction) {
 	case playerToggleMute:
 		a.player.ToggleMute()
 		a.playback.Muted = !a.playback.Muted
+	case playerToggleDanmaku:
+		a.toggleDanmakuEnabled()
 	case playerToggleFull:
 		if a.playbackWindow() != nil {
 			a.togglePlayerFullscreen(false)

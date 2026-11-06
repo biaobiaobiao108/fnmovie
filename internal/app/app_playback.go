@@ -175,6 +175,7 @@ func (a *appState) finishPlayerStartup(ctx context.Context, requestID uint64, se
 	trackCtx, trackCancel := context.WithCancel(context.Background())
 	a.playbackTrackCancel = trackCancel
 	go a.trackPlayback(trackCtx, item, player, session)
+	a.beginDanmaku(item, player)
 }
 
 func (a *appState) failPlayerStartup(requestID uint64, player *Player, proxy *PlaybackProxy, message string) {
@@ -263,7 +264,7 @@ func (a *appState) trackPlayback(ctx context.Context, item MediaItem, player *Pl
 			a.playback.AudioOutput = snapshot.AudioOutput
 			a.playback.AudioParams = snapshot.AudioParams
 			a.playback.AudioTracks = snapshot.AudioTracks
-			a.playback.SubtitleTracks = snapshot.SubtitleTracks
+			a.playback.SubtitleTracks = filterDanmakuSubtitleTracks(snapshot.SubtitleTracks)
 			if duration > 0 {
 				a.playback.Duration = duration
 			}
@@ -382,6 +383,7 @@ func (a *appState) closePlayer(keepWindow bool) (*Server, *MediaItem, float64, f
 	}
 	a.player.Stop()
 	a.player.ReleaseSurface()
+	a.cancelDanmaku()
 	a.playerProxy.Close()
 	a.playerProxy = nil
 	a.playingItem = nil

@@ -21,8 +21,9 @@ func configureCompatibleAppPaths() {
 }
 
 type Settings struct {
-	ServerURL string `json:"serverUrl"`
-	Username  string `json:"username,omitempty"`
+	ServerURL string          `json:"serverUrl"`
+	Username  string          `json:"username,omitempty"`
+	Danmaku   DanmakuSettings `json:"danmaku,omitempty"`
 }
 
 func settingsPath() (string, error) {
