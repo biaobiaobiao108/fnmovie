@@ -262,10 +262,11 @@ func TestFilterDanmakuSubtitleTracks(t *testing.T) {
 		{ID: 1, Title: "中文", External: true},
 		{ID: 2, Title: "danmaku", External: true},
 		{ID: 3, Title: "fnmovie-danmaku.ass", External: true},
-		{ID: 4, Title: "danmaku", External: false},
+		{ID: 4, Title: "弹幕", External: true},
+		{ID: 5, Title: "danmaku", External: false},
 	}
 	filtered := filterDanmakuSubtitleTracks(tracks)
-	if len(filtered) != 2 || filtered[0].ID != 1 || filtered[1].ID != 4 {
+	if len(filtered) != 2 || filtered[0].ID != 1 || filtered[1].ID != 5 {
 		t.Fatalf("filtered tracks = %+v", filtered)
 	}
 }

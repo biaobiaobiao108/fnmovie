@@ -90,7 +90,7 @@ func isDanmakuSubtitleTrack(track PlayerTrack) bool {
 	}
 	title := strings.ToLower(strings.TrimSpace(track.Title))
 	title = strings.TrimSuffix(title, ".ass")
-	return title == "danmaku" || strings.Contains(title, "fnmovie-danmaku")
+	return title == "弹幕" || title == "danmaku" || strings.Contains(title, "fnmovie-danmaku")
 }
 
 // filterDanmakuSubtitleTracks keeps the generated danmaku track out of the

@@ -732,7 +732,7 @@ func (p *playerProcess) setDanmakuSubtitle(path string) bool {
 		p.danmakuTrackID = 0
 	}
 	previous := p.getInt("sid", 0)
-	if code := p.command("sub-add", path, "select"); code < 0 {
+	if code := p.command("sub-add", path, "select", "弹幕"); code < 0 {
 		log.Printf("libmpv add danmaku subtitle failed: %s", mpvError(p.api, code))
 		return false
 	}
