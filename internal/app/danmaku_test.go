@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 )
 
@@ -266,6 +267,18 @@ func TestFilterDanmakuSubtitleTracks(t *testing.T) {
 	filtered := filterDanmakuSubtitleTracks(tracks)
 	if len(filtered) != 2 || filtered[0].ID != 1 || filtered[1].ID != 4 {
 		t.Fatalf("filtered tracks = %+v", filtered)
+	}
+}
+
+func TestDanmakuMenuBoundsFitSmallWindows(t *testing.T) {
+	a := &appState{playerOverlayMenu: "danmaku"}
+	large := a.playerMenuBounds(mygo.Rectangle{Width: 1280, Height: 800})
+	if large.Width != playerDanmakuMenuWidth || large.Height != playerDanmakuMenuHeight {
+		t.Fatalf("large danmaku menu bounds = %+v", large)
+	}
+	small := a.playerMenuBounds(mygo.Rectangle{Width: 400, Height: 300})
+	if small.Width > 360 || small.Height > 138 || small.Width <= 0 || small.Height <= 0 {
+		t.Fatalf("small danmaku menu bounds = %+v", small)
 	}
 }
 
