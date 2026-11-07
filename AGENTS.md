@@ -9,7 +9,7 @@
 | 位置 | 职责 |
 | --- | --- |
 | `main.go`、`mygo.json` | 应用入口与构建配置 |
-| `internal/app/app.go`、`app_state.go`、`app_session.go` | 应用生命周期、状态及登录会话 |
+| `internal/app/app.go`、`app_state.go`、`app_session.go`、`fnid.go` | 应用生命周期、状态、登录会话及 FN ID 解析 |
 | `internal/app/app_navigation_view.go`、`app_secondary_view.go`、`media_view.go` | 导航、次级页面和媒体列表界面 |
 | `internal/app/home*.go`、`app_detail*.go`、`detail_loading.go` | 首页、媒体详情及其数据加载 |
 | `internal/app/server.go`、`app_catalog.go`、`app_favorites.go` | 飞牛 API、影视目录与收藏 |

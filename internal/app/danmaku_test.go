@@ -26,6 +26,22 @@ func TestDanmakuSettingsNormalize(t *testing.T) {
 	}
 }
 
+func TestNormalizeDanmakuBaseURLToken(t *testing.T) {
+	cases := []struct{ raw, token, want string }{
+		{"http://nas:9321", "", "http://nas:9321"},
+		{"http://nas:9321", "abc123", "http://nas:9321/abc123"},
+		{"http://nas:9321/", "abc123", "http://nas:9321/abc123"},
+		{"http://nas:9321/abc123", "abc123", "http://nas:9321/abc123"},
+		{"http://nas:9321/api/v2", "abc123", "http://nas:9321/abc123"},
+		{"nas:9321", "/abc123/", "http://nas:9321/abc123"},
+	}
+	for _, tc := range cases {
+		if got := normalizeDanmakuBaseURL(tc.raw, tc.token); got != tc.want {
+			t.Errorf("normalizeDanmakuBaseURL(%q, %q) = %q, want %q", tc.raw, tc.token, got, tc.want)
+		}
+	}
+}
+
 func TestDefaultDanmakuServerURL(t *testing.T) {
 	cases := map[string]string{
 		"":                           "",
@@ -159,7 +175,7 @@ func TestDanmakuClientProtocol(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewDanmakuClient(server.URL + "/api/v2")
+	client := NewDanmakuClient(server.URL+"/api/v2", "")
 	ctx := context.Background()
 	matches, err := client.Match(ctx, "Show.S01E01.mkv")
 	if err != nil || len(matches) != 1 || matches[0].EpisodeID != "901" || matchedName != "Show.S01E01.mkv" {
@@ -198,7 +214,7 @@ func TestResolveDanmakuSelectsTargetEpisode(t *testing.T) {
 	defer server.Close()
 
 	item := MediaItem{Title: "第二集", SeriesTitle: "测试番剧", EpisodeNumber: 2}
-	comments, label, err := resolveDanmaku(context.Background(), NewDanmakuClient(server.URL), item, 100)
+	comments, label, err := resolveDanmaku(context.Background(), NewDanmakuClient(server.URL, ""), item, 100)
 	if err != nil || comments == nil || commentPath != "/api/v2/comment/902" {
 		t.Fatalf("resolve comments=%v label=%q err=%v path=%q", comments, label, err, commentPath)
 	}
@@ -212,7 +228,7 @@ func TestDanmakuSettingsPersist(t *testing.T) {
 	t.Setenv("AppData", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	want := Settings{Danmaku: DanmakuSettings{
-		ServerURL: "http://nas:9321", FontScale: 1.4, Opacity: 0.7, SpeedSeconds: 12,
+		ServerURL: "http://nas:9321", Token: "secret-token", FontScale: 1.4, Opacity: 0.7, SpeedSeconds: 12,
 		AreaPercent: 35, Anchor: "middle", OffsetSecond: -2, HideTop: true, NoOutline: true, MaxComments: 5000,
 	}}
 	if err := SaveSettings(want); err != nil {

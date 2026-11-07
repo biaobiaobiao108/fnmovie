@@ -25,6 +25,7 @@ import (
 type DanmakuSettings struct {
 	Disabled     bool    `json:"disabled,omitempty"`
 	ServerURL    string  `json:"serverUrl,omitempty"`
+	Token        string  `json:"token,omitempty"`
 	FontScale    float64 `json:"fontScale,omitempty"`
 	Opacity      float64 `json:"opacity,omitempty"`
 	SpeedSeconds float64 `json:"speedSeconds,omitempty"`
@@ -40,6 +41,7 @@ type DanmakuSettings struct {
 
 func (s DanmakuSettings) normalized() DanmakuSettings {
 	s.ServerURL = strings.TrimSpace(s.ServerURL)
+	s.Token = strings.TrimSpace(s.Token)
 	if s.FontScale <= 0 {
 		s.FontScale = 1
 	}
@@ -98,17 +100,19 @@ func defaultDanmakuServerURL(serverURL string) string {
 // shapes returned by some community server builds.
 type DanmakuClient struct {
 	baseURL string
+	token   string
 	client  *http.Client
 }
 
-func NewDanmakuClient(serverURL string) *DanmakuClient {
+func NewDanmakuClient(serverURL, token string) *DanmakuClient {
 	return &DanmakuClient{
-		baseURL: normalizeDanmakuBaseURL(serverURL),
+		baseURL: normalizeDanmakuBaseURL(serverURL, token),
+		token:   strings.TrimSpace(token),
 		client:  &http.Client{Timeout: 15 * time.Second},
 	}
 }
 
-func normalizeDanmakuBaseURL(raw string) string {
+func normalizeDanmakuBaseURL(raw, token string) string {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return ""
@@ -120,6 +124,17 @@ func normalizeDanmakuBaseURL(raw string) string {
 	for strings.HasSuffix(strings.ToLower(raw), "/api/v2") {
 		raw = raw[:len(raw)-len("/api/v2")]
 		raw = strings.TrimRight(raw, "/")
+	}
+	// danmu_api protects its endpoints with a token as the first path segment:
+	// http://host:9321/{TOKEN}/api/v2/...
+	token = strings.Trim(strings.TrimSpace(token), "/")
+	if token != "" {
+		parsed, err := url.Parse(raw)
+		if err == nil && !strings.HasSuffix(strings.TrimRight(parsed.Path, "/"), "/"+token) {
+			parsed.Path = strings.TrimRight(parsed.Path, "/") + "/" + url.PathEscape(token)
+			parsed.RawPath = ""
+			raw = strings.TrimRight(parsed.String(), "/")
+		}
 	}
 	return raw
 }

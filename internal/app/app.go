@@ -47,10 +47,17 @@ func Run() {
 		log.Printf("settings: %v", err)
 	}
 	settings.Danmaku = settings.Danmaku.normalized()
+	loginMode := settings.LoginMode
+	loginModeTab := 0
+	if loginMode == "fnid" {
+		loginModeTab = 1
+	} else {
+		loginMode = "server"
+	}
 	app := &appState{
 		settings: settings, serverAddress: settings.ServerURL, player: NewPlayer(), posters: NewPosterLoader(),
 		navigationUIState: navigationUIState{section: "home"},
-		sessionUIState:    sessionUIState{status: "连接飞牛影视服务器后开始浏览", loginOpen: true},
+		sessionUIState:    sessionUIState{status: "连接飞牛影视服务器后开始浏览", loginOpen: true, loginMode: loginMode, loginModeTab: loginModeTab, fnID: settings.FnID},
 		catalogUIState:    catalogUIState{catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache()},
 		detailUIState:     detailUIState{favoritePending: map[string]bool{}},
 	}

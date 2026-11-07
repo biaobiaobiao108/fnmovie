@@ -23,6 +23,8 @@ func configureCompatibleAppPaths() {
 type Settings struct {
 	ServerURL string          `json:"serverUrl"`
 	Username  string          `json:"username,omitempty"`
+	LoginMode string          `json:"loginMode,omitempty"`
+	FnID      string          `json:"fnId,omitempty"`
 	Danmaku   DanmakuSettings `json:"danmaku,omitempty"`
 }
 

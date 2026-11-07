@@ -1338,6 +1338,9 @@ func (s *Server) requestContext(ctx context.Context, method, version, route stri
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Trim-Client", "web")
 	req.Header.Set("X-Trim-Client-Version", "631")
+	// FN Connect relay nodes use the same mode selector as the web client.
+	// A direct fnOS address ignores this cookie.
+	req.Header.Set("Cookie", "mode=relay")
 	req.Header.Set("authx", signature(req.URL, method, payload))
 	if token != "" {
 		req.Header.Set("Authorization", token)

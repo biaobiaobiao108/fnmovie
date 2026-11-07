@@ -95,6 +95,17 @@ func (a *appState) playerDanmakuSettingsView(c *ui.Context) {
 				a.applyDanmakuServerSettings(true)
 			}
 		})
+		ui.Row(c).Height(34).AlignItems(ui.Center).Gap(6).Children(func() {
+			tokenInput := ui.TextInput(c.Key("danmaku-token"), &a.danmaku.token).Grow(1).MinWidth(0).
+				FontSize(11.5).Placeholder("访问令牌（可选，danmu_api 的 TOKEN）").Label("弹幕访问令牌")
+			if tokenInput.Submitted() {
+				a.applyDanmakuServerSettings(true)
+			}
+			ui.Button(c.Key("danmaku-token-apply"), "应用").Height(32).Padding(0, 14).Radius(8).
+				Background(ui.RGBA(255, 255, 255, 0.10)).TextColor(ui.RGBA(255, 255, 255, 0.90)).
+				OnClick(func() { a.applyDanmakuServerSettings(true) })
+		})
+		ui.Text(c, "部分 danmu_api 实例需要访问令牌；留空表示无需令牌。").FontSize(10).TextColor(ui.RGBA(255, 255, 255, 0.42))
 		ui.Button(c.Key("danmaku-rematch"), "重新匹配当前影片").Height(30).FillWidth().Radius(8).
 			Background(ui.RGBA(255, 255, 255, 0.08)).TextColor(ui.RGBA(255, 255, 255, 0.86)).
 			OnClick(a.retryDanmaku)

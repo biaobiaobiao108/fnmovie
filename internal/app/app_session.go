@@ -66,6 +66,14 @@ func (a *appState) login() {
 	if a.busy {
 		return
 	}
+	if a.loginMode == "fnid" {
+		a.loginWithFNID()
+		return
+	}
+	a.loginWithServer()
+}
+
+func (a *appState) loginWithServer() {
 	serverURL := strings.TrimSpace(a.serverAddress)
 	if serverURL == "" {
 		a.status = "请输入服务器地址后再连接"
@@ -85,6 +93,8 @@ func (a *appState) login() {
 	username, password := a.username, a.password
 	settings := a.settings
 	settings.ServerURL = serverURL
+	settings.LoginMode = "server"
+	settings.FnID = ""
 	ctx, cancel := context.WithCancel(context.Background())
 	a.loginCancel = cancel
 	if a.window != nil {
@@ -112,33 +122,120 @@ func (a *appState) login() {
 				a.loginOpen = true
 				return
 			}
-			a.server = server
-			a.resetHome()
-			a.posters.CancelPending()
-			a.settings = settings
-			if a.libraryCancel != nil {
-				a.libraryCancel()
-				a.libraryCancel = nil
-			}
-			a.libraryLoading = false
-			a.libraries = nil
-			a.closePerson()
-			a.favoritePending = map[string]bool{}
-			a.seriesEpisodeRequest++
-			a.loggedIn = true
-			a.loginOpen = false
-			a.mediaView.Invalidate()
-			a.dataRevision++
-			a.cancelCatalogRequests()
-			a.catalogs = map[string]*CatalogState{}
-			a.items = nil
-			a.closeDetail()
-			a.section = "home"
-			a.libraryID = ""
-			a.status = "连接成功，正在读取影视库…"
-			a.loadLibraries()
+			a.finishLoginSuccess(server, settings)
 		})
 	}()
+}
+
+func (a *appState) loginWithFNID() {
+	fnID := normalizeFNIDInput(a.fnID)
+	if !isValidFNID(fnID) {
+		a.status = "FN ID 格式不正确（6-30 位小写字母、数字或连字符，并以字母开头）"
+		return
+	}
+	username := strings.TrimSpace(a.username)
+	if username == "" {
+		a.status = "请输入飞牛影视用户名"
+		return
+	}
+	password := a.password
+	settings := a.settings
+	if password == "" && settings.FnID == fnID && settings.Username == username && settings.ServerURL != "" {
+		if credentials, err := ReadCredential(settings.ServerURL); err == nil && credentials.Username == username {
+			password = credentials.Password
+		}
+	}
+	if strings.TrimSpace(password) == "" {
+		a.status = "请输入账户密码后再连接"
+		return
+	}
+	a.busy = true
+	a.status = "正在解析 FN ID…"
+	ctx, cancel := context.WithCancel(context.Background())
+	a.loginCancel = cancel
+	if a.window != nil {
+		a.window.Invalidate()
+	}
+	go func() {
+		resolved, err := ResolveFNID(ctx, fnID)
+		serverURL := ""
+		var server *Server
+		var result LoginResult
+		if err == nil {
+			serverURL = resolved.ServerURL
+			server = NewServer(serverURL, "")
+			result, err = server.LoginContext(ctx, username, password)
+		}
+		a.window.Update(func() {
+			if ctx.Err() != nil {
+				return
+			}
+			a.loginCancel = nil
+			defer cancel()
+			if err == nil {
+				settings.ServerURL = serverURL
+				settings.Username = username
+				settings.LoginMode = "fnid"
+				settings.FnID = fnID
+				err = WriteCredential(serverURL, Credential{Username: username, Password: password, Token: result.Token})
+				if err == nil {
+					err = SaveSettings(settings)
+				}
+			}
+			a.busy = false
+			if err != nil {
+				if serverURL != "" {
+					a.serverAddress = serverURL
+				}
+				prefix := "FN ID 解析失败："
+				if serverURL != "" {
+					prefix = "FN ID 登录失败："
+				}
+				a.status = prefix + err.Error()
+				a.loginOpen = true
+				return
+			}
+			a.serverAddress = serverURL
+			a.fnID = fnID
+			a.finishLoginSuccess(server, settings)
+		})
+	}()
+}
+
+func (a *appState) finishLoginSuccess(server *Server, settings Settings) {
+	a.server = server
+	a.resetHome()
+	a.posters.CancelPending()
+	a.settings = settings
+	a.serverAddress = settings.ServerURL
+	a.fnID = settings.FnID
+	a.loginMode = settings.LoginMode
+	if a.loginMode == "fnid" {
+		a.loginModeTab = 1
+	} else {
+		a.loginModeTab = 0
+	}
+	if a.libraryCancel != nil {
+		a.libraryCancel()
+		a.libraryCancel = nil
+	}
+	a.libraryLoading = false
+	a.libraries = nil
+	a.closePerson()
+	a.favoritePending = map[string]bool{}
+	a.seriesEpisodeRequest++
+	a.loggedIn = true
+	a.loginOpen = false
+	a.mediaView.Invalidate()
+	a.dataRevision++
+	a.cancelCatalogRequests()
+	a.catalogs = map[string]*CatalogState{}
+	a.items = nil
+	a.closeDetail()
+	a.section = "home"
+	a.libraryID = ""
+	a.status = "连接成功，正在读取影视库…"
+	a.loadLibraries()
 }
 
 func (a *appState) loadLibraries() {

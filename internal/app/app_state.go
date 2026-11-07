@@ -44,13 +44,16 @@ type navigationUIState struct {
 }
 
 type sessionUIState struct {
-	username    string
-	password    string
-	status      string
-	busy        bool
-	loginCancel context.CancelFunc
-	loggedIn    bool
-	loginOpen   bool
+	username     string
+	password     string
+	status       string
+	busy         bool
+	loginCancel  context.CancelFunc
+	loggedIn     bool
+	loginOpen    bool
+	loginMode    string
+	loginModeTab int
+	fnID         string
 }
 
 type catalogUIState struct {

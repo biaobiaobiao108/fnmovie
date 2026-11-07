@@ -14,7 +14,7 @@
 
 ## 弹幕
 
-- 弹幕数据来自 danmu_api v2 协议（`/api/v2/match`、`/api/v2/search/anime`、`/api/v2/bangumi/{id}`、`/api/v2/comment/{id}?format=json`），默认服务器为飞牛地址主机的 9321 端口，可在播放器的弹幕面板中覆盖。
+- 弹幕数据来自 danmu_api v2 协议（`/api/v2/match`、`/api/v2/search/anime`、`/api/v2/bangumi/{id}`、`/api/v2/comment/{id}?format=json`），默认服务器为飞牛地址主机的 9321 端口，可在播放器的弹幕面板中覆盖。danmu_api 的 TOKEN 作为 URL 第一段路径（`http://host:9321/{TOKEN}/api/v2/...`），面板中的访问令牌会自动拼接且避免重复。
 - 弹幕通过 libmpv 的 secondary subtitle 轨呈现：生成的 ASS 文件写入临时目录，`sub-add` 选中后设置 `secondary-sid`，再恢复用户原有的主字幕。切换弹幕只改变 `secondary-sub-visibility`，不得改动主字幕选择。
 - 设置变更先重写 ASS，再通过 `sub-reload` 生效；自动匹配按文件名（优先 `file_name`）匹配，匹配到番剧但集数不一致时按 `EpisodeNumber` 从剧集列表选取。搜索选集只影响当前播放会话。
 - 弹幕开关、字体倍率、不透明度、滚动时长、覆盖范围、位置（顶部/居中/底部）、时间偏移、滚动/顶部/底部类型和描边保存在 `settings.json` 的 `danmaku` 字段。面板宽度 460、高度 580，按窗口可用空间收缩，长列表在面板内滚动。

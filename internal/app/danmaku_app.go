@@ -31,6 +31,7 @@ type danmakuUIState struct {
 	episodesError   string
 	settingsInit    bool
 	serverURL       string
+	token           string
 	fontScale       float64
 	opacity         float64
 	speed           float64
@@ -170,8 +171,9 @@ func (a *appState) startDanmakuMatch(item MediaItem, player *Player) {
 		return
 	}
 	ctx, request := a.newDanmakuRequest()
-	client := NewDanmakuClient(serverURL)
-	maxComments := a.settings.Danmaku.normalized().MaxComments
+	settings := a.settings.Danmaku.normalized()
+	client := NewDanmakuClient(serverURL, settings.Token)
+	maxComments := settings.MaxComments
 	a.danmaku.loading = true
 	a.danmaku.status = "正在匹配弹幕…"
 	a.danmaku.searchError = ""
@@ -266,6 +268,7 @@ func writeDanmakuFile(path, content string) error {
 func (a *appState) prepareDanmakuPanel() {
 	settings := a.settings.Danmaku.normalized()
 	a.danmaku.serverURL = a.danmakuServerURL()
+	a.danmaku.token = settings.Token
 	a.danmaku.fontScale = settings.FontScale
 	a.danmaku.opacity = settings.Opacity * 100
 	a.danmaku.speed = settings.SpeedSeconds
@@ -281,6 +284,7 @@ func (a *appState) prepareDanmakuPanel() {
 func (a *appState) danmakuSettingsFromPanel() DanmakuSettings {
 	settings := a.settings.Danmaku
 	settings.ServerURL = strings.TrimSpace(a.danmaku.serverURL)
+	settings.Token = strings.TrimSpace(a.danmaku.token)
 	settings.FontScale = a.danmaku.fontScale
 	settings.Opacity = a.danmaku.opacity / 100
 	settings.SpeedSeconds = a.danmaku.speed
@@ -361,7 +365,7 @@ func (a *appState) danmakuSearch() {
 		return
 	}
 	ctx, request := a.newDanmakuRequest()
-	client := NewDanmakuClient(serverURL)
+	client := NewDanmakuClient(serverURL, a.settings.Danmaku.Token)
 	a.danmaku.searchLoading = true
 	a.danmaku.searchError = ""
 	a.danmaku.searchResults = nil
@@ -408,7 +412,7 @@ func (a *appState) danmakuLoadEpisodes(anime DanmakuAnime) {
 		return
 	}
 	ctx, request := a.newDanmakuRequest()
-	client := NewDanmakuClient(serverURL)
+	client := NewDanmakuClient(serverURL, a.settings.Danmaku.Token)
 	a.danmaku.selectedAnime = anime
 	a.danmaku.episodes = nil
 	a.danmaku.episodesLoading = true
@@ -457,7 +461,7 @@ func (a *appState) danmakuSelectEpisode(episode DanmakuEpisode) {
 		return
 	}
 	ctx, request := a.newDanmakuRequest()
-	client := NewDanmakuClient(serverURL)
+	client := NewDanmakuClient(serverURL, a.settings.Danmaku.Token)
 	maxComments := a.settings.Danmaku.normalized().MaxComments
 	a.danmaku.loading = true
 	a.danmaku.status = "正在加载弹幕…"

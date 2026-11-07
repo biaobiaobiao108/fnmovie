@@ -202,21 +202,44 @@ func (a *appState) navButton(c *ui.Context, icon *ui.SVG, label, key string) {
 	}
 }
 
+func (a *appState) loginModeFields(c *ui.Context, t *ui.Theme) {
+	if ui.Tabs(c, &a.loginModeTab, "服务器地址", "FN ID").Changed() {
+		if a.loginModeTab == 1 {
+			a.loginMode = "fnid"
+		} else {
+			a.loginMode = "server"
+		}
+	}
+	if a.loginMode == "fnid" {
+		ui.Text(c, "输入 FN ID 和飞牛影视账户，通过 FN Connect 自动定位你的 NAS。").FontSize(12).TextColor(t.TextMuted)
+		ui.TextInput(c.Key("login-fnid"), &a.fnID).Placeholder("例如 abcd1234").Label("FN ID")
+	} else {
+		ui.Text(c, "输入飞牛影视服务器地址和账户信息，在哞哩影院浏览与播放你的媒体。").FontSize(12).TextColor(t.TextMuted)
+		ui.TextInput(c.Key("login-server"), &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
+	}
+	ui.TextInput(c.Key("login-username"), &a.username).Placeholder("飞牛影视用户名").Label("用户名")
+	if ui.TextInput(c.Key("login-password"), &a.password).Password().Placeholder("密码").Label("密码").Submitted() {
+		a.login()
+	}
+}
+
+func (a *appState) loginActionLabel() string {
+	if a.loginMode == "fnid" {
+		return "FN ID 登录"
+	}
+	return "连接并登录"
+}
+
 func (a *appState) connectionView(c *ui.Context) {
 	t := c.Theme()
 	ui.Column(c).Grow(1).Fill().Center().Children(func() {
 		ui.Column(c).Width(440).Padding(34).Gap(16).Radius(16).Background(t.Surface).Border(1, t.Border).Children(func() {
 			ui.Text(c, "连接哞哩影院").FontSize(22).Bold()
-			ui.Text(c, "输入飞牛影视服务器地址和账户信息，在哞哩影院浏览与播放你的媒体。").FontSize(12).TextColor(t.TextMuted)
-			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
-			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
-			if ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted() {
-				a.login()
-			}
+			a.loginModeFields(c, t)
 			if a.status != "" {
 				ui.Text(c, a.status).FontSize(11).TextColor(t.TextMuted)
 			}
-			if primaryActionButton(c, "连接并登录").Disabled(a.busy).Clicked() {
+			if primaryActionButton(c, a.loginActionLabel()).Disabled(a.busy).Clicked() {
 				a.login()
 			}
 		})
@@ -228,12 +251,7 @@ func (a *appState) loginModal(c *ui.Context) {
 		t := c.Theme()
 		ui.Column(c).Width(430).Padding(28, 30).Gap(15).Radius(16).Background(t.Surface).Border(1, t.Border).Children(func() {
 			ui.Text(c, "连接哞哩影院").FontSize(22).Bold()
-			ui.Text(c, "使用飞牛影视账户登录，在哞哩影院浏览媒体库并播放影片。").FontSize(12).TextColor(t.TextMuted)
-			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
-			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
-			if ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted() {
-				a.login()
-			}
+			a.loginModeFields(c, t)
 			if a.status != "" && !a.loggedIn {
 				color := t.TextMuted
 				if strings.Contains(a.status, "失败") || strings.Contains(a.status, "无法") {
@@ -242,7 +260,7 @@ func (a *appState) loginModal(c *ui.Context) {
 				ui.Text(c, a.status).FontSize(11).TextColor(color).MaxLines(3)
 			}
 			ui.Row(c).Gap(10).Children(func() {
-				if primaryActionButton(c, "连接并登录").Disabled(a.busy).Clicked() {
+				if primaryActionButton(c, a.loginActionLabel()).Disabled(a.busy).Clicked() {
 					a.login()
 				}
 				if a.loggedIn && actionButton(c, "取消").Clicked() {
