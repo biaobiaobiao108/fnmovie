@@ -49,7 +49,7 @@ func Run() {
 	app := &appState{
 		settings: settings, serverAddress: settings.ServerURL, player: NewPlayer(), posters: NewPosterLoader(),
 		navigationUIState: navigationUIState{section: "home"},
-		sessionUIState:    sessionUIState{status: "连接飞牛影视服务器后开始浏览", loginOpen: true},
+		sessionUIState:    sessionUIState{status: "连接飞牛影视服务器后开始浏览"},
 		catalogUIState:    catalogUIState{catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache()},
 		detailUIState:     detailUIState{favoritePending: map[string]bool{}},
 	}
@@ -66,6 +66,7 @@ func Run() {
 			}
 		}
 	}
+	app.loginOpen = !app.loggedIn
 
 	mygo.App.WhenReady(func() {
 		app.window = mygo.NewWindow(mygo.WindowOptions{
@@ -84,7 +85,6 @@ func Run() {
 			log.Printf("set app icon: %v", err)
 		}
 		if app.loggedIn {
-			app.loginOpen = false
 			app.loadLibraries()
 		}
 	})
