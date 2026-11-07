@@ -1,5 +1,7 @@
 # 哞哩影院
 
+[![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/fnmovie)
+
 **把家里的飞牛影视片库，带到 Windows 桌面。**
 
 哞哩影院让找片和继续观看更顺手：登录自己的飞牛影视，按影视库浏览电影与剧集，查看详情，再从上次的进度接着播放。它是一款 Windows x64 原生桌面客户端，界面贴合 Windows 使用习惯，视频由 libmpv 播放。
