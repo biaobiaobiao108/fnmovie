@@ -97,7 +97,7 @@ func (a *appState) playerDanmakuSettingsView(c *ui.Context) {
 		})
 		ui.Row(c).Height(34).AlignItems(ui.Center).Gap(6).Children(func() {
 			tokenInput := ui.TextInput(c.Key("danmaku-token"), &a.danmaku.token).Grow(1).MinWidth(0).
-				FontSize(11.5).Placeholder("访问令牌（可选，danmu_api 的 TOKEN）").Label("弹幕访问令牌")
+				FontSize(11.5).Placeholder("访问令牌或密码（可选，danmu_api 的 TOKEN）").Label("弹幕访问令牌")
 			if tokenInput.Submitted() {
 				a.applyDanmakuServerSettings(true)
 			}
