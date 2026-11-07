@@ -587,7 +587,15 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 func (a *appState) playerSeekSlider(c *ui.Context, maxPosition float64, commit func(float64)) {
 	slider := ui.Slider(c.Key("player-seek"), &a.seekSliderPosition, 0, maxPosition).Grow(1).Label("播放进度")
 	pressed, changed := slider.Pressed(), slider.Changed()
-	released := !pressed && a.seekDragging
+	canceled := slider.PressCanceled()
+	released := !pressed && a.seekDragging && !canceled
+	if canceled {
+		position := a.playback.Position
+		if a.seekFeedback.Pending {
+			position = a.seekFeedback.Target
+		}
+		a.seekSliderPosition = minFloat(maxPosition, maxFloat(0, position))
+	}
 	if !pressed && !changed && !a.seekDragging && !a.seekFeedback.Pending {
 		a.seekSliderPosition = minFloat(maxPosition, maxFloat(0, a.playback.Position))
 	}
@@ -601,7 +609,7 @@ func (a *appState) playerSeekSlider(c *ui.Context, maxPosition float64, commit f
 	}
 	slider.OnChange(func() {
 		// Pointer edits remain local during a drag; keyboard edits commit once.
-		if !pressed && !released {
+		if !pressed && !released && !canceled {
 			commit(a.seekSliderPosition)
 		}
 	})

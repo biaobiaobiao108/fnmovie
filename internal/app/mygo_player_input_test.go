@@ -68,3 +68,25 @@ func TestMyGoPlayerSeekKeyboardEditCommitsOnceAndIsNotOverwritten(t *testing.T) 
 		t.Fatalf("keyboard change repeated or target reset: position=%v commits=%v", a.seekSliderPosition, commits)
 	}
 }
+
+func TestMyGoPlayerSeekCanceledDragDoesNotCommit(t *testing.T) {
+	a := &appState{playback: PlaybackState{Position: 12, Duration: 100}, seekSliderPosition: 12}
+	var commits []float64
+	tt := ui.NewTester(func(c *ui.Context) {
+		ui.Row(c).Size(400, 40).Children(func() {
+			a.playerSeekSlider(c, 100, func(target float64) { commits = append(commits, target) })
+		})
+	}, 400, 80)
+	r, ok := tt.Find("播放进度")
+	if !ok {
+		t.Fatal("seek slider missing")
+	}
+	y := r.Y + r.H/2
+	tt.Press(r.X+r.W*0.3, y)
+	tt.Move(r.X+r.W*0.8, y)
+	tt.CancelPress()
+	tt.Frame()
+	if len(commits) != 0 || a.seekDragging || a.seekSliderPosition != 12 {
+		t.Fatalf("canceled drag committed or left stale state: position=%v dragging=%v commits=%v", a.seekSliderPosition, a.seekDragging, commits)
+	}
+}
