@@ -57,7 +57,7 @@ func Run() {
 	app := &appState{
 		settings: settings, serverAddress: settings.ServerURL, player: NewPlayer(), posters: NewPosterLoader(),
 		navigationUIState: navigationUIState{section: "home"},
-		sessionUIState:    sessionUIState{status: "连接飞牛影视服务器后开始浏览", loginOpen: true, loginMode: loginMode, loginModeTab: loginModeTab, fnID: settings.FnID},
+		sessionUIState:    sessionUIState{status: "连接飞牛影视服务器后开始浏览", loginMode: loginMode, loginModeTab: loginModeTab, fnID: settings.FnID},
 		catalogUIState:    catalogUIState{catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache()},
 		detailUIState:     detailUIState{favoritePending: map[string]bool{}},
 	}
@@ -74,6 +74,9 @@ func Run() {
 			}
 		}
 	}
+	// Decide before the first window paint: clearing this inside WhenReady
+	// paints one login-modal frame over a restored session.
+	app.loginOpen = !app.loggedIn
 
 	mygo.App.WhenReady(func() {
 		app.window = mygo.NewWindow(mygo.WindowOptions{

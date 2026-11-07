@@ -3,5 +3,8 @@
   "identifier": "com.fnmovie.desktop",
   "version": "1.3.2",
   "copyright": "Copyright 2026 哞哩影院 contributors",
-  "out": "build"
+  "out": "build",
+  "windows": {
+    "installerInclude": "scripts/installer.nsh"
+  }
 }

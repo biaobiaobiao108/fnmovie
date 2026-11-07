@@ -25,7 +25,7 @@
 ## 通用开发约束
 
 - UI 状态保留在 Go 应用层；应用实现和测试位于 `internal/app`，飞牛接口在 `internal/app/server.go`，播放器在 `internal/app/player.go` 及平台文件，根目录 `main.go` 只负责启动。
-- MyGo v0.3 的 `ui.Element` 只在当前构建中有效，不保存到应用状态或后台任务；跨构建焦点和尺寸使用 `ui.Handle`。有状态控件构造前调用 `c.Key(...)`，输入绑定持久模型字段；优先通过 `OnClick` / `OnChange` 执行动作。异步回调使用 `Services`，通过 `Window.Update` 发布模型结果。升级 MyGo 后运行 `go tool mygo vet .`。
+- MyGo v0.8 的 `ui.Element` 只在当前构建中有效，不保存到应用状态或后台任务；跨构建焦点和尺寸使用 `ui.Handle`。有状态控件构造前调用 `c.Key(...)`，输入绑定持久模型字段；优先通过 `OnClick` / `OnChange` 执行动作。异步回调使用 `Services`，通过 `Window.Update` 发布模型结果。升级 MyGo 后运行 `go tool mygo vet .`。
 - 全局搜索只传关键词，不沿用当前库、类型、收藏或筛选条件；搜索缓存和结果范围统一，清空关键词恢复原页面范围。普通影视库查询必须携带服务器库 ID 对应的 `ancestor_guid` 并保持按库隔离，不得用全库查询掩盖 API 错误。
 - 页面离开、账号切换或取消操作时取消相关网络请求，并拒绝过期响应。不要在源码、测试默认值或提交中保存 NAS 密码、会话令牌和个人配置；真实 NAS 测试凭据通过环境变量提供。
 - 页面、首页、媒体数据/缓存和播放器的具体行为约束按需查阅下列专题，不要在实现中自行改写这些产品约定。
@@ -43,5 +43,6 @@
 
 - 修改 Go 代码后运行 `gofmt`、`go test ./...` 和 `go vet ./...`；升级 MyGo 后运行 `go tool mygo vet .`。
 - 完成代码修改后创建 Git 提交；提交后按项目约定构建 Windows x64 包。固定输出到 `out\\fnmovie-20261007\\windows-amd64`，使用 `pwsh -File scripts/build-windows.ps1`（脚本执行 `go tool mygo build -platform windows/amd64 -o out\\fnmovie-20261007`）。用户要求发布时再推送远程。
+- Windows 安装包依赖 `mygo.json` 的 `windows.installerInclude`；`scripts/installer.nsh` 负责从旧版安装器的 `UninstallString` 恢复上次安装目录，MyGo v0.8.1 自身用 `InstallLocation` 记住新安装目录。不要删除该包含文件。
 - NSIS 中文名称通过构建脚本临时设置编译器编码；不要修改全局工具或应用数据路径。
 - `out/` 和 `build/` 不提交；`libmpv-2.dll` 由 Git LFS 管理。克隆后安装 Git LFS 并运行 `git lfs pull`。
