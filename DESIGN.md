@@ -2,40 +2,54 @@
 
 ## Direction
 
-- Concept: 私人胶片放映厅 (Private Cinema Archive) —— 现代高阶桌面影音工作台的精密秩序与经典电影放映厅的温润光影沉浸感。
+- Concept: 现代影视画廊与暗曜放映厅 (Daylight Gallery & Obsidian Cinema) —— 一级页面以典雅明快的艺术画廊为底色，选片与浏览舒展自然；二级页面进入深度暗调放映厅，烘托剧照原色与光影沉浸。
 - Target qualities:
-  1. 暗曜沉浸 (Deep Obsidian): 温润黑曜石与低漫反射深石板色，彻底衬托海报与剧照的高饱和色彩。
-  2. 胶片琥珀 (Filmic Amber): 提取经典胶卷放映机光芒，以琥珀金作为评分与高光标识，搭配电影灰蓝作为交互基调。
-  3. 精密几何 (Precision Geometry): 严格统一的 4px/8px 比例阶梯，海报严格 2:3 比例，文字基线与图标严密左对齐。
+  1. 画廊秩序 (Gallery Structure): 一级页面采用温润纯净的浅色体系，侧边栏、背景与卡片具有明确的微明度阶差，空间轻盈且秩序严谨。
+  2. 暗曜沉浸 (Obsidian Cinema): 进入电影/剧集/演员详情页与播放器，无缝切换为深黑曜石暗调，以模糊海报色调与 OkLab 光晕呈现影视艺术。
+  3. 精密几何 (Precision Geometry): 4px/8px 网格基数，海报严格 2:3 纵横比，卡片文本一律左对齐，基线与网格严密对齐。
 - Anti-qualities:
-  1. 拒绝办公浅色面板 (No Office Tool Aesthetic): 告别浅灰记事本配色与昼夜割裂的穿梭体验。
-  2. 拒绝胶囊标签与居中堆砌 (No Pill Slop & Centered Text): 严禁无意义分类药丸，卡片信息严谨左对齐。
-  3. 拒绝弹窗打断 (No Dialog Interruption): 简介与状态自适应展示，保持选片心流不被弹窗割裂。
+  1. 拒绝单调扁平灰白 (No Flat Gray Monotony): 侧边栏与主区具有清晰的 3% 层次级差，卡片采用纯白微浮，拒绝浑浊无层次。
+  2. 拒绝胶囊标签与居中堆砌 (No Pill Slop & Centered Text): 严禁无意义分类药丸，卡片标题左对齐，去除 0.0 评分噪音。
+  3. 拒绝弹窗打断 (No Dialog Interruption): 简介阅读与状态原地平滑适应，保持选片心流不被弹窗割裂。
 
 ## Color System
 
+### 一级页面：现代影视画廊 (Primary / Daylight Gallery)
 ```
-Canvas / Background:    #0d0f12 (极深黑曜底色)
-Sidebar Background:     #13161b (侧边栏深沉表面)
-Surface:                #1a1e24 (卡片、列表项、悬浮容器表面)
-Surface Hover:          rgba(255, 255, 255, 0.06)
-Surface Pressed:        rgba(255, 255, 255, 0.10)
-Border Subtle:          rgba(255, 255, 255, 0.08)
-Border Strong:          rgba(255, 255, 255, 0.16)
-Text Primary:           #f0f2f5 (主要标题、影片名称)
-Text Secondary:         #a2a8b4 (副标题、年份、季度集数)
-Text Muted:             rgba(240, 242, 245, 0.60) (辅助说明、空状态)
-Accent Primary:         #5e85a8 (电影灰蓝，主操作与激活态)
-Accent Hover:           #6f97bc
-Accent Pressed:         #4f7394
-Accent Selected:        rgba(94, 133, 168, 0.18)
+Canvas / Background:    #f7f7f6 (温润画廊底色，低眩光)
+Sidebar Background:     #f0f1f3 (侧边栏微沉表面，3% 清晰明度级差)
+Surface:                #ffffff (纯白卡片与输入容器浮起表面)
+Surface Hover:          rgba(0, 0, 0, 0.04)
+Surface Pressed:        rgba(0, 0, 0, 0.08)
+Border Subtle:          rgba(0, 0, 0, 0.08) (精密发丝分割线)
+Border Strong:          rgba(0, 0, 0, 0.16)
+Text Primary:           #191b1f (深石墨文字，对比度 14:1)
+Text Secondary:         rgba(25, 27, 31, 0.62) (副标题与元数据，对比度 5.5:1)
+Text Muted:             rgba(25, 27, 31, 0.45)
+Accent Primary:         #44627a (沉静青灰蓝，导航激活与主要操作)
+Accent Hover:           #375267
+Accent Pressed:         #2d4456
+Accent Selected:        rgba(68, 98, 122, 0.12)
+Rating Badge Bg:        rgba(13, 15, 18, 0.78) (海报暗底胶片角标)
 Rating Amber:           #e5a93c (胶片琥珀金，有效评分与星标)
-Rating Background:      rgba(229, 169, 60, 0.16)
-Favorite Rose:          #e0526b (收藏高亮)
-Danger:                 #e05656 (报错、异常提示)
-Placeholder:            #1a1e24
-Placeholder Text:       #4e5666
-Immersive Detail Tint:  #0b0c10 (详情页底层融合墨色)
+Favorite Rose:          #d94f68 (收藏高亮)
+Danger:                 #c0392b (异常与错误提示)
+Placeholder:            #ececee
+Placeholder Text:       #8e929a
+```
+
+### 二级页面：暗曜放映厅 (Secondary / Obsidian Cinema)
+```
+Canvas / Background:    #0b0c10 (深邃黑曜底色)
+Backdrop Blend:         海报原图模糊 (Blur 34, Opacity 0.34) 叠加 OkLab 动态渐变过渡
+Surface:                rgba(255, 255, 255, 0.09) (半透明暗调表面)
+Surface Hover:          rgba(255, 255, 255, 0.14)
+Surface Pressed:        rgba(255, 255, 255, 0.19)
+Border:                 rgba(255, 255, 255, 0.13)
+Text Primary:           #ffffff (纯净高光文字)
+Text Muted:             rgba(255, 255, 255, 0.68)
+Accent Dynamic:         从当前海报色调动态提取并与白色以 28% 混合
+Danger:                 #ff8f86
 ```
 
 ## Typography
@@ -45,7 +59,7 @@ Immersive Detail Tint:  #0b0c10 (详情页底层融合墨色)
 - Section Heading:      20px / 28px, Bold (栏目标题：继续观看、影视库名称)
 - Card Title:           14px / 20px, Bold, Left-Aligned (海报下方标题)
 - Body / Metadata:      12px / 18px, Regular, Left-Aligned (年份、分类、集数)
-- Micro / Badge:        11px / 14px, Medium, tnum (播放时间轴、角标)
+- Micro / Badge:        11px / 14px, Medium, tnum (播放时间轴、评分角标)
 
 ## Spacing & Geometry
 
@@ -69,8 +83,8 @@ Immersive Detail Tint:  #0b0c10 (详情页底层融合墨色)
 
 ## Motion & Interaction
 
-- Navigation transition: 160ms, Y 位移 6 DIP + 淡入。
-- Button transition: 120ms 颜色过渡与按压微压缩。
-- Poster 3D tilt: 360ms 阻尼弹簧，悬停视差倾斜角度不超过 5 度。
-- Player controls fade: 180ms 淡入，闲置 2500ms 淡出。
+- Page Tier Transition: 160ms，Y 位移 6 DIP + 淡入。二级页面进入时同步切换 Win32 标题栏按钮暗黑模式。
+- Button Transition: 120ms 颜色过渡与按压微压缩。
+- Poster 3D Tilt: 360ms 阻尼弹簧，悬停视差倾斜角度不超过 5 度。
+- Player Controls Fade: 180ms 淡入，闲置 2500ms 淡出。
 - Respect ReduceMotion: 开启时禁用 3D 倾斜与位移，保留瞬时透明度过渡。

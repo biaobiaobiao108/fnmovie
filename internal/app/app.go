@@ -115,6 +115,7 @@ func (a *appState) view(c *ui.Context) {
 		a.loadLibrary()
 	}
 	secondary := a.selectedPerson != nil || a.selected != nil
+	a.syncWindowTheme(secondary)
 	host := ui.Box(c.Key("navigation-host")).Fill()
 	if secondary {
 		host.Background(ui.Hex(immersiveDetailBackground))

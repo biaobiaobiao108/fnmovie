@@ -3,7 +3,7 @@ package app
 import "github.com/egoist/mygo/ui"
 
 const (
-	movieWindowBackground    = "#0d0f12"
+	movieWindowBackground    = "#f7f7f6"
 	movieSidebarWidth        = 232
 	movieMainHorizontalInset = 28
 	movieTitleBarHeight      = 46
@@ -15,28 +15,28 @@ var movieColors = struct {
 	selected, danger, favorite, placeholder, placeholderText, rating, ratingText ui.Color
 }{
 	background:      ui.Hex(movieWindowBackground),
-	sidebar:         ui.Hex("#13161b"),
-	surface:         ui.Hex("#1a1e24"),
-	surfaceHover:    ui.RGBA(255, 255, 255, 0.06),
-	surfacePressed:  ui.RGBA(255, 255, 255, 0.10),
-	text:            ui.Hex("#f0f2f5"),
-	textMuted:       ui.RGBA(240, 242, 245, 0.60),
-	border:          ui.RGBA(255, 255, 255, 0.08),
-	accent:          ui.Hex("#5e85a8"),
-	accentHover:     ui.Hex("#6f97bc"),
-	accentPressed:   ui.Hex("#4f7394"),
+	sidebar:         ui.Hex("#f0f1f3"),
+	surface:         ui.Hex("#ffffff"),
+	surfaceHover:    ui.RGBA(0, 0, 0, 0.04),
+	surfacePressed:  ui.RGBA(0, 0, 0, 0.08),
+	text:            ui.Hex("#191b1f"),
+	textMuted:       ui.RGBA(25, 27, 31, 0.62),
+	border:          ui.RGBA(0, 0, 0, 0.08),
+	accent:          ui.Hex("#44627a"),
+	accentHover:     ui.Hex("#375267"),
+	accentPressed:   ui.Hex("#2d4456"),
 	accentText:      ui.Hex("#ffffff"),
-	selected:        ui.RGBA(94, 133, 168, 0.18),
-	danger:          ui.Hex("#e05656"),
-	favorite:        ui.Hex("#e0526b"),
-	placeholder:     ui.Hex("#1a1e24"),
-	placeholderText: ui.Hex("#4e5666"),
+	selected:        ui.RGBA(68, 98, 122, 0.12),
+	danger:          ui.Hex("#c0392b"),
+	favorite:        ui.Hex("#d94f68"),
+	placeholder:     ui.Hex("#ececee"),
+	placeholderText: ui.Hex("#8e929a"),
 	rating:          ui.Hex("#2a2415"),
 	ratingText:      ui.Hex("#e5a93c"),
 }
 
 func movieTheme() *ui.Theme {
-	t := ui.DarkTheme()
+	t := ui.LightTheme()
 	t.Background = movieColors.background
 	t.Surface = movieColors.surface
 	t.SurfaceHover = movieColors.surfaceHover
@@ -49,10 +49,10 @@ func movieTheme() *ui.Theme {
 	t.AccentPressed = movieColors.accentPressed
 	t.AccentText = movieColors.accentText
 	t.Danger = movieColors.danger
-	t.Warning = ui.Hex("#e5a93c")
+	t.Warning = ui.Hex("#9c6d1a")
 	t.Success = movieColors.accent
-	t.Selection = movieColors.accent.Alpha(0.32)
-	t.Focus = movieColors.accent.Alpha(0.55)
+	t.Selection = movieColors.accent.Alpha(0.24)
+	t.Focus = movieColors.accent.Alpha(0.48)
 	t.Scrollbar = ui.Transparent
 	t.Radius = 8
 	return t

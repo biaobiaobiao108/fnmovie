@@ -13,14 +13,16 @@ import (
 // appState owns state shared by MyGo's UI callbacks. Domain state is grouped
 // by lifecycle so page-specific changes stay easier to audit.
 type appState struct {
-	home          homeState
-	window        *mygo.Window
-	settings      Settings
-	serverAddress string
-	server        *Server
-	player        *Player
-	displayScale  float64
-	posters       *PosterLoader
+	home           homeState
+	window         *mygo.Window
+	settings       Settings
+	serverAddress  string
+	server         *Server
+	player         *Player
+	displayScale   float64
+	posters        *PosterLoader
+	windowIsDark   bool
+	windowThemeSet bool
 
 	navigationUIState
 	sessionUIState
