@@ -17,7 +17,7 @@ func TestCatalogScrollsBehindTitleBar(t *testing.T) {
 	tester.Frame()
 	tester.Frame()
 	initialBar := tester.Image().RGBAAt(1000, 20)
-	if a.contentUnderTitleBar(movieTitleBarHeight) || initialBar.R != 247 || initialBar.G != 247 || initialBar.B != 246 {
+	if a.contentUnderTitleBar(movieTitleBarHeight) || initialBar.R != 13 || initialBar.G != 15 || initialBar.B != 18 {
 		t.Fatalf("title bar should match the page before scrolling: pixel=%+v", initialBar)
 	}
 	initial, found := tester.Find("影片 0")

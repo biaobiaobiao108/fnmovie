@@ -111,7 +111,7 @@ func (a *appState) homeContinueEmpty(c *ui.Context, height float32) {
 
 func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 	width, _ := c.Size()
-	hero := ui.Box(c.Key("home-carousel")).Bind(&a.home.HeroHandle).FillWidth().Radius(18).Clip().Background(ui.Hex("#27352e")).Label("首页推荐海报")
+	hero := ui.Box(c.Key("home-carousel")).Bind(&a.home.HeroHandle).FillWidth().Radius(16).Clip().Background(ui.Hex("#13161b")).Border(1, c.Theme().Border).Label("首页推荐海报")
 	contentWidth := a.home.HeroHandle.Bounds(c).W
 	if contentWidth <= 0 {
 		contentWidth = max(1, width-float32(movieSidebarWidth+movieMainHorizontalInset*2))
@@ -156,7 +156,7 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 			ui.Image(c, image).Absolute().Top(0).Left(0).Fill().Fit(ui.Cover).Opacity(fade)
 		}
 		ui.Box(c).Absolute().Top(0).Left(0).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
-			p.FillGradient(r, ui.LinearGradient{From: ui.RGBA(8, 14, 11, 0), To: ui.RGBA(8, 14, 11, 0.90), Angle: 180}, 0)
+			p.FillGradient(r, ui.LinearGradient{From: ui.RGBA(13, 15, 18, 0), To: ui.RGBA(13, 15, 18, 0.92), Angle: 180}, 0)
 		})
 		body := actionButton(c.Key("home-hero-detail"), "").Absolute().Top(0).Left(0).Fill().Padding(0).BorderWidth(0).Background(ui.Transparent).Label("查看 " + item.Title + " 详情")
 		body.Children(func() {
@@ -193,7 +193,7 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 				if direction > 0 {
 					label, icon = "下一张海报", "forward"
 				}
-				button := actionButton(c.Key(fmt.Sprintf("home-hero-arrow-%d", direction)), "").Absolute().Top(arrowTop).Size(40, 40).Padding(0).Center().Radius(20).BorderWidth(0).Background(ui.Transparent).TextColor(ui.RGBA(255, 255, 255, 0.76)).Label(label)
+				button := actionButton(c.Key(fmt.Sprintf("home-hero-arrow-%d", direction)), "").Absolute().Top(arrowTop).Size(40, 40).Padding(0).Center().Radius(20).BorderWidth(0).Background(ui.RGBA(19, 22, 27, 0.45)).TextColor(ui.RGBA(255, 255, 255, 0.85)).Label(label)
 				if button.Hovered() {
 					button.TextColor(ui.Hex("#ffffff"))
 				}
@@ -223,11 +223,11 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 			for i := range a.home.Heroes {
 				button := actionButton(c.Key(fmt.Sprintf("home-hero-dot-%d", i)), "").Size(16, 16).Padding(0).BorderWidth(0).Background(ui.Transparent).Label(fmt.Sprintf("显示第 %d 张海报", i+1))
 				button.Children(func() {
-					color, w := ui.RGBA(255, 255, 255, 0.40), float32(6)
+					color, w := ui.RGBA(255, 255, 255, 0.35), float32(6)
 					if i == index {
 						color, w = ui.Hex("#ffffff"), 16
 					}
-					ui.Box(c).Size(w, 6).Radius(3).Background(color)
+					ui.Box(c).Size(w, 4).Radius(2).Background(color)
 				})
 				if button.Clicked() {
 					a.selectHomeHero(i, c.Now())
@@ -262,7 +262,7 @@ func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, wi
 	height := width * 9 / 16
 	loading := a.playbackLoading && a.playbackLoadingID == item.RecordGUID
 	ui.Column(c.Key("home-continue:" + item.RecordGUID)).Width(width).Gap(8).Children(func() {
-		button := actionButton(c.Key("resume:"+item.RecordGUID), "").Size(width, height).Padding(0).BorderWidth(0).Radius(12).Clip().Background(c.Theme().Surface).Label("继续观看 " + media.Title)
+		button := actionButton(c.Key("resume:"+item.RecordGUID), "").Size(width, height).Padding(0).BorderWidth(0).Radius(10).Clip().Background(c.Theme().Surface).Border(1, c.Theme().Border).Label("继续观看 " + media.Title)
 		button.Children(func() {
 			image := a.imageForURL(media.Backdrop, int(width), int(height))
 			if image == nil {
@@ -272,7 +272,7 @@ func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, wi
 				ui.Image(c, image).Size(width, height).Fit(ui.Cover)
 			}
 			ui.Box(c).Absolute().Bottom(0).Left(0).Width(width).Height(68).Draw(func(p *ui.Painter, r ui.Rect) {
-				p.FillGradient(r, ui.LinearGradient{From: ui.RGBA(8, 14, 11, 0), To: ui.RGBA(8, 14, 11, 0.78), Angle: 180}, 0)
+				p.FillGradient(r, ui.LinearGradient{From: ui.RGBA(13, 15, 18, 0), To: ui.RGBA(13, 15, 18, 0.88), Angle: 180}, 0)
 			})
 			ui.Text(c, formatClock(item.Position)+" / "+formatClock(item.Duration)).Absolute().Bottom(24).Right(12).FontSize(12).Bold().TextColor(ui.Hex("#ffffff"))
 			ui.Box(c).Absolute().Bottom(12).Left(12).Right(12).Height(4).Draw(func(p *ui.Painter, r ui.Rect) {
@@ -281,10 +281,10 @@ func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, wi
 				if item.Duration > 0 && !math.IsNaN(item.Duration) && !math.IsNaN(item.Position) {
 					progress = float32(max(0, min(1, item.Position/item.Duration)))
 				}
-				p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * progress, H: r.H}, ui.Hex("#ffffff"), 2)
+				p.Fill(ui.Rect{X: r.X, Y: r.Y, W: r.W * progress, H: r.H}, movieColors.accent.Mix(ui.RGB(255, 255, 255), 0.25), 2)
 			})
 			if loading {
-				ui.Box(c).Absolute().Top(height/2-19).Left(width/2-19).Size(38, 38).Center().Radius(19).Background(ui.RGBA(8, 14, 11, 0.68)).Children(func() {
+				ui.Box(c).Absolute().Top(height/2-19).Left(width/2-19).Size(38, 38).Center().Radius(19).Background(ui.RGBA(13, 15, 18, 0.75)).Border(1, ui.RGBA(255, 255, 255, 0.20)).Children(func() {
 					// Spinner draws with Theme.TextMuted, rather than TextColor.
 					// Scope a high-contrast color to this progress indicator only.
 					theme := c.Theme()
@@ -295,7 +295,7 @@ func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, wi
 					c.SetTheme(theme)
 				})
 			} else if button.Hovered() {
-				ui.Box(c).Absolute().Top(height/2-20).Left(width/2-20).Size(40, 40).Center().Radius(20).Background(ui.RGBA(8, 14, 11, 0.5)).Children(func() { ui.Icon(c, playerOverlayIcons["play"]).Size(20, 20).TextColor(ui.Hex("#ffffff")) })
+				ui.Box(c).Absolute().Top(height/2-20).Left(width/2-20).Size(40, 40).Center().Radius(20).Background(ui.RGBA(13, 15, 18, 0.65)).Border(1, ui.RGBA(255, 255, 255, 0.20)).Children(func() { ui.Icon(c, playerOverlayIcons["play"]).Size(20, 20).TextColor(ui.Hex("#ffffff")) })
 			}
 		})
 		if button.Clicked() {

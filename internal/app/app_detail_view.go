@@ -296,13 +296,7 @@ func detailArtworkSurface(c *ui.Context, key string, width, height, radius float
 // The intro keeps a bounded synopsis preview with a separate full-text view.
 func (a *appState) detailIntro(c *ui.Context, item MediaItem) {
 	lines := detailSynopsisLines(c)
-	kind := "电影"
-	if item.IsSeries {
-		kind = "电视剧"
-	}
 	ui.Column(c).FillWidth().Gap(14).Children(func() {
-		ui.Text(c, kind).AlignSelf(ui.Start).Padding(5, 11).Radius(999).
-			Background(c.Theme().Accent.Alpha(0.20)).FontSize(12).Bold().TextColor(c.Theme().Accent)
 		ui.Text(c, item.Title).FillWidth().Height(88).FixedLineHeight(42).FontSize(36).Bold().
 			LetterSpacing(-0.5).MaxLines(2)
 		if meta := item.Subtitle(); meta != "" {
@@ -349,7 +343,7 @@ func (a *appState) detailSynopsisDialog(c *ui.Context) {
 	item := *a.selected
 	width, height := c.Size()
 	ui.Modal(c, &a.detailSynopsisOpen, func() {
-		ui.Column(c).Width(min(float32(760), width-64)).Padding(24).Gap(16).Radius(12).Background(c.Theme().Surface).Children(func() {
+		ui.Column(c).Width(min(float32(760), width-64)).Padding(24).Gap(16).Radius(12).Background(c.Theme().Surface).Border(1, c.Theme().Border).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
 				ui.Text(c, item.Title).Grow(1).FontSize(20).Bold().SingleLine()
 				if actionButton(c, "收起简介").FontSize(12).Clicked() {
@@ -473,6 +467,13 @@ func (a *appState) castSection(c *ui.Context, item MediaItem) {
 						if role == "" {
 							role = p.Job
 						}
+						if strings.EqualFold(role, "Director") {
+							role = "导演"
+						} else if strings.EqualFold(role, "Writer") {
+							role = "编剧"
+						} else if strings.EqualFold(role, "Actor") {
+							role = "演员"
+						}
 						ui.Text(c, role).FontSize(12).TextColor(t.TextMuted).TextAlign(ui.Center).SingleLine()
 					})
 				})
@@ -509,7 +510,7 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 		})
 
 		ui.Column(c).Grow(1).MinWidth(0).FillHeight().Gap(20).Padding(22, 4, 18, 0).Children(func() {
-			ui.Text(c, "演职人员").FontSize(12).Bold().LetterSpacing(0.5).TextColor(t.Accent)
+			ui.Text(c, "演职人员").FontSize(12).TextColor(t.TextMuted)
 			ui.Row(c).Gap(14).AlignItems(ui.Center).Children(func() {
 				ui.Text(c, person.Name).FontSize(36).Bold().LetterSpacing(-0.5).SingleLine()
 				a.favoriteButton(c, MediaItem{ID: person.ID, Title: person.Name, Kind: "person", Favorite: person.Favorite})
@@ -577,27 +578,34 @@ func (a *appState) personView(c *ui.Context, person CastMember) {
 					card := actionButton(c.Key("person-"+item.ID), "").Padding(0).BorderWidth(0).
 						Background(ui.Color{}).TextColor(t.Text).Label("查看 " + item.Title + " 详情")
 					card.Children(func() {
-						ui.Column(c).Gap(8).Center().Children(func() {
-							cover := ui.Box(c).Size(150, 225).Radius(12).Clip().BorderWidth(0)
+						ui.Column(c).Width(150).Gap(6).AlignItems(ui.Start).Children(func() {
+							cover := ui.Box(c).Size(150, 225).Radius(10).Clip().Border(1, t.Border)
 							cover.Children(func() {
 								poster := a.imageFor(item, 150, 225)
 								if poster != nil {
 									ui.Image(c, poster).Size(150, 225).Fit(ui.Cover)
 								} else {
-									ui.Box(c).Size(150, 225).Background(t.Surface)
+									ui.Box(c).Size(150, 225).Background(t.Surface).Center().Children(func() {
+										initial := "影"
+										if runes := []rune(item.Title); len(runes) > 0 {
+											initial = string(runes[:1])
+										}
+										ui.Text(c, initial).FontSize(32).Bold().TextColor(movieColors.placeholderText)
+									})
 								}
-								if item.Rating != "" {
-									ui.Text(c, item.Rating).Absolute().Top(10).Left(10).Padding(4, 8).Radius(7).
-										Background(movieColors.rating).FontSize(12).Bold().TextColor(movieColors.ratingText)
+								if item.Rating != "" && item.Rating != "0" && item.Rating != "0.0" {
+									ui.Text(c, "★ "+item.Rating).Absolute().Top(8).Right(8).Padding(3, 7).Radius(6).
+										Background(ui.RGBA(13, 15, 18, 0.78)).Border(1, ui.RGBA(255, 255, 255, 0.12)).
+										FontSize(11).Bold().FontFeatures("tnum").TextColor(movieColors.ratingText)
 								}
 							})
-							ui.Text(c, item.Title).FontSize(14).Bold().TextAlign(ui.Center).SingleLine()
+							ui.Text(c, item.Title).Width(150).FontSize(14).Bold().SingleLine()
 							subtitle := item.Subtitle()
 							if subtitle == "" {
 								subtitle = item.Year
 							}
 							if subtitle != "" {
-								ui.Text(c, subtitle).FontSize(11).TextColor(t.TextMuted).SingleLine()
+								ui.Text(c, subtitle).Width(150).FontSize(12).TextColor(t.TextMuted).SingleLine()
 							}
 						})
 					})

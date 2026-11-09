@@ -21,10 +21,10 @@ func setWindowTheme(window *mygo.Window) {
 	hwnd := window.NativeHandle()
 	// DWM title-bar attributes are supported on Windows 11. Older versions
 	// keep their system title-bar colors when these calls are rejected.
-	darkMode := uint32(0)
-	caption := uint32(0x00F6F4F4) // #f4f4f6 as a Win32 COLORREF (BGR).
-	text := uint32(0x001F1D1D)    // #1d1d1f.
-	border := uint32(0x00E9E5E5)  // #e5e5e9.
+	darkMode := uint32(1)
+	caption := uint32(0x001B1613) // #13161b as a Win32 COLORREF (BGR).
+	text := uint32(0x00F5F2F0)    // #f0f2f5.
+	border := uint32(0x00241E1A)  // #1a1e24.
 	for _, attribute := range []struct {
 		id    uintptr
 		value *uint32

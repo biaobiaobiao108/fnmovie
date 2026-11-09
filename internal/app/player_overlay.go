@@ -564,8 +564,8 @@ func (a *appState) playerHeaderView(c *ui.Context) {
 	ui.Box(c).Label("播放信息渐隐").Absolute().Fill().PassThrough().Radius(cornerRadius, cornerRadius, 0, 0).Clip().LinearGradient(ui.LinearGradient{
 		Angle: 180,
 		Stops: []ui.GradientStop{
-			{Color: ui.RGBA(0, 0, 0, 0.58), At: 0},
-			{Color: ui.RGBA(0, 0, 0, 0.18), At: 0.62},
+			{Color: ui.RGBA(13, 15, 18, 0.70), At: 0},
+			{Color: ui.RGBA(13, 15, 18, 0.25), At: 0.65},
 			{Color: ui.RGBA(0, 0, 0, 0), At: 1},
 		}})
 	row := ui.Row(c).Absolute().Fill().Padding(0, 20, 0, 16).Gap(10).AlignItems(ui.Center).DragWindow()
@@ -629,8 +629,8 @@ func (a *appState) playerTransport(c *ui.Context) {
 		Stops: []ui.GradientStop{
 			{Color: ui.RGBA(0, 0, 0, 0), At: 0},
 			{Color: ui.RGBA(0, 0, 0, 0.04), At: 0.30},
-			{Color: ui.RGBA(0, 0, 0, 0.32), At: 0.68},
-			{Color: ui.RGBA(0, 0, 0, 0.68), At: 1},
+			{Color: ui.RGBA(13, 15, 18, 0.40), At: 0.68},
+			{Color: ui.RGBA(13, 15, 18, 0.78), At: 1},
 		}})
 	ui.Column(c).Label("播放控件区域").Absolute().Bottom(12).Left(gutter).Right(gutter).Gap(7).Children(func() {
 		// The progress line sits above the information row, as on MyGo Music's
@@ -809,7 +809,7 @@ func (a *appState) playerPopover(c *ui.Context) {
 		return
 	}
 	ui.Column(c).Label("播放选项菜单").Fill().MinWidth(0).Padding(8).Gap(3).Radius(18).Clip().
-		Background(ui.RGBA(20, 22, 26, 0.88)).Border(1, ui.RGBA(255, 255, 255, 0.16)).Children(func() {
+		Background(ui.RGBA(19, 22, 27, 0.94)).Border(1, ui.RGBA(255, 255, 255, 0.14)).Children(func() {
 		var title string
 		switch a.playerOverlayMenu {
 		case "subtitle":

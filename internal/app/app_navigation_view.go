@@ -129,7 +129,7 @@ func (a *appState) globalSearchField(c *ui.Context) {
 	focused := c.Focused(a.searchBox)
 	field := ui.Row(c.Key("global-search-field")).Height(32).FillWidth().PaddingX(10).Gap(7).Radius(9).AlignItems(ui.Center).Margin(0, 0, 14, 0)
 	if focused {
-		field.Background(t.Background).Shadow(0, 0, 0, 3, movieColors.accent.Alpha(0.25)).Border(1, movieColors.accent.Alpha(0.6))
+		field.Background(t.Surface).Border(1, movieColors.accent.Alpha(0.70))
 	} else {
 		field.Background(t.SurfaceHover).Border(1, t.Border)
 	}
@@ -348,24 +348,29 @@ func (a *appState) libraryViewContent(c *ui.Context) {
 		}
 		card := actionButton(c.Key(item.ID), "").Padding(0).BorderWidth(0).Background(ui.Color{}).TextColor(t.Text)
 		card.Children(func() {
-			ui.Column(c).Gap(8).Center().Children(func() {
-				cover := ui.Box(c).Size(150, 225).Radius(10).Clip().BorderWidth(0)
+			ui.Column(c).Width(150).Gap(6).AlignItems(ui.Start).Children(func() {
+				cover := ui.Box(c).Size(150, 225).Radius(10).Clip().Border(1, t.Border)
 				cover.Children(func() {
 					poster := a.imageFor(item, 150, 225)
 					if poster != nil {
 						ui.Image(c, poster).Size(150, 225).Fit(ui.Cover)
 					} else {
 						ui.Box(c).Size(150, 225).Background(movieColors.placeholder).Center().Children(func() {
-							ui.Text(c, "FILM").FontSize(10).Bold().TextColor(movieColors.placeholderText)
+							initial := "影"
+							if runes := []rune(item.Title); len(runes) > 0 {
+								initial = string(runes[:1])
+							}
+							ui.Text(c, initial).FontSize(32).Bold().TextColor(movieColors.placeholderText)
 						})
 					}
-					if item.Rating != "" {
-						ui.Text(c, item.Rating).Absolute().Top(10).Left(10).Padding(4, 8).Radius(6).
-							Background(movieColors.rating).FontSize(12).Bold().TextColor(movieColors.ratingText)
+					if item.Rating != "" && item.Rating != "0" && item.Rating != "0.0" {
+						ui.Text(c, "★ "+item.Rating).Absolute().Top(8).Right(8).Padding(3, 7).Radius(6).
+							Background(ui.RGBA(13, 15, 18, 0.78)).Border(1, ui.RGBA(255, 255, 255, 0.12)).
+							FontSize(11).Bold().FontFeatures("tnum").TextColor(movieColors.ratingText)
 					}
 				})
-				ui.Text(c, item.Title).FontSize(14).Bold().TextAlign(ui.Center).SingleLine()
-				ui.Text(c, cardCaption(item)).FontSize(12).TextColor(t.TextMuted).TextAlign(ui.Center).SingleLine()
+				ui.Text(c, item.Title).Width(150).FontSize(14).Bold().SingleLine()
+				ui.Text(c, cardCaption(item)).Width(150).FontSize(12).TextColor(t.TextMuted).SingleLine()
 			})
 		})
 		if card.Clicked() {
@@ -428,7 +433,7 @@ func (a *appState) homeHero(c *ui.Context, item MediaItem) {
 			if item.Watched {
 				label = "继续观看"
 			}
-			ui.Text(c, label).FontSize(10).Bold().LetterSpacing(1.4).TextColor(t.Accent)
+			ui.Text(c, label).FontSize(11).Bold().TextColor(t.Accent)
 			ui.Text(c, item.Title).FontSize(25).Bold().SingleLine()
 			ui.Text(c, item.Subtitle()).FontSize(12).TextColor(t.TextMuted)
 			if item.Overview != "" {
