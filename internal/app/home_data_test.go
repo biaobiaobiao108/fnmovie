@@ -427,9 +427,9 @@ func TestHomeSessionSetStableAcrossRetry(t *testing.T) {
 		t.Fatalf("retry changed session order or failed to recover metadata: %+v", result)
 	}
 	for _, scale := range []float64{1, 1.5, 2, 3} {
-		width, height := homeHeroPixelSize(2500, 1400, scale)
-		if width > 1600 || height > 900 {
-			t.Fatalf("hero decode exceeds budget: %dx%d", width, height)
+		width, height := homeHeroPixelSize(2500, scale)
+		if width != 1600 || height != 900 {
+			t.Fatalf("large hero decode should use the full 16:9 budget: %dx%d", width, height)
 		}
 	}
 }

@@ -282,15 +282,15 @@ func TestHomeKeepsDecodedPreviewWhileBackdropLoads(t *testing.T) {
 	}
 	a := &appState{server: server, posters: loader, displayScale: 1}
 	item := MediaItem{Poster: "/preview.jpg", Backdrop: "/backdrop.jpg"}
-	w, h := homeHeroPixelSize(800, 450, 1)
+	w, h := homeHeroPixelSize(800, 1)
 	preview := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 1, 1)))
 	loader.putLocked(posterKey{URL: server.imageURL(item.Poster), Width: w, Height: h}, preview, 4)
-	if got := a.homeHeroImage(item, 800, 450); got != preview || len(loader.queue) != 1 {
+	if got := a.homeHeroImage(item, 800); got != preview || len(loader.queue) != 1 {
 		t.Fatal("loading backdrop removed preview or scheduled extra preview work")
 	}
 	backdrop := ui.NewBitmap(image.NewRGBA(image.Rect(0, 0, 2, 1)))
 	loader.putLocked(posterKey{URL: server.imageURL(item.Backdrop), Width: w, Height: h}, backdrop, 8)
-	if got := a.homeHeroImage(item, 800, 450); got != backdrop {
+	if got := a.homeHeroImage(item, 800); got != backdrop {
 		t.Fatal("loaded backdrop did not replace preview")
 	}
 	loader.SetPlayback(true)

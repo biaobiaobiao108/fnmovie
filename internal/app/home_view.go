@@ -10,10 +10,15 @@ import (
 )
 
 const (
-	homeHeroFadeDuration = 180 * time.Millisecond
-	homeHeroMaxHeight    = 416
-	homeContinueMaxWidth = 272
-	homeContinueCardGap  = 16
+	homeHeroFadeDuration     = 180 * time.Millisecond
+	homeArtworkAspect        = 16.0 / 9
+	homeContinueMinWidth     = 208
+	homeContinueMaxWidth     = 272
+	homeContinueCardGap      = 16
+	homeSectionsGap          = 16
+	homeContinueHeaderHeight = 36
+	homeContinueGap          = 8
+	homeContinueCaption      = 52
 )
 
 var homeDetailIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/></svg>`))
@@ -22,10 +27,13 @@ var homeNextIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/sv
 
 // Keep both home sections in the available viewport; only the record row scrolls.
 func homeViewportLayout(width, height float32) (heroHeight, cardWidth, rowHeight float32) {
-	cardWidth = min(homeContinueMaxWidth, max(float32(200), width/3-16))
-	rowHeight = cardWidth*9/16 + 56
-	remaining := height - rowHeight - 38 - 8 - 24
-	heroHeight = min(homeHeroMaxHeight, width*9/16, max(float32(120), remaining))
+	// Reserve a complete row of compact cards, then let the backdrop grow
+	// toward its full widescreen height before enlarging the cards.
+	artworkHeight := height - homeSectionsGap - homeContinueHeaderHeight - homeContinueGap - homeContinueCaption
+	heroHeight = min(width/homeArtworkAspect, max(float32(120), artworkHeight-homeContinueMinWidth/homeArtworkAspect))
+	preferredCardWidth := min(homeContinueMaxWidth, width/3-homeContinueCardGap)
+	cardWidth = max(homeContinueMinWidth, min(preferredCardWidth, (artworkHeight-heroHeight)*homeArtworkAspect))
+	rowHeight = cardWidth/homeArtworkAspect + homeContinueCaption
 	return
 }
 
@@ -35,7 +43,7 @@ func (a *appState) homeView(c *ui.Context) {
 		return
 	}
 	width, height := c.Size()
-	page := ui.Column(c.Key("home-viewport")).Bind(&a.home.ViewportHandle).Grow(1).FillHeight().FillWidth().Padding(movieTitleBarHeight+16, 0, 0, 0).Gap(24)
+	page := ui.Column(c.Key("home-viewport")).Bind(&a.home.ViewportHandle).Grow(1).FillHeight().FillWidth().Padding(movieTitleBarHeight+16, 0, 0, 0).Gap(homeSectionsGap)
 	bounds := a.home.ViewportHandle.Bounds(c)
 	if bounds.W > 0 && bounds.H > 0 {
 		width, height = bounds.W, max(1, bounds.H-float32(movieTitleBarHeight+16))
@@ -47,7 +55,7 @@ func (a *appState) homeView(c *ui.Context) {
 	canScroll := float32(recordCount)*(cardWidth+homeContinueCardGap)-homeContinueCardGap > width
 	page.Children(func() {
 		a.homeCarouselSized(c, heroHeight)
-		ui.Column(c).FillWidth().Gap(8).Children(func() {
+		ui.Column(c).FillWidth().Gap(homeContinueGap).Children(func() {
 			a.homeContinueHeader(c, canScroll, cardWidth)
 			if recordCount > 0 {
 				ui.ScrollHorizontal(c.Key("home-continue-row")).FillWidth().Height(rowHeight).TrackScroll(&a.home.RowScroll).Gap(homeContinueCardGap).Children(func() {
@@ -63,7 +71,7 @@ func (a *appState) homeView(c *ui.Context) {
 }
 
 func (a *appState) homeContinueHeader(c *ui.Context, canScroll bool, cardWidth float32) {
-	ui.Row(c).Height(38).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
+	ui.Row(c).Height(homeContinueHeaderHeight).FillWidth().AlignItems(ui.Center).Gap(homeContinueGap).Children(func() {
 		ui.Text(c, "继续观看").FontSize(20).Bold().Grow(1)
 		if a.home.ContinueDetailLoading {
 			ui.Text(c, "正在读取详情…").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
@@ -176,12 +184,12 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 	hero.Children(func() {
 		if fade < 1 && a.home.HeroPrevious >= 0 && a.home.HeroPrevious < len(a.home.Heroes) && a.home.HeroPrevious != index {
 			previous := a.home.Heroes[a.home.HeroPrevious]
-			if image := a.homeHeroImage(previous, int(contentWidth), int(height)); image != nil {
+			if image := a.homeHeroImage(previous, int(contentWidth)); image != nil {
 				ui.Image(c, image).Absolute().Top(0).Left(0).Fill().Fit(ui.Cover)
 			}
 			c.AnimationFrame()
 		}
-		if image := a.homeHeroImage(item, int(contentWidth), int(height)); image != nil {
+		if image := a.homeHeroImage(item, int(contentWidth)); image != nil {
 			ui.Image(c, image).Absolute().Top(0).Left(0).Fill().Fit(ui.Cover).Opacity(fade)
 		}
 		ui.Box(c).Absolute().Top(0).Left(0).Fill().Draw(func(p *ui.Painter, r ui.Rect) {
@@ -264,7 +272,7 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 		})
 	})
 	if fade >= 1 && len(a.home.Heroes) > 1 {
-		a.homeHeroImage(a.home.Heroes[(index+1)%len(a.home.Heroes)], int(contentWidth), int(height))
+		a.homeHeroImage(a.home.Heroes[(index+1)%len(a.home.Heroes)], int(contentWidth))
 	}
 }
 
@@ -287,7 +295,7 @@ func homeHeroMetadata(item MediaItem) string {
 
 func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, width float32) {
 	media := item.Media
-	height := width * 9 / 16
+	height := width / homeArtworkAspect
 	loading := a.playbackLoading && a.playbackLoadingID == item.RecordGUID
 	failed := a.playbackFailedID != "" && a.playbackFailedID == item.RecordGUID
 	label := "继续观看 " + media.Title

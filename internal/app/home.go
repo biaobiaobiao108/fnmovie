@@ -315,20 +315,21 @@ func (a *appState) openContinueDetail(record ContinueWatchingItem) {
 	}()
 }
 
-func homeHeroPixelSize(width, height int, scale float64) (int, int) {
+func homeHeroPixelSize(width int, scale float64) (int, int) {
 	if scale <= 0 {
 		scale = 1
 	}
-	w, h := float64(max(1, width))*scale, float64(max(1, height))*scale
-	fit := min(1.0, min(1600/w, 900/h))
-	return max(1, int(math.Ceil(w*fit))), max(1, int(math.Ceil(h*fit)))
+	// Cover scales the artwork to the full width even if the window crops its
+	// top and bottom. Decode for that width so height-only resizes reuse it.
+	w := min(1600, float64(max(1, width))*scale)
+	return max(1, int(math.Ceil(w))), max(1, int(math.Ceil(w/homeArtworkAspect)))
 }
 
-func (a *appState) homeHeroImage(item MediaItem, width, height int) *ui.Bitmap {
+func (a *appState) homeHeroImage(item MediaItem, width int) *ui.Bitmap {
 	if a.server == nil || a.posters == nil {
 		return nil
 	}
-	w, h := homeHeroPixelSize(width, height, a.displayScale)
+	w, h := homeHeroPixelSize(width, a.displayScale)
 	onLoaded := func() {
 		if a.window != nil {
 			a.window.Update(func() { a.window.Invalidate() })

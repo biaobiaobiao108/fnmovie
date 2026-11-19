@@ -120,6 +120,24 @@ func TestHomeFitsViewport(t *testing.T) {
 	}
 }
 
+func TestHomeHeroUsesArtworkProportionsAndAvailableHeight(t *testing.T) {
+	for _, tc := range []struct {
+		width, height float32
+		wantHero      float32
+		wantCard      float32
+	}{
+		{width: 704, height: 650, wantHero: 396, wantCard: 704.0/3 - 16},
+		{width: 992, height: 700, wantHero: 471, wantCard: 208},
+		{width: 1600, height: 970, wantHero: 741, wantCard: 208},
+	} {
+		hero, card, row := homeViewportLayout(tc.width, tc.height)
+		if hero != tc.wantHero || card != tc.wantCard || hero+row+homeSectionsGap+homeContinueHeaderHeight+homeContinueGap > tc.height {
+			t.Errorf("viewport %g×%g: hero=%g card=%g row=%g, want hero=%g card=%g and both sections inside viewport",
+				tc.width, tc.height, hero, card, row, tc.wantHero, tc.wantCard)
+		}
+	}
+}
+
 func TestHomeContinueGridScrollsBehindTitleBar(t *testing.T) {
 	a := &appState{section: "home", catalogs: map[string]*CatalogState{}}
 	a.home.AllContinue = true
