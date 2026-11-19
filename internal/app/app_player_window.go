@@ -7,6 +7,11 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
+const (
+	playerWindowMinWidth  = 320
+	playerWindowMinHeight = 280
+)
+
 func (a *appState) playbackWindow() *mygo.Window {
 	if a.playerWindow != nil {
 		return a.playerWindow
@@ -26,7 +31,7 @@ func (a *appState) createPlayerWindow(title string, requestID uint64) {
 	a.playerWindowSizedForRequest = 0
 	a.playerWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: title, X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height,
-		MinWidth: 320, MinHeight: 180, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: movieTitleBarHeight,
+		MinWidth: playerWindowMinWidth, MinHeight: playerWindowMinHeight, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: movieTitleBarHeight,
 		BackgroundColor: "#000000", StateKey: "player", Content: ui.View(a.playerWindowView),
 	})
 	a.playerWindow.OnClose(func(e *mygo.CloseEvent) {
@@ -74,7 +79,8 @@ func (a *appState) sizePlayerWindowForVideo(requestID uint64, snapshot PlayerSna
 		height = maxHeight
 		width = int(float64(height) * aspect)
 	}
-	width, height = max(1, width), max(1, height)
+	width = min(workArea.Width, max(playerWindowMinWidth, width))
+	height = min(workArea.Height, max(playerWindowMinHeight, height))
 	x, y := centerX-width/2, centerY-height/2
 	if workArea.Width >= width {
 		x = min(max(x, workArea.X), workArea.X+workArea.Width-width)

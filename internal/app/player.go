@@ -99,20 +99,19 @@ func formatClock(value float64) string {
 }
 
 type Player struct {
-	mu             sync.Mutex
-	url            string
-	active         bool
-	position       float64
-	duration       float64
-	paused         bool
-	viewport       ui.Rect
-	started        time.Time
-	process        *playerProcess
-	startCancel    context.CancelFunc
-	generation     uint64
-	surface        uintptr
-	onDoubleClick  func()
-	topMarginRatio float64
+	mu            sync.Mutex
+	url           string
+	active        bool
+	position      float64
+	duration      float64
+	paused        bool
+	viewport      ui.Rect
+	started       time.Time
+	process       *playerProcess
+	startCancel   context.CancelFunc
+	generation    uint64
+	surface       uintptr
+	onDoubleClick func()
 }
 
 func NewPlayer() *Player { return &Player{} }
@@ -182,9 +181,6 @@ func (p *Player) StartContext(ctx context.Context, streamURL string, parent uint
 	p.url = streamURL
 	p.position, p.duration, p.paused = resumeAt, duration, false
 	p.started = time.Now()
-	if p.topMarginRatio > 0 {
-		process.setTopMarginRatio(p.topMarginRatio)
-	}
 	return nil
 }
 
@@ -218,27 +214,13 @@ func (p *Player) SetOnDoubleClick(fn func()) {
 	}
 }
 
-func (p *Player) SetTopMarginRatio(ratio float64) {
-	p.mu.Lock()
-	p.topMarginRatio = ratio
-	process := p.process
-	p.mu.Unlock()
-	if process != nil {
-		process.setTopMarginRatio(ratio)
-	}
-}
-
 func (p *Player) SetViewport(rect ui.Rect) {
 	p.mu.Lock()
 	p.viewport = rect
 	surface := p.surface
-	process := p.process
 	p.mu.Unlock()
 	if surface != 0 {
 		setPlayerSurfaceViewport(surface, rect)
-	}
-	if process != nil {
-		process.setViewport(rect)
 	}
 }
 
@@ -252,13 +234,6 @@ func (p *Player) HideSurface() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	hidePlayerSurface(p.surface)
-}
-
-// SetCaptionButtonCutout leaves room for native titlebar controls above the video surface.
-func (p *Player) SetCaptionButtonCutout(enabled bool, owner uintptr) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	setPlayerWindowButtonsCutout(p.surface, owner, enabled)
 }
 
 func (p *Player) ReleaseSurface() {

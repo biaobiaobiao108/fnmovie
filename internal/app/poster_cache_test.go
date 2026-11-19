@@ -54,6 +54,44 @@ func TestPosterTintFollowsArtworkAndStaysWithCachedBitmap(t *testing.T) {
 	}
 }
 
+func TestPosterCacheSeparatesAccountsSharingAnImageURL(t *testing.T) {
+	var data bytes.Buffer
+	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 20, 30))); err != nil {
+		t.Fatal(err)
+	}
+	var requests atomic.Int32
+	fixture := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		_, _ = w.Write(data.Bytes())
+	}))
+	defer fixture.Close()
+	loader := &PosterLoader{
+		queue: make(chan posterRequest, posterQueueLimit), pending: map[posterKey]uint64{},
+		failed: map[posterKey]time.Time{}, entries: map[posterKey]*list.Element{},
+		lru: list.New(), maxBytes: posterCacheBudget, diskDir: t.TempDir(),
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); loader.worker() }()
+	t.Cleanup(func() { loader.Close(); <-done })
+
+	for _, account := range []string{"first", "second", "first"} {
+		loader.SetAccount(fixture.URL, account)
+		if loader.Cached(fixture.URL, 20, 30) != nil {
+			t.Fatal("account switch reused artwork held in memory")
+		}
+		loaded := make(chan struct{})
+		loader.GetOrRequest(NewServer(fixture.URL, account), fixture.URL, 20, 30, func() { close(loaded) })
+		select {
+		case <-loaded:
+		case <-time.After(3 * time.Second):
+			t.Fatalf("artwork didn't load for %s", account)
+		}
+	}
+	if got := requests.Load(); got != 2 {
+		t.Fatalf("expected one image download per account, got %d", got)
+	}
+}
+
 func TestPlaybackDropsPostersAndRejectsObsoleteDecode(t *testing.T) {
 	var data bytes.Buffer
 	if err := png.Encode(&data, image.NewRGBA(image.Rect(0, 0, 20, 30))); err != nil {

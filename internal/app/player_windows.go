@@ -193,8 +193,6 @@ type playerProcess struct {
 	trackRefresh      playerTrackRefreshState
 	trackListObserved bool
 	stopOnce          sync.Once
-	viewport          ui.Rect
-	topMarginRatio    float64
 	resumeAt          float64
 }
 
@@ -282,7 +280,6 @@ func (p *playerProcess) resetSession(api *mpvAPI, ctx, host uintptr, resumeAt fl
 	p.done, p.loaded, p.events = make(chan struct{}), make(chan struct{}), make(chan struct{}, 1)
 	p.pointerEvents, p.pointerDone, p.resumeAt = make(chan struct{}, 1), nil, resumeAt
 	p.stopOnce, p.loadOnce = sync.Once{}, sync.Once{}
-	p.topMarginRatio = 0
 	p.stateMu.Lock()
 	p.exitStatus = ""
 	p.positionBits, p.durationBits, p.positionSeen = 0, 0, false
@@ -449,9 +446,6 @@ func (p *playerProcess) eventLoop() {
 				}
 			case mpvEventFileLoaded:
 				fileLoaded = true
-				if p.topMarginRatio > 0 {
-					p.command("set", "video-margin-ratio-top", strconv.FormatFloat(p.topMarginRatio, 'f', 6, 64))
-				}
 				if p.resumeAt > 0 {
 					if code := p.command("seek", strconv.FormatFloat(p.resumeAt, 'f', 2, 64), "absolute", "exact"); code < 0 {
 						log.Printf("libmpv resume seek failed: %s", mpvError(p.api, code))
@@ -770,22 +764,6 @@ func (p *playerProcess) snapshot() PlayerSnapshot {
 	return state
 }
 
-func (p *playerProcess) setViewport(rect ui.Rect) {
-	p.viewport = rect
-	fitPlayerSurface(p.host)
-}
-
-func (p *playerProcess) setTopMarginRatio(ratio float64) {
-	p.commandMu.Lock()
-	p.topMarginRatio = ratio
-	ctx := p.ctx
-	api := p.api
-	p.commandMu.Unlock()
-	if ctx != 0 && api != nil {
-		p.command("set", "video-margin-ratio-top", strconv.FormatFloat(ratio, 'f', 6, 64))
-	}
-}
-
 type playerSurfaceState struct {
 	originalProc  uintptr
 	onDoubleClick func()
@@ -793,6 +771,7 @@ type playerSurfaceState struct {
 	lastClickX    int16
 	lastClickY    int16
 	viewport      ui.Rect
+	shape         [3]int32
 	mu            sync.Mutex
 }
 
@@ -1084,6 +1063,21 @@ func updatePlayerSurfaceShape(host, parent uintptr, width, height int32, scale f
 		}
 	}
 
+	radius := max(6, int32(math.Round(8*scale)))
+	if isFullScreen {
+		radius = 0
+	}
+	shape := [3]int32{width, height, radius}
+	if value, ok := playerSurfaces.Load(host); ok {
+		state := value.(*playerSurfaceState)
+		state.mu.Lock()
+		unchanged := state.shape == shape
+		state.shape = shape
+		state.mu.Unlock()
+		if unchanged {
+			return
+		}
+	}
 	if isFullScreen {
 		procSetWindowRgn.Call(host, 0, 1)
 		if procDwmSetWindowAttribute.Find() == nil {
@@ -1091,10 +1085,6 @@ func updatePlayerSurfaceShape(host, parent uintptr, width, height int32, scale f
 			procDwmSetWindowAttribute.Call(host, 33, uintptr(unsafe.Pointer(&pref)), 4)
 		}
 	} else {
-		radius := int32(math.Round(8 * scale))
-		if radius < 6 {
-			radius = 6
-		}
 		diameter := radius * 2
 		rgn, _, _ := procCreateRoundRectRgn.Call(0, 0, uintptr(width+1), uintptr(height+1), uintptr(diameter), uintptr(diameter))
 		if rgn != 0 {
@@ -1219,81 +1209,6 @@ func destroyPlayerSurface(host uintptr) {
 func hidePlayerSurface(host uintptr) {
 	if host != 0 {
 		procShowPlayerWindow.Call(host, 0)
-	}
-}
-
-// Preserve MyGo's native caption buttons above the video and header popups.
-// The transparent hole keeps both their drawing and mouse hit testing intact.
-func setPlayerWindowButtonsCutout(hwnd, owner uintptr, enabled bool) {
-	if hwnd == 0 {
-		return
-	}
-	var client [4]int32
-	if ok, _, _ := procGetPlayerClientRect.Call(hwnd, uintptr(unsafe.Pointer(&client[0]))); ok == 0 {
-		return
-	}
-	scale := windowScale(owner)
-	cutWidth := int32(math.Round(46 * 3 * scale))
-	cutHeight := int32(math.Round(float64(movieTitleBarHeight) * scale))
-	if caption := findMyGoCaptionButtons(owner); caption != 0 {
-		var capRect [4]int32
-		if ok, _, _ := procGetWindowRect.Call(caption, uintptr(unsafe.Pointer(&capRect[0]))); ok != 0 {
-			w := capRect[2] - capRect[0]
-			h := capRect[3] - capRect[1]
-			if w > 0 && h > 0 {
-				cutWidth = w
-				cutHeight = h
-			}
-		}
-	}
-	if client[3] <= cutHeight+2 {
-		cutHeight = client[3]
-	}
-	if cutWidth <= 0 || cutHeight <= 0 || client[2] <= cutWidth || client[3] < cutHeight {
-		return
-	}
-	gdi := syscall.NewLazyDLL("gdi32.dll")
-	createRegion := gdi.NewProc("CreateRectRgn")
-	pointInRegion := gdi.NewProc("PtInRegion")
-	combineRegion := gdi.NewProc("CombineRgn")
-	deleteObject := gdi.NewProc("DeleteObject")
-	getWindowRegion := syscall.NewLazyDLL("user32.dll").NewProc("GetWindowRgn")
-	setWindowRegion := syscall.NewLazyDLL("user32.dll").NewProc("SetWindowRgn")
-	current, _, _ := createRegion.Call(0, 0, 0, 0)
-	if current != 0 {
-		kind, _, _ := getWindowRegion.Call(hwnd, current)
-		buttonX, buttonY := uintptr(client[2]-cutWidth/2), uintptr(cutHeight/2)
-		centerX, centerY := uintptr(client[2]/2), uintptr(client[3]/2)
-		buttonVisible, _, _ := pointInRegion.Call(current, buttonX, buttonY)
-		centerVisible, _, _ := pointInRegion.Call(current, centerX, centerY)
-		deleteObject.Call(current)
-		if enabled && kind != 0 && buttonVisible == 0 && centerVisible != 0 || !enabled && kind == 0 {
-			return
-		}
-	}
-	if !enabled {
-		setWindowRegion.Call(hwnd, 0, 1)
-		return
-	}
-	whole, _, _ := createRegion.Call(0, 0, uintptr(client[2]), uintptr(client[3]))
-	hole, _, _ := createRegion.Call(uintptr(client[2]-cutWidth), 0, uintptr(client[2]), uintptr(cutHeight))
-	if whole == 0 || hole == 0 {
-		if whole != 0 {
-			deleteObject.Call(whole)
-		}
-		if hole != 0 {
-			deleteObject.Call(hole)
-		}
-		return
-	}
-	if result, _, _ := combineRegion.Call(whole, whole, hole, 4); result == 0 { // RGN_DIFF
-		deleteObject.Call(whole)
-		deleteObject.Call(hole)
-		return
-	}
-	deleteObject.Call(hole)
-	if accepted, _, _ := setWindowRegion.Call(hwnd, whole, 1); accepted == 0 {
-		deleteObject.Call(whole)
 	}
 }
 

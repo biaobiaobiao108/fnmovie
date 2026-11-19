@@ -14,7 +14,7 @@ const (
 
 var moveFileExW = syscall.NewLazyDLL("kernel32.dll").NewProc("MoveFileExW")
 
-func replaceCatalogFile(source, destination string) error {
+func replaceFile(source, destination string) error {
 	sourcePath, err := syscall.UTF16PtrFromString(source)
 	if err != nil {
 		return err

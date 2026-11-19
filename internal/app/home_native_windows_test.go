@@ -110,6 +110,7 @@ func TestContinuePlaybackUsesCurrentServerPosition(t *testing.T) {
 
 // All requests and artwork are synthetic; this test never changes NAS history.
 func runNativeHomeVerification() error {
+	const recordCount = 7
 	var artwork bytes.Buffer
 	img := image.NewRGBA(image.Rect(0, 0, 800, 450))
 	for y := 0; y < 450; y++ {
@@ -134,7 +135,14 @@ func runNativeHomeVerification() error {
 				close(oldEntered)
 				<-oldRelease
 			}
-			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": []map[string]any{{"guid": "resume", "title": "合成观看记录", "type": "Movie", "backdrops": []string{"/art.png"}, "ts": 125, "duration": 7200}}})
+			records := make([]map[string]any, 0, recordCount)
+			for i := range recordCount {
+				records = append(records, map[string]any{
+					"guid": fmt.Sprintf("resume-%d", i), "title": fmt.Sprintf("合成观看记录 %d", i+1),
+					"type": "Movie", "backdrops": []string{"/art.png"}, "ts": 125 + i*940, "duration": 7200,
+				})
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": records})
 			return
 		}
 		if strings.HasSuffix(r.URL.Path, "/play/info") {
@@ -142,7 +150,7 @@ func runNativeHomeVerification() error {
 				ID string `json:"item_guid"`
 			}
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body.ID == "resume" {
+			if strings.HasPrefix(body.ID, "resume-") {
 				fmt.Fprint(w, `{"code":0,"data":{"ts":125,"duration":7200}}`)
 				return
 			}
@@ -175,7 +183,7 @@ func runNativeHomeVerification() error {
 			for {
 				time.Sleep(100 * time.Millisecond)
 				loaded := false
-				_ = update(func() error { loaded = len(a.home.Continue) == 1 && !a.home.ContinueLoading; return nil })
+				_ = update(func() error { loaded = len(a.home.Continue) == recordCount && !a.home.ContinueLoading; return nil })
 				if loaded {
 					break
 				}
@@ -250,7 +258,21 @@ func runNativeHomeVerification() error {
 				if a.home.Timer != nil || len(a.home.Continue) != 0 || a.home.Generation != 1 || !a.home.ContinueUpdatedAt.IsZero() {
 					return fmt.Errorf("old account response repopulated reset home state")
 				}
+				a.loggedIn, a.loginOpen = false, true
+				a.status = ""
+				a.window.SetSize(960, 640)
 				return nil
+			}); err != nil {
+				fail(err)
+				return
+			}
+			time.Sleep(250 * time.Millisecond)
+			if err := update(func() error {
+				data, err := a.window.CapturePage()
+				if err != nil {
+					return err
+				}
+				return os.WriteFile(filepath.Join("..", "..", "out", "home-check", "native-login.png"), data, 0600)
 			}); err != nil {
 				fail(err)
 				return

@@ -49,7 +49,6 @@ func Run() {
 	app := &appState{
 		settings: settings, serverAddress: settings.ServerURL, player: NewPlayer(), posters: NewPosterLoader(),
 		navigationUIState: navigationUIState{section: "home"},
-		sessionUIState:    sessionUIState{status: "连接飞牛影视服务器后开始浏览"},
 		catalogUIState:    catalogUIState{catalogs: map[string]*CatalogState{}, catalogCache: NewCatalogCache()},
 		detailUIState:     detailUIState{favoritePending: map[string]bool{}},
 	}
@@ -65,6 +64,9 @@ func Run() {
 				}
 			}
 		}
+	}
+	if app.loggedIn {
+		app.posters.SetAccount(settings.ServerURL, settings.Username)
 	}
 	app.loginOpen = !app.loggedIn
 

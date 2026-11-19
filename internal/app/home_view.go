@@ -9,7 +9,12 @@ import (
 	"github.com/egoist/mygo/ui"
 )
 
-const homeHeroFadeDuration = 180 * time.Millisecond
+const (
+	homeHeroFadeDuration = 180 * time.Millisecond
+	homeHeroMaxHeight    = 416
+	homeContinueMaxWidth = 272
+	homeContinueCardGap  = 16
+)
 
 var homeDetailIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v.1"/></svg>`))
 
@@ -17,11 +22,10 @@ var homeNextIcon = ui.MustParseSVG([]byte(`<svg xmlns="http://www.w3.org/2000/sv
 
 // Keep both home sections in the available viewport; only the record row scrolls.
 func homeViewportLayout(width, height float32) (heroHeight, cardWidth, rowHeight float32) {
-	cardWidth = min(float32(240), max(float32(200), (height-300)*16/9))
-	rowHeight = cardWidth*9/16 + 58
-	continueHeight := float32(38 + 10 + rowHeight)
-	remaining := height - continueHeight - 16
-	heroHeight = min(float32(560), min(width*9/16, max(float32(120), remaining)))
+	cardWidth = min(homeContinueMaxWidth, max(float32(200), width/3-16))
+	rowHeight = cardWidth*9/16 + 56
+	remaining := height - rowHeight - 38 - 8 - 24
+	heroHeight = min(homeHeroMaxHeight, width*9/16, max(float32(120), remaining))
 	return
 }
 
@@ -31,7 +35,7 @@ func (a *appState) homeView(c *ui.Context) {
 		return
 	}
 	width, height := c.Size()
-	page := ui.Column(c.Key("home-viewport")).Bind(&a.home.ViewportHandle).Grow(1).FillHeight().FillWidth().Padding(movieTitleBarHeight+16, 0, 0, 0).Gap(16)
+	page := ui.Column(c.Key("home-viewport")).Bind(&a.home.ViewportHandle).Grow(1).FillHeight().FillWidth().Padding(movieTitleBarHeight+16, 0, 0, 0).Gap(24)
 	bounds := a.home.ViewportHandle.Bounds(c)
 	if bounds.W > 0 && bounds.H > 0 {
 		width, height = bounds.W, max(1, bounds.H-float32(movieTitleBarHeight+16))
@@ -39,13 +43,15 @@ func (a *appState) homeView(c *ui.Context) {
 		width, height = max(1, width-float32(movieSidebarWidth+movieMainHorizontalInset*2)), max(1, height-float32(movieTitleBarHeight+100))
 	}
 	heroHeight, cardWidth, rowHeight := homeViewportLayout(width, height)
+	recordCount := min(10, len(a.home.Continue))
+	canScroll := float32(recordCount)*(cardWidth+homeContinueCardGap)-homeContinueCardGap > width
 	page.Children(func() {
 		a.homeCarouselSized(c, heroHeight)
-		ui.Column(c).FillWidth().Gap(10).Children(func() {
-			a.homeContinueHeader(c, true)
-			if len(a.home.Continue) > 0 {
-				ui.ScrollHorizontal(c.Key("home-continue-row")).Height(rowHeight).TrackScroll(&a.home.RowScroll).Gap(18).Children(func() {
-					for _, item := range a.home.Continue[:min(10, len(a.home.Continue))] {
+		ui.Column(c).FillWidth().Gap(8).Children(func() {
+			a.homeContinueHeader(c, canScroll, cardWidth)
+			if recordCount > 0 {
+				ui.ScrollHorizontal(c.Key("home-continue-row")).FillWidth().Height(rowHeight).TrackScroll(&a.home.RowScroll).Gap(homeContinueCardGap).Children(func() {
+					for _, item := range a.home.Continue[:recordCount] {
 						a.homeContinueCard(c, item, cardWidth)
 					}
 				})
@@ -56,9 +62,9 @@ func (a *appState) homeView(c *ui.Context) {
 	})
 }
 
-func (a *appState) homeContinueHeader(c *ui.Context, showAll bool) {
+func (a *appState) homeContinueHeader(c *ui.Context, canScroll bool, cardWidth float32) {
 	ui.Row(c).Height(38).FillWidth().AlignItems(ui.Center).Gap(8).Children(func() {
-		ui.Text(c, "继续观看").FontSize(22).Bold().Grow(1)
+		ui.Text(c, "继续观看").FontSize(20).Bold().Grow(1)
 		if a.home.ContinueDetailLoading {
 			ui.Text(c, "正在读取详情…").FontSize(12).TextColor(c.Theme().TextMuted).SingleLine()
 		} else if a.home.ContinueDetailErr != "" {
@@ -72,9 +78,32 @@ func (a *appState) homeContinueHeader(c *ui.Context, showAll bool) {
 				a.loadContinueWatching(true)
 			}
 		}
-		if showAll && len(a.home.Continue) > 0 {
-			if actionButton(c.Key("home-continue-all"), fmt.Sprintf("全部 · %d ›", len(a.home.Continue))).BorderWidth(0).Background(ui.Transparent).TextColor(c.Theme().TextMuted).Clicked() {
+		if len(a.home.Continue) > 0 {
+			if actionButton(c.Key("home-continue-all"), "查看全部 ›").BorderWidth(0).Background(ui.Transparent).TextColor(c.Theme().Accent).Clicked() {
 				a.home.AllContinue = true
+			}
+		}
+		if canScroll {
+			scroll := &a.home.RowScroll
+			step := cardWidth + homeContinueCardGap
+			animation := ui.Animation{Duration: navigationMotionDuration}
+			if c.Preferences().ReduceMotion {
+				animation.Duration = 0
+			}
+			for _, control := range []struct {
+				label    string
+				icon     *ui.SVG
+				target   float32
+				disabled bool
+			}{
+				{"向左浏览继续观看", playerOverlayIcons["back"], max(0, scroll.X-step), scroll.X <= 0.5},
+				{"向右浏览继续观看", homeNextIcon, min(scroll.MaxX, scroll.X+step), scroll.X >= scroll.MaxX-0.5},
+			} {
+				button := actionButton(c.Key(control.label), "").Size(32, 32).Padding(0).Label(control.label).Disabled(control.disabled)
+				button.Children(func() { ui.Icon(c, control.icon).Size(16, 16) })
+				if button.Clicked() {
+					scroll.ScrollTo(control.target, 0, animation)
+				}
 			}
 		}
 	})
@@ -160,15 +189,12 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 		})
 		body := actionButton(c.Key("home-hero-detail"), "").Absolute().Top(0).Left(0).Fill().Padding(0).BorderWidth(0).Background(ui.Transparent).Label("查看 " + item.Title + " 详情")
 		body.Children(func() {
-			fontSize, logoHeight := float32(34), float32(88)
-			if height < 340 {
-				fontSize, logoHeight = 26, 56
+			fontSize, logoHeight, synopsisLines := float32(32), float32(64), 3
+			if height < 320 {
+				fontSize, logoHeight, synopsisLines = 26, 48, 2
 			}
-			if height < 240 {
-				fontSize, logoHeight = 24, 40
-			}
-			infoWidth := min(float32(760), max(float32(1), contentWidth-56))
-			ui.Column(c).Absolute().Bottom(42).Left(28).Width(infoWidth).Gap(8).Children(func() {
+			infoWidth := min(float32(760), max(float32(1), contentWidth-48))
+			ui.Column(c).Absolute().Bottom(56).Left(24).Width(infoWidth).Gap(8).Children(func() {
 				ui.Column(c).FillWidth().Height(logoHeight).Justify(ui.End).Children(func() {
 					if logo := a.imageForURL(item.Logo, 240, int(logoHeight)); logo != nil {
 						ui.Image(c, logo).Size(min(float32(240), infoWidth), logoHeight).Fit(ui.Contain)
@@ -176,31 +202,29 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 						ui.Text(c, item.Title).FillWidth().Height(fontSize + 8).FixedLineHeight(fontSize + 8).FontSize(fontSize).Bold().TextColor(ui.Hex("#ffffff")).SingleLine()
 					}
 				})
-				ui.Text(c, homeHeroMetadata(item)).FillWidth().Height(20).FixedLineHeight(20).FontSize(14).Bold().TextColor(ui.RGBA(255, 255, 255, 0.92)).SingleLine()
-				ui.Text(c, item.Overview).FillWidth().Height(66).FontSize(14).FixedLineHeight(22).TextColor(ui.RGBA(255, 255, 255, 0.86)).MaxLines(3)
+				if metadata := homeHeroMetadata(item); metadata != "" {
+					ui.Text(c, metadata).FillWidth().Height(20).FixedLineHeight(20).FontSize(14).Bold().TextColor(ui.RGBA(255, 255, 255, 0.92)).SingleLine()
+				}
+				if item.Overview != "" {
+					ui.Text(c, item.Overview).FillWidth().FontSize(14).FixedLineHeight(20).TextColor(ui.RGBA(255, 255, 255, 0.86)).MaxLines(synopsisLines)
+				}
 			})
+			ui.Text(c, "查看详情 ›").Absolute().Bottom(20).Left(24).FontSize(13).Bold().TextColor(ui.Hex("#ffffff"))
 		})
 		if body.Clicked() {
 			a.openDetail(item)
 		}
 		if len(a.home.Heroes) > 1 {
-			arrowTop := height/2 - 20
-			if height < 520 {
-				arrowTop = movieTitleBarHeight + 8
-			}
 			for _, direction := range []int{-1, 1} {
 				label, icon := "上一张海报", "back"
+				right := float32(60)
 				if direction > 0 {
 					label, icon = "下一张海报", "forward"
+					right = 16
 				}
-				button := actionButton(c.Key(fmt.Sprintf("home-hero-arrow-%d", direction)), "").Absolute().Top(arrowTop).Size(40, 40).Padding(0).Center().Radius(20).BorderWidth(0).Background(ui.RGBA(19, 22, 27, 0.45)).TextColor(ui.RGBA(255, 255, 255, 0.85)).Label(label)
+				button := actionButton(c.Key(fmt.Sprintf("home-hero-arrow-%d", direction)), "").Absolute().Bottom(12).Right(right).Size(36, 36).Padding(0).Center().Radius(8).BorderWidth(0).Background(ui.RGBA(19, 22, 27, 0.72)).TextColor(ui.RGBA(255, 255, 255, 0.85)).Label(label)
 				if button.Hovered() {
-					button.TextColor(ui.Hex("#ffffff"))
-				}
-				if direction < 0 {
-					button.Left(16)
-				} else {
-					button.Right(16)
+					button.Background(ui.RGBA(255, 255, 255, 0.18)).TextColor(ui.Hex("#ffffff"))
 				}
 				button.Children(func() {
 					if icon == "back" {
@@ -219,9 +243,13 @@ func (a *appState) homeCarouselSized(c *ui.Context, height float32) {
 				a.loadHomeHeroes(true)
 			}
 		}
-		ui.Row(c).Absolute().Bottom(18).Left(max(float32(0), (contentWidth-float32(len(a.home.Heroes)*22))/2)).Gap(6).Children(func() {
+		if len(a.home.Heroes) < 2 {
+			return
+		}
+		dotsWidth := float32(len(a.home.Heroes)*24 - 4)
+		ui.Row(c).Absolute().Bottom(20).Left((contentWidth - dotsWidth) / 2).Gap(4).Children(func() {
 			for i := range a.home.Heroes {
-				button := actionButton(c.Key(fmt.Sprintf("home-hero-dot-%d", i)), "").Size(16, 16).Padding(0).BorderWidth(0).Background(ui.Transparent).Label(fmt.Sprintf("显示第 %d 张海报", i+1))
+				button := actionButton(c.Key(fmt.Sprintf("home-hero-dot-%d", i)), "").Size(20, 20).Padding(0).BorderWidth(0).Background(ui.Transparent).Label(fmt.Sprintf("显示第 %d 张海报", i+1))
 				button.Children(func() {
 					color, w := ui.RGBA(255, 255, 255, 0.35), float32(6)
 					if i == index {
@@ -261,8 +289,13 @@ func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, wi
 	media := item.Media
 	height := width * 9 / 16
 	loading := a.playbackLoading && a.playbackLoadingID == item.RecordGUID
-	ui.Column(c.Key("home-continue:" + item.RecordGUID)).Width(width).Gap(8).Children(func() {
-		button := actionButton(c.Key("resume:"+item.RecordGUID), "").Size(width, height).Padding(0).BorderWidth(0).Radius(10).Clip().Background(c.Theme().Surface).Border(1, c.Theme().Border).Label("继续观看 " + media.Title)
+	failed := a.playbackFailedID != "" && a.playbackFailedID == item.RecordGUID
+	label := "继续观看 " + media.Title
+	if failed {
+		label = "重试播放 " + media.Title
+	}
+	ui.Column(c.Key("home-continue:" + item.RecordGUID)).Width(width).Shrink(0).Gap(8).Children(func() {
+		button := actionButton(c.Key("resume:"+item.RecordGUID), "").Size(width, height).Padding(0).BorderWidth(0).Radius(10).Clip().Background(c.Theme().Surface).Border(1, c.Theme().Border).Label(label)
 		button.Children(func() {
 			image := a.imageForURL(media.Backdrop, int(width), int(height))
 			if image == nil {
@@ -294,8 +327,15 @@ func (a *appState) homeContinueCard(c *ui.Context, item ContinueWatchingItem, wi
 					ui.Spinner(c).Size(22, 22).Label("正在准备播放，点击卡片取消")
 					c.SetTheme(theme)
 				})
-			} else if button.Hovered() {
-				ui.Box(c).Absolute().Top(height/2-20).Left(width/2-20).Size(40, 40).Center().Radius(20).Background(ui.RGBA(13, 15, 18, 0.65)).Border(1, ui.RGBA(255, 255, 255, 0.20)).Children(func() { ui.Icon(c, playerOverlayIcons["play"]).Size(20, 20).TextColor(ui.Hex("#ffffff")) })
+			} else if failed {
+				ui.Text(c, "播放失败，点击重试").Absolute().Top(12).Left(12).Padding(6, 8).
+					Radius(8).Background(ui.RGBA(13, 15, 18, 0.90)).FontSize(12).Bold().TextColor(ui.Hex("#ffffff"))
+			} else {
+				play := ui.Box(c).Absolute().Top(12).Left(12).Size(32, 32).Center().Radius(8).Background(ui.RGBA(13, 15, 18, 0.72))
+				if button.Hovered() {
+					play.Background(ui.RGBA(13, 15, 18, 0.90))
+				}
+				play.Children(func() { ui.Icon(c, playerOverlayIcons["play"]).Size(16, 16).TextColor(ui.Hex("#ffffff")) })
 			}
 		})
 		if button.Clicked() {

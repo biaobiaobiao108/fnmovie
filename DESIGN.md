@@ -80,6 +80,9 @@ Danger:                 #ff8f86
   - Sidebar width: 232 DIP
   - Title bar height: 46 DIP
   - Poster card: 150 × 225 DIP (2:3 工业标准比例)
+  - 首页轮播最高 416 DIP，底部左侧是详情入口，右侧是两枚 36 DIP 切换键。
+  - 首页续播横向卡片宽 200–272 DIP，比例 16:9，卡片间距 16 DIP。播放入口始终可见，列表溢出时在标题行提供横向浏览按钮。
+  - 播放窗口小于 896 DIP 时，进度、播放操作和其他设置分三行，播放键保持相对视频居中。
 
 ## Motion & Interaction
 

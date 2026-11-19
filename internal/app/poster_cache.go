@@ -30,6 +30,7 @@ const (
 )
 
 type posterKey struct {
+	Scope  string
 	URL    string
 	Width  int
 	Height int
@@ -70,6 +71,7 @@ type PosterLoader struct {
 	paused        bool
 	closed        bool
 	generation    uint64
+	scope         string
 }
 
 func NewPosterLoader() *PosterLoader {
@@ -95,8 +97,8 @@ func (p *PosterLoader) GetOrRequest(server *Server, remoteURL string, width, hei
 	if p == nil || server == nil || remoteURL == "" || width <= 0 || height <= 0 {
 		return nil
 	}
-	key := posterKey{URL: remoteURL, Width: width, Height: height}
 	p.mu.Lock()
+	key := posterKey{Scope: p.scope, URL: remoteURL, Width: width, Height: height}
 	if p.paused || p.closed {
 		p.mu.Unlock()
 		return nil
@@ -141,7 +143,7 @@ func (p *PosterLoader) Cached(remoteURL string, width, height int) *ui.Bitmap {
 	if p.paused {
 		return nil
 	}
-	if element := p.entries[posterKey{URL: remoteURL, Width: width, Height: height}]; element != nil {
+	if element := p.entries[posterKey{Scope: p.scope, URL: remoteURL, Width: width, Height: height}]; element != nil {
 		p.lru.MoveToFront(element)
 		return element.Value.(*posterEntry).bitmap
 	}
@@ -157,7 +159,7 @@ func (p *PosterLoader) Tint(remoteURL string, width, height int) (ui.Color, bool
 	if p.paused {
 		return ui.Color{}, false
 	}
-	if element := p.entries[posterKey{URL: remoteURL, Width: width, Height: height}]; element != nil {
+	if element := p.entries[posterKey{Scope: p.scope, URL: remoteURL, Width: width, Height: height}]; element != nil {
 		p.lru.MoveToFront(element)
 		return element.Value.(*posterEntry).tint, true
 	}
@@ -242,6 +244,25 @@ func (p *PosterLoader) CancelPending() {
 	p.cancelRequestsLocked()
 }
 
+// SetAccount isolates artwork that the server may serve differently to each
+// account under the same URL. Old requests retain their original disk scope.
+func (p *PosterLoader) SetAccount(serverURL, username string) {
+	if p == nil {
+		return
+	}
+	scope := catalogServerKey(serverURL, username)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed || p.scope == scope {
+		return
+	}
+	p.scope = scope
+	p.cancelRequestsLocked()
+	clear(p.entries)
+	p.lru.Init()
+	p.used = 0
+}
+
 func (p *PosterLoader) cancelRequestsLocked() {
 	p.generation++
 	clear(p.pending)
@@ -303,7 +324,11 @@ func (p *PosterLoader) loadPosterWithTint(request posterRequest) (*ui.Bitmap, in
 	if p.diskDir == "" {
 		return loadPosterWithTintContext(ctx, request.server, request.url, request.key.Width, request.key.Height)
 	}
-	path := posterSourcePath(p.diskDir, request.url)
+	cacheSource := request.url
+	if request.key.Scope != "" {
+		cacheSource = request.key.Scope + "\x00" + cacheSource
+	}
+	path := posterSourcePath(p.diskDir, cacheSource)
 	if info, err := os.Stat(path); err == nil && time.Since(info.ModTime()) < 30*24*time.Hour {
 		if data, err := os.ReadFile(path); err == nil {
 			if bitmap, size, tint, decodeErr := decodePosterWithTint(data, request.key.Width, request.key.Height); decodeErr == nil {
@@ -484,7 +509,7 @@ func (p *PosterLoader) Stats() (items int, bytes int64, pending int) {
 func (p *PosterLoader) HasFailed(remoteURL string, width, height int) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return time.Now().Before(p.failed[posterKey{URL: remoteURL, Width: width, Height: height}])
+	return time.Now().Before(p.failed[posterKey{Scope: p.scope, URL: remoteURL, Width: width, Height: height}])
 }
 
 func loadPoster(server *Server, remoteURL string, maxWidth, maxHeight int) (*ui.Bitmap, int64, error) {

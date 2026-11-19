@@ -21,6 +21,7 @@ const (
 	playerSeekFeedbackHeight   = 56
 	playerMenuWidth            = 300
 	playerMenuHeight           = 330
+	playerTransportWideMin     = 896
 )
 
 var playerOverlayIcons = map[string]*ui.SVG{
@@ -157,21 +158,7 @@ func (a *appState) syncPlayerOverlay() {
 		a.playerMenuWindow.Invalidate()
 	}
 	if a.player != nil {
-		width, height := a.playbackWindow().ContentBounds().Width, a.playbackWindow().ContentBounds().Height
-		vp := ui.Rect{X: 0, Y: 0, W: float32(width), H: float32(height)}
-		a.player.SetTopMarginRatio(0)
-		a.player.SetViewport(vp)
-		a.player.SetCaptionButtonCutout(false, 0)
-	}
-	if a.playerHeaderWindow != nil {
-		setPlayerWindowButtonsCutout(a.playerHeaderWindow.NativeHandle(), a.playbackWindow().NativeHandle(), false)
-		if a.playerOverlayVisible {
-			a.playerHeaderWindow.ShowInactive()
-		} else {
-			a.playerHeaderWindow.Hide()
-		}
-	}
-	if a.player != nil {
+		a.player.SetViewport(ui.Rect{W: float32(bounds.Width), H: float32(bounds.Height)})
 		video := a.player.surface
 		for _, overlayWindow := range []*mygo.Window{a.playerHeaderWindow, a.playerOverlayWindow, a.playerMenuWindow, a.playerSeekFeedbackWindow} {
 			if overlayWindow != nil {
@@ -179,14 +166,16 @@ func (a *appState) syncPlayerOverlay() {
 			}
 		}
 	}
-	var headerHandle, overlayHandle uintptr
-	if a.playerHeaderWindow != nil {
-		headerHandle = a.playerHeaderWindow.NativeHandle()
+	window := a.playbackWindow()
+	owner := window.NativeHandle()
+	shape := playerOverlayShape{
+		width: bounds.Width, height: bounds.Height, scale: windowScale(owner),
+		fullscreen: window.IsFullScreen(), maximized: window.IsMaximized(),
 	}
-	if a.playerOverlayWindow != nil {
-		overlayHandle = a.playerOverlayWindow.NativeHandle()
+	if a.playerOverlayShape != shape {
+		updatePlayerOverlayShapes(owner, a.playerHeaderWindow.NativeHandle(), a.playerOverlayWindow.NativeHandle())
+		a.playerOverlayShape = shape
 	}
-	updatePlayerOverlayShapes(a.playbackWindow().NativeHandle(), headerHandle, overlayHandle)
 }
 
 func playerSeekFeedbackBounds(bounds mygo.Rectangle) mygo.Rectangle {
@@ -447,6 +436,7 @@ func (a *appState) closePlayerOverlay() {
 	a.playerOverlayAnimationStart = time.Time{}
 	a.overlayMu.Unlock()
 	a.playerOverlayContent, a.playerHeaderContent, a.playerSeekFeedbackContent = nil, nil, nil
+	a.playerOverlayShape = playerOverlayShape{}
 	a.playerSeekFeedbackVisible = false
 	a.playerOverlayMenu = ""
 	a.seekDragging = false
@@ -620,6 +610,11 @@ func (a *appState) playerTransport(c *ui.Context) {
 	maxPosition := maxFloat(1, a.playback.Duration)
 	width, _ := c.Size()
 	gutter := float32(max(16, (int(width)-1760)/2))
+	compact := width < playerTransportWideMin
+	bottom, gap, playSize, seekSize := float32(12), float32(7), float32(48), float32(42)
+	if compact {
+		bottom, gap, playSize, seekSize = 8, 4, 36, 36
+	}
 	var cornerRadius float32
 	if a.playbackWindow() != nil && !a.playbackWindow().IsFullScreen() {
 		cornerRadius = 8
@@ -632,7 +627,7 @@ func (a *appState) playerTransport(c *ui.Context) {
 			{Color: ui.RGBA(13, 15, 18, 0.40), At: 0.68},
 			{Color: ui.RGBA(13, 15, 18, 0.78), At: 1},
 		}})
-	ui.Column(c).Label("播放控件区域").Absolute().Bottom(12).Left(gutter).Right(gutter).Gap(7).Children(func() {
+	ui.Column(c).Label("播放控件区域").Absolute().Bottom(bottom).Left(gutter).Right(gutter).Gap(gap).Children(func() {
 		// The progress line sits above the information row, as on MyGo Music's
 		// immersive player. Time labels stay at its ends while the slider fills
 		// the space between them.
@@ -642,32 +637,29 @@ func (a *appState) playerTransport(c *ui.Context) {
 			ui.Text(c, formatClock(a.playback.Duration)).Width(54).Shrink(0).TextAlign(ui.Start).FontSize(10.5).FontFeatures("tnum").TextColor(ui.RGBA(255, 255, 255, 0.54))
 		})
 
-		// Three equal columns keep the transport centered regardless of the
-		// width of the track and volume controls.
-		ui.Row(c).Label("播放控制栏").Height(48).AlignItems(ui.Center).Gap(10).Children(func() {
-			ui.Box(c).Grow(1).Basis(0).MinWidth(0)
-
-			ui.Row(c).Label("居中播放操作").Grow(1).Basis(0).Gap(10).Center().Children(func() {
-				playerOverlayIconButton(c, "seek-back-10", "快退 10 秒", 42, 24).OnClick(func() {
+		transport := func(row ui.Element) {
+			row.Label("居中播放操作").Gap(10).Center().Children(func() {
+				playerOverlayIconButton(c, "seek-back-10", "快退 10 秒", seekSize, 24).OnClick(func() {
 					a.requestPlayerSeekRelative(-10)
 					a.markPlayerOverlayActivity()
 				})
 
-				playBtn := playerOverlayButton(c, "播放或暂停", 48, ui.RGBA(255, 255, 255, 0.96))
-				playBtn.Children(func() { playerOverlayPlayPause(c, playBtn, a.playback.Paused, 26) })
+				playBtn := playerOverlayButton(c, "播放或暂停", playSize, ui.RGBA(255, 255, 255, 0.96))
+				playBtn.Children(func() { playerOverlayPlayPause(c, playBtn, a.playback.Paused, min(26, playSize-12)) })
 				playBtn.OnClick(func() {
 					a.player.TogglePause()
 					a.playback.Paused = !a.playback.Paused
 					a.markPlayerOverlayActivity()
 				})
 
-				playerOverlayIconButton(c, "seek-forward-10", "快进 10 秒", 42, 24).OnClick(func() {
+				playerOverlayIconButton(c, "seek-forward-10", "快进 10 秒", seekSize, 24).OnClick(func() {
 					a.requestPlayerSeekRelative(10)
 					a.markPlayerOverlayActivity()
 				})
 			})
-
-			ui.Row(c).Label("影片操作").Grow(1).Basis(0).Gap(3).Justify(ui.End).AlignItems(ui.Center).Children(func() {
+		}
+		options := func(row ui.Element) {
+			row.Label("影片操作").Gap(3).AlignItems(ui.Center).Children(func() {
 				volumeIcon := "volume"
 				if a.playback.Muted || a.playback.Volume <= 0 {
 					volumeIcon = "muted"
@@ -702,6 +694,17 @@ func (a *appState) playerTransport(c *ui.Context) {
 					a.markPlayerOverlayActivity()
 				})
 			})
+		}
+		if compact {
+			transport(ui.Row(c).Label("播放控制栏").FillWidth().Height(playSize))
+			options(ui.Row(c).FillWidth().Height(34).Justify(ui.Center))
+			return
+		}
+		// Equal side columns keep transport centered around the video.
+		ui.Row(c).Label("播放控制栏").Height(playSize).AlignItems(ui.Center).Gap(10).Children(func() {
+			ui.Box(c).Grow(1).Basis(0).MinWidth(0)
+			transport(ui.Row(c).Grow(1).Basis(0))
+			options(ui.Row(c).Grow(1).Basis(0).Justify(ui.End))
 		})
 	})
 }
@@ -895,7 +898,7 @@ func playerOverlayIconButton(c *ui.Context, name, label string, size, iconSize f
 
 func playerOverlayButton(c *ui.Context, label string, size float32, color ui.Color) ui.Element {
 	b := ui.ButtonBase(c.Key("player-control-"+label)).Size(size, size).Center().Radius(size / 2).
-		Label(label).TextColor(color).FocusRing(false)
+		Label(label).TextColor(color)
 	background := ui.Transparent
 	if b.Pressed() {
 		background = ui.RGBA(255, 255, 255, 0.20)

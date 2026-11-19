@@ -251,13 +251,7 @@ func (s *Server) Library(query string) ([]MediaItem, error) {
 
 func (s *Server) LibraryItems(libraryID, query string) ([]MediaItem, error) {
 	if strings.TrimSpace(query) != "" {
-		var response any
-		route := searchRoute(libraryID, query)
-		if err := s.request("GET", "v1", route, nil, &response, s.tokenValue()); err != nil {
-			return nil, err
-		}
-		items := normalizeItems(unwrapData(response))
-		return filterSearchLibraryItems(items, libraryID)
+		return s.searchItemsContext(context.Background(), libraryID, query)
 	}
 	const pageSize = 500
 	items := make([]MediaItem, 0, pageSize)
@@ -293,14 +287,22 @@ func (s *Server) LibraryPageContext(ctx context.Context, libraryID, query string
 	return s.MediaPageContext(ctx, libraryID, "", query, page, pageSize)
 }
 
-// GlobalSearchPageContext searches every accessible library and resource type,
-// independently of the currently selected category, library, or favorite scope.
-func (s *Server) GlobalSearchPageContext(ctx context.Context, query string, page, pageSize int) ([]MediaItem, int, error) {
+// GlobalSearchContext returns the server's full search response once. The
+// virtualized results grid only constructs the visible cards.
+func (s *Server) GlobalSearchContext(ctx context.Context, query string) ([]MediaItem, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return nil, 0, errors.New("搜索关键词不能为空")
+		return nil, errors.New("搜索关键词不能为空")
 	}
-	return s.MediaPageContext(ctx, "", "", query, page, pageSize)
+	return s.searchItemsContext(ctx, "", query)
+}
+
+func (s *Server) searchItemsContext(ctx context.Context, libraryID, query string) ([]MediaItem, error) {
+	var response any
+	if err := s.requestContext(ctx, "GET", "v1", searchRoute(libraryID, query), nil, &response, s.tokenValue()); err != nil {
+		return nil, err
+	}
+	return filterSearchLibraryItems(normalizeItems(unwrapData(response)), libraryID)
 }
 
 // MediaPageContext reads a page from either a personal media library or one
@@ -315,12 +317,7 @@ func (s *Server) MediaPageContext(ctx context.Context, libraryID, mediaType, que
 		pageSize = 100
 	}
 	if strings.TrimSpace(query) != "" {
-		var response any
-		route := searchRoute(libraryID, query)
-		if err := s.requestContext(ctx, "GET", "v1", route, nil, &response, s.tokenValue()); err != nil {
-			return nil, 0, err
-		}
-		items, err := filterSearchLibraryItems(normalizeItems(unwrapData(response)), libraryID)
+		items, err := s.searchItemsContext(ctx, libraryID, query)
 		if err != nil {
 			return nil, 0, err
 		}

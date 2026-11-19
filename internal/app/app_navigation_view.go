@@ -81,6 +81,9 @@ func (a *appState) sidebar(c *ui.Context) {
 			bindSoftScrollEdges(list, &a.sidebarScroll, background)
 		}
 		if a.loggedIn {
+			if a.logoutErr != "" {
+				ui.Text(c, a.logoutErr).PaddingX(10).FontSize(12).TextColor(t.Danger).MaxLines(3)
+			}
 			exitBtn := actionButton(c, "").Height(36).Justify(ui.Start).Padding(9, 12).Gap(10).Radius(8).BorderWidth(0).
 				Background(ui.Color{}).TextColor(t.TextMuted).Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 			if exitBtn.Hovered() {
@@ -202,47 +205,39 @@ func (a *appState) navButton(c *ui.Context, icon *ui.SVG, label, key string) {
 	}
 }
 
-func (a *appState) connectionView(c *ui.Context) {
-	t := c.Theme()
-	ui.Column(c).Grow(1).Fill().Center().Children(func() {
-		ui.Column(c).Width(440).Padding(34).Gap(16).Radius(16).Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Text(c, "连接哞哩影院").FontSize(22).Bold()
-			ui.Text(c, "输入飞牛影视服务器地址和账户信息，在哞哩影院浏览与播放你的媒体。").FontSize(12).TextColor(t.TextMuted)
-			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
-			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
-			if ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted() {
-				a.login()
-			}
-			if a.status != "" {
-				ui.Text(c, a.status).FontSize(11).TextColor(t.TextMuted)
-			}
-			if primaryActionButton(c, "连接并登录").Disabled(a.busy).Clicked() {
-				a.login()
-			}
-		})
-	})
-}
-
 func (a *appState) loginModal(c *ui.Context) {
 	ui.Modal(c, &a.loginOpen, func() {
 		t := c.Theme()
-		ui.Column(c).Width(430).Padding(28, 30).Gap(15).Radius(16).Background(t.Surface).Border(1, t.Border).Children(func() {
-			ui.Text(c, "连接哞哩影院").FontSize(22).Bold()
-			ui.Text(c, "使用飞牛影视账户登录，在哞哩影院浏览媒体库并播放影片。").FontSize(12).TextColor(t.TextMuted)
-			ui.TextInput(c, &a.serverAddress).Placeholder("http://nas.example:5666/v").Label("服务器地址")
-			ui.TextInput(c, &a.username).Placeholder("飞牛影视用户名").Label("用户名")
-			if ui.TextInput(c, &a.password).Password().Placeholder("密码").Label("密码").Submitted() {
-				a.login()
-			}
+		ui.Column(c).Width(384).Padding(4).Gap(16).Children(func() {
+			ui.Text(c, "登录飞牛影视").FontSize(20).Bold()
+			ui.Column(c).Gap(4).Children(func() {
+				ui.Text(c, "服务器地址").FontSize(13)
+				ui.TextInput(c.Key("login-address"), &a.serverAddress).FillWidth().Placeholder("http://nas.example:5666/v").Label("服务器地址")
+				ui.Text(c, "外网连接请使用 HTTPS").FontSize(12).TextColor(t.TextMuted)
+			})
+			ui.Column(c).Gap(4).Children(func() {
+				ui.Text(c, "用户名").FontSize(13)
+				ui.TextInput(c.Key("login-username"), &a.username).FillWidth().Label("用户名")
+			})
+			ui.Column(c).Gap(4).Children(func() {
+				ui.Text(c, "密码").FontSize(13)
+				if ui.TextInput(c.Key("login-password"), &a.password).FillWidth().Password().Label("密码").Submitted() {
+					a.login()
+				}
+			})
 			if a.status != "" && !a.loggedIn {
 				color := t.TextMuted
 				if strings.Contains(a.status, "失败") || strings.Contains(a.status, "无法") {
 					color = t.Danger
 				}
-				ui.Text(c, a.status).FontSize(11).TextColor(color).MaxLines(3)
+				ui.Text(c, a.status).FontSize(12).TextColor(color).MaxLines(3)
 			}
 			ui.Row(c).Gap(10).Children(func() {
-				if primaryActionButton(c, "连接并登录").Disabled(a.busy).Clicked() {
+				label := "连接并登录"
+				if a.busy {
+					label = "正在连接…"
+				}
+				if primaryActionButton(c.Key("login-submit"), label).Disabled(a.busy).Clicked() {
 					a.login()
 				}
 				if a.loggedIn && actionButton(c, "取消").Clicked() {
@@ -278,38 +273,39 @@ func (a *appState) libraryViewContent(c *ui.Context) {
 		a.grid = ui.GridState{}
 	}
 	state := a.catalogs[a.currentCatalogKey()]
+	searching := strings.TrimSpace(a.query) != ""
 	if len(items) == 0 {
 		if catalogNeedsMoreVisibleItems(len(items), state) {
 			a.loadNextCatalogPage(false)
 		}
 		ui.Column(c).Fill().Padding(movieTitleBarHeight, 0, 0, 0).Children(func() {
 			a.libraryHeading(c)
-			ui.Column(c).Grow(1).Center().Gap(10).Children(func() {
-				ui.Text(c, "⌕").FontSize(34).TextColor(t.TextMuted)
-				if a.searchPending && strings.TrimSpace(a.query) != "" {
-					ui.Text(c, "正在搜索…").FontSize(13).TextColor(t.TextMuted)
-				} else if state != nil && state.Loading && len(state.Items) > 0 {
-					ui.Text(c, "正在加载媒体…").FontSize(13).TextColor(t.TextMuted)
-				} else if a.status != "" {
-					ui.Text(c, a.status).FontSize(13).TextColor(t.TextMuted)
-				} else if state != nil && state.Loading {
-					ui.Text(c, "正在读取影视库…").FontSize(13).TextColor(t.TextMuted)
-				} else if state != nil && state.Err != "" {
-					ui.Text(c, state.Err).FontSize(13).TextColor(t.Danger).MaxLines(3)
-				} else {
-					label := "这里还没有内容"
-					if strings.TrimSpace(a.query) != "" {
-						label = "没有找到相关内容"
+			ui.Column(c).Grow(1).Center().Gap(12).PaddingX(24).Children(func() {
+				switch {
+				case a.searchPending && searching || state != nil && state.Loading:
+					label := "正在读取影视库…"
+					if searching {
+						label = "正在搜索…"
+					}
+					ui.Spinner(c).Size(20, 20)
+					ui.Text(c, label).FontSize(14).TextColor(t.TextMuted)
+				case state != nil && state.Err != "":
+					ui.Text(c, state.Err).FontSize(14).TextColor(t.Danger).TextAlign(ui.Center).MaxLines(3)
+					if actionButton(c.Key("retry-catalog"), "重试").Clicked() {
+						a.loadNextCatalogPage(true)
+					}
+				case searching:
+					ui.Text(c, "没有找到相关内容").FontSize(14).TextColor(t.TextMuted)
+				default:
+					label := a.status
+					if label == "" {
+						label = "这里还没有内容"
 					}
 					ui.Text(c, label).FontSize(14).TextColor(t.TextMuted)
-				}
-				if actionButton(c, "重新加载").Clicked() {
-					if state != nil && state.Err != "" {
-						a.loadNextCatalogPage(true)
-					} else if state != nil {
-						state.Refreshed = false
-						a.loadLibrary()
-					} else {
+					if a.loggedIn && actionButton(c.Key("reload-catalog"), "重新加载").Clicked() {
+						if state != nil {
+							state.Refreshed = false
+						}
 						a.loadLibrary()
 					}
 				}
@@ -407,10 +403,11 @@ func (a *appState) libraryHeading(c *ui.Context) {
 	}
 	ui.Row(c).Height(38).FillWidth().Gap(10).AlignItems(ui.Center).Children(func() {
 		ui.Text(c, label).FontSize(26).Bold().Grow(1)
-		if a.loggedIn && (a.busy || a.libraryLoading || a.currentCatalogLoading()) {
+		hasItems := len(a.visibleItems()) > 0
+		if hasItems && a.loggedIn && (a.busy || a.libraryLoading || a.currentCatalogLoading()) {
 			ui.Spinner(c).Size(16, 16)
 		}
-		if state := a.catalogs[a.currentCatalogKey()]; state != nil && state.Err != "" && len(state.Items) > 0 {
+		if state := a.catalogs[a.currentCatalogKey()]; state != nil && state.Err != "" && hasItems {
 			if actionButton(c, "重试").Padding(5, 9).Clicked() {
 				a.loadNextCatalogPage(true)
 			}

@@ -86,7 +86,8 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 		var refreshedCredential *Credential
 		requestPage := func() ([]MediaItem, int, error) {
 			if query != "" {
-				return server.GlobalSearchPageContext(ctx, query, page, catalogPageSize)
+				items, err := server.GlobalSearchContext(ctx, query)
+				return items, len(items), err
 			}
 			return server.MediaPageContext(ctx, libraryID, mediaType, "", page, catalogPageSize)
 		}
@@ -143,7 +144,7 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 			a.mediaView.Invalidate()
 			state.Total = total
 			state.NextPage = page + 1
-			state.Exhausted = catalogPageExhausted(len(items), len(state.Items), total, catalogPageSize)
+			state.Exhausted = query != "" || catalogPageExhausted(len(items), len(state.Items), total, catalogPageSize)
 			state.PageAutoRequested = false
 			state.UpdatedAt = time.Now()
 			state.Refreshed = true
@@ -154,7 +155,7 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 			}
 			if key == a.currentCatalogKey() {
 				a.items = state.Items
-				if len(state.Items) == 0 {
+				if len(state.Items) == 0 && query == "" {
 					a.status = "服务器已连接，但没有找到可显示的媒体"
 				} else {
 					a.status = ""
@@ -167,10 +168,14 @@ func (a *appState) fetchCatalogPage(ctx context.Context, key string, server *Ser
 func (a *appState) loadNextCatalogPage(retry bool) {
 	key := a.currentCatalogKey()
 	state := a.catalogs[key]
-	if a.server == nil || state == nil || state.Loading || state.Exhausted {
+	if a.server == nil || state == nil || state.Loading {
 		return
 	}
-	if state.Err != "" && !retry {
+	if retry && state.Err != "" && state.NextPage == 1 {
+		a.loadLibrary()
+		return
+	}
+	if state.Exhausted || state.Err != "" && !retry {
 		return
 	}
 	ctx, cancel := context.WithCancel(context.Background())

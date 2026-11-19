@@ -37,7 +37,7 @@ func TestPlayerMenusKeepUniformBoundsAndTruncateLongTrackNames(t *testing.T) {
 }
 
 func TestPlayerTransportRemainsCentered(t *testing.T) {
-	for _, width := range []int{960, 1280, 1920} {
+	for _, width := range []int{playerTransportWideMin, 960, 1280, 1920} {
 		for _, speed := range []float64{0.25, 1, 4} {
 			t.Run(fmt.Sprintf("width_%d_speed_%g", width, speed), func(t *testing.T) {
 				a := &appState{player: NewPlayer(), playback: PlaybackState{Duration: 7200, Volume: 80, Speed: speed}}
@@ -92,6 +92,31 @@ func TestPlayerTransportRemainsCentered(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestCompactPlayerFitsAllControls(t *testing.T) {
+	for _, width := range []int{playerWindowMinWidth, 500, playerTransportWideMin - 1} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			a := &appState{player: NewPlayer(), playback: PlaybackState{Duration: 7200, Volume: 80, Speed: 0.25}}
+			tester := ui.NewTester(a.playerTransport, width, playerOverlayControlHeight)
+			play, found := tester.Find("播放或暂停")
+			if !found || math.Abs(float64(play.X+play.W/2)-float64(width)/2) > 0.5 {
+				t.Fatalf("play is not centered: %+v", play)
+			}
+			options, found := tester.Find("影片操作")
+			if !found || options.Y <= play.Y+play.H || options.Y+options.H > playerOverlayControlHeight {
+				t.Fatalf("movie options overlap transport or the viewport edge: play=%+v options=%+v", play, options)
+			}
+			right := float32(0)
+			for _, label := range []string{"静音", "音量", "播放速度", "字幕", "音轨", "切换全屏"} {
+				control, found := tester.Find(label)
+				if !found || control.X < right || control.X+control.W > float32(width) {
+					t.Fatalf("%s overlaps another control or falls outside the viewport: %+v", label, control)
+				}
+				right = control.X + control.W
+			}
+		})
 	}
 }
 

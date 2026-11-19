@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-func TestGlobalSearchPageContextKeepsAllResourceTypesAndServerOrder(t *testing.T) {
+func TestGlobalSearchContextKeepsAllResourceTypesAndServerOrder(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/search/list" {
 			t.Errorf("unexpected search request: %s %s", r.Method, r.URL)
@@ -25,33 +25,20 @@ func TestGlobalSearchPageContextKeepsAllResourceTypesAndServerOrder(t *testing.T
 	}))
 	defer server.Close()
 	client := NewServer(server.URL, "synthetic-token")
-	for _, tc := range []struct {
-		page int
-		ids  []string
-	}{
-		{1, []string{"film", "series"}},
-		{2, []string{"actor", "episode"}},
-		{3, []string{}},
-	} {
-		items, total, err := client.GlobalSearchPageContext(t.Context(), "  keyword  ", tc.page, 2)
-		if err != nil || total != 4 {
-			t.Fatalf("page %d: total=%d err=%v", tc.page, total, err)
-		}
-		ids := make([]string, 0, len(items))
-		for _, item := range items {
-			ids = append(ids, item.ID)
-		}
-		if !reflect.DeepEqual(ids, tc.ids) {
-			t.Errorf("page %d IDs=%v, want %v", tc.page, ids, tc.ids)
-		}
-	}
-	items, _, err := client.GlobalSearchPageContext(t.Context(), "keyword", 0, 0)
+	items, err := client.GlobalSearchContext(t.Context(), "  keyword  ")
 	if err != nil || len(items) != 4 || items[0].Favorite || items[2].Kind != "person" || items[3].Kind != "episode" {
 		t.Fatalf("global search changed resource or favorite semantics: items=%v err=%v", items, err)
 	}
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		ids = append(ids, item.ID)
+	}
+	if want := []string{"film", "series", "actor", "episode"}; !reflect.DeepEqual(ids, want) {
+		t.Errorf("search IDs=%v, want %v", ids, want)
+	}
 }
 
-func TestGlobalSearchPageContextRejectsBlankQueryWithoutRequest(t *testing.T) {
+func TestGlobalSearchContextRejectsBlankQueryWithoutRequest(t *testing.T) {
 	var requests atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests.Add(1)
@@ -60,7 +47,7 @@ func TestGlobalSearchPageContextRejectsBlankQueryWithoutRequest(t *testing.T) {
 	defer server.Close()
 	client := NewServer(server.URL, "synthetic-token")
 	for _, query := range []string{"", " \t\n "} {
-		if _, _, err := client.GlobalSearchPageContext(t.Context(), query, 1, 100); err == nil {
+		if _, err := client.GlobalSearchContext(t.Context(), query); err == nil {
 			t.Fatal("empty query must not enumerate the full catalog")
 		}
 	}
@@ -69,14 +56,14 @@ func TestGlobalSearchPageContextRejectsBlankQueryWithoutRequest(t *testing.T) {
 	}
 }
 
-func TestGlobalSearchPageContextAuthenticationAndCancellation(t *testing.T) {
+func TestGlobalSearchContextAuthenticationAndCancellation(t *testing.T) {
 	t.Run("unauthorized", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusUnauthorized)
 			writeJSON(t, w, `{"code":401,"msg":"authentication required"}`)
 		}))
 		defer server.Close()
-		if _, _, err := NewServer(server.URL, "synthetic-token").GlobalSearchPageContext(t.Context(), "keyword", 1, 100); err == nil {
+		if _, err := NewServer(server.URL, "synthetic-token").GlobalSearchContext(t.Context(), "keyword"); err == nil {
 			t.Fatal("authentication failure should be returned")
 		}
 	})
@@ -91,7 +78,7 @@ func TestGlobalSearchPageContextAuthenticationAndCancellation(t *testing.T) {
 		defer cancel()
 		result := make(chan error, 1)
 		go func() {
-			_, _, err := NewServer(server.URL, "synthetic-token").GlobalSearchPageContext(ctx, "keyword", 1, 100)
+			_, err := NewServer(server.URL, "synthetic-token").GlobalSearchContext(ctx, "keyword")
 			result <- err
 		}()
 		<-started

@@ -190,8 +190,16 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 					return
 				}
 				episode := episodes[i-3]
+				loading := a.playbackLoading && a.playbackLoadingID == episode.ID
+				failed := a.playbackFailedID != "" && a.playbackFailedID == episode.ID
+				label := "播放 " + episode.Title
+				if loading {
+					label = "取消准备播放 " + episode.Title
+				} else if failed {
+					label = "重试播放 " + episode.Title
+				}
 				row := actionButton(c.Key(episode.ID), "").FillWidth().Padding(12, 10).Gap(14).AlignItems(ui.Center).
-					BorderWidth(0).Radius(12).Background(ui.Transparent).TextColor(t.Text).Label("播放 " + episode.Title).Disabled(a.playbackLoading).
+					BorderWidth(0).Radius(12).Background(ui.Transparent).TextColor(t.Text).Label(label).Disabled(a.playbackLoading && !loading).
 					Transition(ui.ElementTransition{Colors: true, Duration: 120 * time.Millisecond})
 				if row.Hovered() {
 					row.Background(t.SurfaceHover)
@@ -208,14 +216,20 @@ func (a *appState) seriesDetailView(c *ui.Context, item MediaItem) {
 							ui.Text(c, overview).FontSize(12).TextColor(t.TextMuted).MaxLines(1)
 						}
 					})
-					if a.playbackLoading && a.playbackLoadingID == episode.ID {
+					if loading {
 						ui.Spinner(c).FontSize(13)
+					} else if failed {
+						ui.Text(c, "播放失败，点击重试").FontSize(12).TextColor(t.Danger)
 					} else {
 						ui.Icon(c, playerOverlayIcons["play"]).Size(18, 18).TextColor(t.Accent)
 					}
 				})
 				if row.Clicked() {
-					a.startPlayback(episode)
+					if loading {
+						a.cancelPlaybackLoading()
+					} else {
+						a.startPlayback(episode)
+					}
 				}
 			}
 		}).Grow(1).MinWidth(0).AlignSelf(ui.Stretch).FillHeight().Gap(6).Padding(10, 6, 34, 6)
@@ -263,8 +277,13 @@ func (a *appState) detailPosterActions(c *ui.Context, item MediaItem) {
 				if button.Clicked() {
 					a.cancelPlaybackLoading()
 				}
-			} else if detailPlayButton(c, label).Disabled(!available).Clicked() {
-				a.startPlayback(playItem)
+			} else {
+				if a.playbackFailedID != "" && a.playbackFailedID == playItem.ID {
+					label = "播放失败 · 重试"
+				}
+				if detailPlayButton(c, label).Disabled(!available).Clicked() {
+					a.startPlayback(playItem)
+				}
 			}
 			a.favoriteButton(c, item)
 		})
@@ -343,7 +362,7 @@ func (a *appState) detailSynopsisDialog(c *ui.Context) {
 	item := *a.selected
 	width, height := c.Size()
 	ui.Modal(c, &a.detailSynopsisOpen, func() {
-		ui.Column(c).Width(min(float32(760), width-64)).Padding(24).Gap(16).Radius(12).Background(c.Theme().Surface).Border(1, c.Theme().Border).Children(func() {
+		ui.Column(c).Width(min(float32(760), width-64)).Padding(4).Gap(16).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(12).Children(func() {
 				ui.Text(c, item.Title).Grow(1).FontSize(20).Bold().SingleLine()
 				if actionButton(c, "收起简介").FontSize(12).Clicked() {

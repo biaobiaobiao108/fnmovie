@@ -66,7 +66,6 @@ func runNativePlaybackOverlayComposition() error {
 			time.Sleep(800 * time.Millisecond)
 			a.window.Update(func() {
 				bounds := a.playbackWindow().ContentBounds()
-				scale := windowScale(a.playbackWindow().NativeHandle())
 				if png, err := a.window.CapturePage(); err == nil {
 					_ = os.MkdirAll("../../out/overlay-check", 0755)
 					_ = os.WriteFile("../../out/overlay-check/main.png", png, 0600)
@@ -80,27 +79,25 @@ func runNativePlaybackOverlayComposition() error {
 				dc, _, _ := getDC.Call(0)
 				defer release.Call(0, dc)
 				checks := []struct {
-					x, y   int
-					header bool
-					clear  bool
+					x, y int
+					fade bool
 				}{
-					{10, 10, false, true}, {bounds.Width - 10, 20, false, true}, {10, bounds.Height - playerOverlayControlHeight - 10, false, true},
-					{bounds.Width - 10, bounds.Height - 45, false, false},
+					{10, 10, true},
+					{10, playerOverlayHeaderHeight + 10, false},
+					{bounds.Width - 10, playerOverlayHeaderHeight + 20, false},
+					{10, bounds.Height - playerOverlayControlHeight - 10, false},
+					{bounds.Width - 10, bounds.Height - 30, true},
 				}
 				var err error
 				for _, check := range checks {
-					color, _, _ := getPixel.Call(dc, uintptr(float64(bounds.X+check.x)*scale), uintptr(float64(bounds.Y+check.y)*scale))
+					color := nativePlayerPixel(getPixel, dc, a.playbackWindow(), check.x, check.y)
 					r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
-					if check.header && (absInt(r-int(movieColors.sidebar.R)) > 3 || absInt(g-int(movieColors.sidebar.G)) > 3 || absInt(b-int(movieColors.sidebar.B)) > 3) {
-						err = fmt.Errorf("player titlebar RGB(%d,%d,%d), want the matched titlebar surface", r, g, b)
-						break
-					}
-					if check.clear && (absInt(r-24) > 3 || absInt(g-164) > 3 || absInt(b-98) > 3) {
+					if !check.fade && (absInt(r-24) > 3 || absInt(g-164) > 3 || absInt(b-98) > 3) {
 						err = fmt.Errorf("transparent margin (%d,%d) = RGB(%d,%d,%d), want video background", check.x, check.y, r, g, b)
 						break
 					}
-					if !check.header && !check.clear && (g < 45 || g > 130) {
-						err = fmt.Errorf("control fade green=%d, want translucent blend rather than opaque black", g)
+					if check.fade && (g < 35 || g > 130) {
+						err = fmt.Errorf("overlay fade (%d,%d) = RGB(%d,%d,%d), want translucent blend", check.x, check.y, r, g, b)
 						break
 					}
 				}
@@ -119,6 +116,9 @@ func runNativePlaybackOverlayComposition() error {
 							mygo.App.Quit()
 							return
 						}
+						// The production library window is not topmost. Keeping
+						// the color fixture topmost would cover the new player.
+						a.window.SetAlwaysOnTop(false)
 						go checkNativePlaybackSessions(a, result)
 					})
 				}()
@@ -129,6 +129,26 @@ func runNativePlaybackOverlayComposition() error {
 		return err
 	}
 	return <-result
+}
+
+// Convert the client-relative DIP offset to pixels before Win32 maps it to
+// the desktop. Multiplying a desktop DIP coordinate by one monitor's scale
+// gives the wrong origin on mixed-DPI layouts.
+func nativePlayerPixel(getPixel *syscall.LazyProc, dc uintptr, window *mygo.Window, x, y int) uintptr {
+	point, ok := nativePlayerSamplePoint(window, x, y)
+	if !ok {
+		return 0xffffffff
+	}
+	color, _, _ := getPixel.Call(dc, uintptr(point.x), uintptr(point.y))
+	return color
+}
+
+func nativePlayerSamplePoint(window *mygo.Window, x, y int) (playerPoint, bool) {
+	hwnd := window.NativeHandle()
+	scale := windowScale(hwnd)
+	point := playerPoint{x: int32(float64(x) * scale), y: int32(float64(y) * scale)}
+	ok, _, _ := procClientToScreen.Call(hwnd, uintptr(unsafe.Pointer(&point)))
+	return point, ok != 0
 }
 
 // Scan the actual desktop while repeatedly opening fresh native menu surfaces.
@@ -182,11 +202,10 @@ func checkNativePlayerMenus(a *appState) error {
 					return
 				}
 				bounds := a.playbackWindow().ContentBounds()
-				scale := windowScale(a.playbackWindow().NativeHandle())
 				dc, _, _ := getDC.Call(0)
 				defer release.Call(0, dc)
 				for y := playerOverlayHeaderHeight + 20; y < bounds.Height-playerOverlayControlHeight; y += 20 {
-					color, _, _ := getPixel.Call(dc, uintptr(float64(bounds.X+bounds.Width/2)*scale), uintptr(float64(bounds.Y+y)*scale))
+					color := nativePlayerPixel(getPixel, dc, a.playbackWindow(), bounds.Width/2, y)
 					r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
 					if absInt(r-24) > 3 || absInt(g-164) > 3 || absInt(b-98) > 3 {
 						err = fmt.Errorf("%s menu frame %d left a ghost at center y=%d: RGB(%d,%d,%d), main=%+v menu=%+v controls=%+v", option, frame, y, r, g, b, bounds, a.playerMenuWindow.ContentBounds(), a.playerOverlayWindow.ContentBounds())
@@ -412,10 +431,9 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 			return
 		}
 		bounds := a.playbackWindow().ContentBounds()
-		scale := windowScale(a.playbackWindow().NativeHandle())
 		user := syscall.NewLazyDLL("user32.dll")
 		dc, _, _ := user.NewProc("GetDC").Call(0)
-		color, _, _ := syscall.NewLazyDLL("gdi32.dll").NewProc("GetPixel").Call(dc, uintptr(float64(bounds.X+bounds.Width/2)*scale), uintptr(float64(bounds.Y+bounds.Height/2)*scale))
+		color := nativePlayerPixel(syscall.NewLazyDLL("gdi32.dll").NewProc("GetPixel"), dc, a.playbackWindow(), bounds.Width/2, bounds.Height/2)
 		user.NewProc("ReleaseDC").Call(0, dc)
 		r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
 		if r > 60 || g < 55 || g > 110 || b < 125 || b > 200 {
@@ -593,6 +611,38 @@ func checkNativePlayerWindowLifecycle(a *appState, onUI func(func())) error {
 		return zErr
 	}
 
+	var wideBounds mygo.Rectangle
+	onUI(func() {
+		window := a.playbackWindow()
+		wideBounds = window.ContentBounds()
+		compactBounds := wideBounds
+		compactBounds.Width, compactBounds.Height = 480, 360
+		window.SetContentBounds(compactBounds)
+		a.showPlayerOverlay()
+	})
+	if err := waitForBounds(); err != nil {
+		return err
+	}
+	time.Sleep(250 * time.Millisecond)
+	var captureErr error
+	onUI(func() {
+		controls := a.playerOverlayWindow
+		if bounds := controls.ContentBounds(); bounds.Width != 480 || bounds.Height != playerOverlayControlHeight {
+			captureErr = fmt.Errorf("compact controls have incorrect native bounds: %+v", bounds)
+		} else if data, err := controls.CapturePage(); err != nil {
+			captureErr = err
+		} else {
+			captureErr = os.WriteFile("out/overlay-check/controls-480.png", data, 0600)
+		}
+		a.playbackWindow().SetContentBounds(wideBounds)
+	})
+	if captureErr != nil {
+		return captureErr
+	}
+	if err := waitForBounds(); err != nil {
+		return err
+	}
+
 	// Owned surfaces hide with a minimized owner and are shown again on restore.
 	var minimizedVisible, shownWhileMinimized uintptr
 	onUI(func() {
@@ -625,14 +675,17 @@ func checkNativeVideoFrames(a *appState, onUI func(func()), duration time.Durati
 		var frameErr error
 		onUI(func() {
 			bounds := a.playbackWindow().ContentBounds()
-			scale := windowScale(a.playbackWindow().NativeHandle())
 			dc, _, _ := getDC.Call(0)
 			defer releaseDC.Call(0, dc)
 			for _, offset := range []int{-40, 0, 40} {
-				color, _, _ := getPixel.Call(dc, uintptr(float64(bounds.X+bounds.Width/2)*scale), uintptr(float64(bounds.Y+bounds.Height/2+offset)*scale))
+				color := nativePlayerPixel(getPixel, dc, a.playbackWindow(), bounds.Width/2, bounds.Height/2+offset)
 				r, g, b := int(color&255), int((color>>8)&255), int((color>>16)&255)
 				if absInt(r-24) > 12 || absInt(g-80) > 12 || absInt(b-164) > 12 {
-					frameErr = fmt.Errorf("video frame %d flashed at offset %d: RGB(%d,%d,%d)", frame, offset, r, g, b)
+					point, _ := nativePlayerSamplePoint(a.playbackWindow(), bounds.Width/2, bounds.Height/2+offset)
+					hit, _, _ := user.NewProc("WindowFromPoint").Call(uintptr(uint32(point.x)) | uintptr(uint32(point.y))<<32)
+					foreground, _, _ := procGetForegroundWindow.Call()
+					frameErr = fmt.Errorf("video frame %d flashed at offset %d: RGB(%d,%d,%d), pixel window=%x foreground=%x player=%x video=%x",
+						frame, offset, r, g, b, hit, foreground, a.playbackWindow().NativeHandle(), a.player.surface)
 					return
 				}
 			}

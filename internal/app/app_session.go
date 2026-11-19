@@ -7,9 +7,17 @@ import (
 )
 
 func (a *appState) logout() {
+	if err := DeleteCredential(a.settings.ServerURL); err != nil {
+		a.logoutErr = "无法移除此设备上的登录凭据，请重试"
+		if a.window != nil {
+			a.window.Invalidate()
+		}
+		return
+	}
+	a.logoutErr = ""
+	a.playbackFailedID = ""
 	a.resetHome()
 	a.posters.CancelPending()
-	serverURL := a.settings.ServerURL
 	if a.loginCancel != nil {
 		a.loginCancel()
 		a.loginCancel = nil
@@ -43,8 +51,6 @@ func (a *appState) logout() {
 	a.seriesEpisodeRequest++
 	a.section = "home"
 	a.status = "已退出登录"
-	_ = DeleteCredential(serverURL)
-	_ = SaveSettings(a.settings)
 	if a.window != nil {
 		a.window.Invalidate()
 	}
@@ -112,9 +118,14 @@ func (a *appState) login() {
 				a.loginOpen = true
 				return
 			}
+			if a.playback.Active || a.playbackLoading {
+				a.stopPlayback()
+			}
+			a.playbackFailedID = ""
 			a.server = server
 			a.resetHome()
 			a.posters.CancelPending()
+			a.posters.SetAccount(settings.ServerURL, settings.Username)
 			a.settings = settings
 			if a.libraryCancel != nil {
 				a.libraryCancel()

@@ -161,6 +161,46 @@ func TestHomeContinueGridScrollsBehindTitleBar(t *testing.T) {
 	}
 }
 
+func TestHomeContinueRowCanScrollUsingVisibleControls(t *testing.T) {
+	a := &appState{section: "home", catalogs: map[string]*CatalogState{}}
+	for i := range 8 {
+		a.home.Continue = append(a.home.Continue, ContinueWatchingItem{
+			RecordGUID: fmt.Sprint(i), Media: MediaItem{Title: fmt.Sprintf("续播影片 %d", i)},
+		})
+	}
+	tester := ui.NewTester(a.view, 960, 640)
+	tester.SetPreferences(ui.Preferences{ReduceMotion: true})
+	tester.Frame()
+	tester.Frame()
+	if err := tester.Click("向右浏览继续观看"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if a.home.RowScroll.X <= 0 {
+		t.Fatal("next button did not scroll the record row")
+	}
+	if err := tester.Click("向左浏览继续观看"); err != nil {
+		t.Fatal(err)
+	}
+	tester.Frame()
+	if a.home.RowScroll.X > 0.5 {
+		t.Fatalf("previous button did not return to the first record: offset=%v", a.home.RowScroll.X)
+	}
+}
+
+func TestHomeContinueCardOffersRetryAfterPlaybackFails(t *testing.T) {
+	const id = "failed-record"
+	a := &appState{}
+	a.playbackLoading, a.playbackLoadingID = true, id
+	a.failPlaybackAttempt()
+	tester := ui.NewTester(func(c *ui.Context) {
+		a.homeContinueCard(c, ContinueWatchingItem{RecordGUID: id, Media: MediaItem{Title: "测试影片"}}, 240)
+	}, 240, 190)
+	if _, found := tester.Find("重试播放 测试影片"); !found || !tester.HasText("播放失败，点击重试") {
+		t.Fatal("failed record does not expose a visible and accessible retry action")
+	}
+}
+
 func TestHomeShowsContinueEmptyStates(t *testing.T) {
 	tests := []struct {
 		name       string

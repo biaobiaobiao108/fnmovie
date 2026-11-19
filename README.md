@@ -52,7 +52,7 @@
 
 ## 开发
 
-需要 Go 1.27.1 或更新版本。克隆仓库后先安装 Git LFS 并运行 `git lfs pull`，再执行：
+需要 Go 1.27.3 或更新版本。克隆仓库后先安装 Git LFS 并运行 `git lfs pull`，再执行：
 
 ```powershell
 go test ./...

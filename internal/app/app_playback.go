@@ -19,6 +19,7 @@ func (a *appState) startPlayback(item MediaItem) {
 	a.playbackLoading = true
 	a.playbackLoadingID = item.ID
 	a.playbackLoadingTitle = item.Title
+	a.playbackFailedID = ""
 	if a.window != nil {
 		a.window.Invalidate()
 	}
@@ -45,7 +46,7 @@ func (a *appState) startPlayback(item MediaItem) {
 				if ctx.Err() != nil {
 					return
 				}
-				a.clearPlaybackLoadingState()
+				a.failPlaybackAttempt()
 				a.status = "无法获取播放源：" + err.Error()
 			})
 			return
@@ -65,7 +66,7 @@ func (a *appState) startPlayback(item MediaItem) {
 				if ctx.Err() != nil {
 					return
 				}
-				a.clearPlaybackLoadingState()
+				a.failPlaybackAttempt()
 				a.playback.Active = false
 				a.playingItem = nil
 				a.status = "播放代理启动失败：" + err.Error()
@@ -190,7 +191,7 @@ func (a *appState) failPlayerStartup(requestID uint64, player *Player, proxy *Pl
 	a.playerProxy = nil
 	a.playback.Active = false
 	a.playingItem = nil
-	a.clearPlaybackLoadingState()
+	a.failPlaybackAttempt()
 	a.status = message
 	if a.window != nil {
 		a.window.Invalidate()
@@ -202,6 +203,11 @@ func (a *appState) clearPlaybackLoadingState() {
 	a.playbackLoadingID = ""
 	a.playbackLoadingTitle = ""
 	a.playbackCancel = nil
+}
+
+func (a *appState) failPlaybackAttempt() {
+	a.playbackFailedID = a.playbackLoadingID
+	a.clearPlaybackLoadingState()
 }
 
 func (a *appState) cancelPlaybackLoading() {
@@ -375,11 +381,6 @@ func (a *appState) closePlayer(keepWindow bool) (*Server, *MediaItem, float64, f
 	}
 	a.clearPlaybackTaskbarProgress()
 	a.closePlayerOverlay()
-	if a.player != nil {
-		if window := a.playbackWindow(); window != nil {
-			a.player.SetCaptionButtonCutout(false, window.NativeHandle())
-		}
-	}
 	a.player.Stop()
 	a.player.ReleaseSurface()
 	a.playerProxy.Close()

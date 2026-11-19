@@ -429,28 +429,8 @@ func (c *CatalogCache) saveLocked() error {
 	if err := os.MkdirAll(filepath.Dir(c.path), 0700); err != nil {
 		return fmt.Errorf("create catalog cache directory: %w", err)
 	}
-	tmpFile, err := os.CreateTemp(filepath.Dir(c.path), "catalog-*.tmp")
-	if err != nil {
-		return fmt.Errorf("create temporary catalog cache: %w", err)
-	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath)
-	if _, err := tmpFile.Write(data); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("write temporary catalog cache: %w", err)
-	}
-	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
-		return fmt.Errorf("flush temporary catalog cache: %w", err)
-	}
-	if err := tmpFile.Close(); err != nil {
-		return fmt.Errorf("close temporary catalog cache: %w", err)
-	}
-	if err := verifyCatalogReplaceDirectory(tmpPath, c.path); err != nil {
-		return fmt.Errorf("verify temporary catalog cache location: %w", err)
-	}
-	if err := replaceCatalogFile(tmpPath, c.path); err != nil {
-		return fmt.Errorf("replace catalog cache: %w", err)
+	if err := writeAtomicFile(c.path, "catalog-*.tmp", data); err != nil {
+		return fmt.Errorf("save catalog cache: %w", err)
 	}
 	return nil
 }
@@ -574,25 +554,4 @@ func removeCatalogCacheEntry(disk *catalogDisk, entry catalogCacheEntryRef) {
 		delete(disk.HomeContinue, entry.key)
 	}
 	delete(disk.Usage, catalogUsageKey(entry.kind, entry.key))
-}
-
-func verifyCatalogReplaceDirectory(source, destination string) error {
-	sourceInfo, err := os.Stat(filepath.Dir(source))
-	if err != nil {
-		return fmt.Errorf("stat temporary file directory: %w", err)
-	}
-	if !sourceInfo.IsDir() {
-		return fmt.Errorf("temporary file parent is not a directory")
-	}
-	destinationInfo, err := os.Stat(filepath.Dir(destination))
-	if err != nil {
-		return fmt.Errorf("stat destination directory: %w", err)
-	}
-	if !destinationInfo.IsDir() {
-		return fmt.Errorf("destination parent is not a directory")
-	}
-	if !os.SameFile(sourceInfo, destinationInfo) {
-		return fmt.Errorf("temporary file and destination are in different directories")
-	}
-	return nil
 }

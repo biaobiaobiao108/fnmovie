@@ -27,3 +27,6 @@ jobs:
 
       - name: Vet application
         run: go vet ./...
+
+      - name: Vet MyGo UI
+        run: go tool mygo vet .

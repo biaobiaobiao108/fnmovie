@@ -53,6 +53,7 @@ type sessionUIState struct {
 	loginCancel context.CancelFunc
 	loggedIn    bool
 	loginOpen   bool
+	logoutErr   string
 }
 
 type catalogUIState struct {
@@ -123,6 +124,7 @@ type playbackUIState struct {
 	playerSeekFeedbackVisible    bool
 	fullscreenMotion             playerFullscreenMotion
 	playerOverlayHooks           bool
+	playerOverlayShape           playerOverlayShape
 	playerOverlayMonitorDone     chan struct{}
 	overlayMu                    sync.Mutex
 	playerOverlayVisible         bool
@@ -143,11 +145,18 @@ type playbackUIState struct {
 	playbackLoading              bool
 	playbackLoadingID            string
 	playbackLoadingTitle         string
+	playbackFailedID             string
 	playbackCancel               context.CancelFunc
 	playbackRequest              uint64
 	playbackTrackCancel          context.CancelFunc
 	playbackProgressReporter     *playbackProgressReporter
 	playbackProgressSession      *playbackProgressSession
+}
+
+type playerOverlayShape struct {
+	width, height         int
+	scale                 float64
+	fullscreen, maximized bool
 }
 
 type personUIState struct {

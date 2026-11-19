@@ -63,5 +63,5 @@ func SaveSettings(settings Settings) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(filename, data, 0600)
+	return writeAtomicFile(filename, "settings-*.tmp", data)
 }
