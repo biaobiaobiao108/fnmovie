@@ -3,4 +3,5 @@ node_modules/
 /build/
 /.mygo/
 /out/
+/resources/darwin-arm64/
 mygo_windows_*.syso

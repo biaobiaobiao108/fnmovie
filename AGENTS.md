@@ -2,7 +2,7 @@
 
 ## 项目
 
-哞哩影院是 Windows x64 飞牛影视桌面客户端。界面与应用逻辑使用 Go 和 MyGo 原生 UI，不使用 HTML、JavaScript 或 WebView；视频由 Go 动态加载 libmpv 并渲染到 MyGoSurface。用户可见品牌统一为“哞哩影院”；Go 模块、应用 identifier、FnMovie 配置/缓存/凭据目录、数据库与协议标识保持兼容，不随品牌更名迁移。
+哞哩影院是 Windows x64 和 Apple Silicon macOS 飞牛影视桌面客户端。界面与应用逻辑使用 Go 和 MyGo 原生 UI，不使用 HTML、JavaScript 或 WebView。视频由 Go 动态加载 libmpv，Windows 使用 MyGoSurface，macOS 使用 Cocoa 播放视图。用户可见品牌统一为“哞哩影院”；Go 模块、应用 identifier、FnMovie 配置/缓存/凭据目录、数据库与协议标识保持兼容，不随品牌更名迁移。
 
 ## 代码地图
 
@@ -42,5 +42,6 @@
 
 - 修改 Go 代码后运行 `gofmt`、`go test ./...` 和 `go vet ./...`；升级 MyGo 后运行 `go tool mygo vet .`。
 - 完成代码修改后创建 Git 提交；提交后按项目约定构建 Windows x64 包。固定输出到 `out\\fnmovie-20261007\\windows-amd64`，使用 `pwsh -File scripts/build-windows.ps1`（脚本执行 `go tool mygo build -platform windows/amd64 -o out\\fnmovie-20261007`）。用户要求发布时再推送远程。
+- macOS arm64 在 Apple Silicon 上使用 `bash scripts/build-macos.sh` 构建，DMG 输出到 `out/fnmovie-macos/darwin-arm64`。发布工作流将两个平台的安装包放进同一个 Release。
 - NSIS 中文名称通过构建脚本临时设置编译器编码；不要修改全局工具或应用数据路径。
 - `out/` 和 `build/` 不提交；`libmpv-2.dll` 由 Git LFS 管理。克隆后安装 Git LFS 并运行 `git lfs pull`。

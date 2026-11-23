@@ -156,4 +156,11 @@ func (p *presenter) freeBitmap() {
 	p.dc, p.bitmap, p.previous = 0, 0, 0
 	p.bits = nil
 }
+
+func (p *presenter) clearFrame() {
+	if p.bits != nil {
+		clear(unsafe.Slice((*byte)(p.bits), p.width*p.height*4))
+		p.present()
+	}
+}
 func (p *presenter) close() { p.freeBitmap(); p.hwnd = 0 }

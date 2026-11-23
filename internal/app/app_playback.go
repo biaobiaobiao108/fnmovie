@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"runtime"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -110,14 +111,11 @@ func (a *appState) startPlayerWindow(ctx context.Context, requestID uint64, serv
 func (a *appState) finishPlayerStartup(ctx context.Context, requestID uint64, server *Server, item MediaItem, stream PlaybackResult, proxy *PlaybackProxy, player *Player, window *mygo.Window, startErr error) {
 	if ctx.Err() != nil || a.server != server || a.playbackRequest != requestID || a.playerWindow != window {
 		proxy.Close()
-		player.Stop()
-		player.ReleaseSurface()
 		if a.playerWindow == window {
 			a.player = NewPlayer()
-			a.destroyPlayerWindow()
-		} else {
-			window.Destroy()
+			a.detachPlayerWindow()
 		}
+		disposePlaybackPlayer(player, window)
 		return
 	}
 	if startErr != nil {
@@ -162,14 +160,14 @@ func (a *appState) finishPlayerStartup(ctx context.Context, requestID uint64, se
 
 func (a *appState) failPlayerStartup(requestID uint64, player *Player, proxy *PlaybackProxy, message string) {
 	proxy.Close()
-	player.Stop()
-	player.ReleaseSurface()
 	if a.player == player {
 		a.player = NewPlayer()
 	}
+	var window *mygo.Window
 	if a.playerWindowRequest == requestID {
-		a.destroyPlayerWindow()
+		window = a.detachPlayerWindow()
 	}
+	disposePlaybackPlayer(player, window)
 	a.playerProxy = nil
 	a.playback.Active = false
 	a.playingItem = nil
@@ -360,14 +358,39 @@ func (a *appState) closePlayer(keepWindow bool) (*Server, *MediaItem, float64, f
 	a.clearPlaybackTaskbarProgress()
 	a.closePlayerOverlay()
 	a.playerProxy.Close()
-	a.player.Stop()
-	a.player.ReleaseSurface()
+	var window *mygo.Window
+	if !keepWindow {
+		window = a.detachPlayerWindow()
+	}
+	disposePlaybackPlayer(a.player, window)
+	a.player = NewPlayer()
 	a.playerProxy = nil
 	a.playingItem = nil
 	a.playback = PlaybackState{}
 	a.syncWindowTitle()
-	if !keepWindow {
-		a.destroyPlayerWindow()
-	}
 	return server, item, position, duration, progress
+}
+
+func disposePlaybackPlayer(player *Player, window *mygo.Window) {
+	release := func() {
+		player.ReleaseSurface()
+		if window != nil {
+			window.Destroy()
+		}
+	}
+	if runtime.GOOS == "darwin" {
+		// The OpenGL context must be freed on the main thread before the
+		// native view can be released. Keep that thread free while mpv stops.
+		player.HideSurface()
+		if window != nil {
+			window.Hide()
+		}
+		go func() {
+			player.Stop()
+			mygo.RunOnMain(release)
+		}()
+		return
+	}
+	player.Stop()
+	release()
 }

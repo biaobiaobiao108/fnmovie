@@ -41,6 +41,13 @@ func (c *Content) SetOpacity(window *mygo.Window, opacity float64) {
 	}
 }
 
+// ClearFrame drops the old pixels before a reused menu is shown or switched.
+func (c *Content) ClearFrame() {
+	if c.presenter != nil {
+		c.presenter.clearFrame()
+	}
+}
+
 // SetIgnoreMouseEvents makes a per-pixel playback surface click-through while
 // preserving the native layered-window mode used by its presenter.
 func SetIgnoreMouseEvents(window *mygo.Window, ignore bool) {

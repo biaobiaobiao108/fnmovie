@@ -1,4 +1,4 @@
-//go:build windows
+//go:build windows || darwin
 
 package app
 
@@ -8,15 +8,26 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
+	"unsafe"
 )
 
-func TestPlayerRepeatedMediaEndsAndRetainsProgress(t *testing.T) {
-	path := filepath.Join("..", "..", "resources", "windows-amd64", "player", "libmpv-2.dll")
-	if _, err := os.Stat(path); err != nil {
-		t.Skip("libmpv LFS asset is not present")
+func testMpvLibrary(t *testing.T) string {
+	t.Helper()
+	if path := os.Getenv("FNMOVIE_TEST_LIBMPV"); path != "" {
+		return path
 	}
+	path := filepath.Join("..", "..", "resources", playerResourcePlatform, "player", playerMpvFilename)
+	if _, err := os.Stat(path); err != nil {
+		t.Skip("bundled libmpv is not present")
+	}
+	return path
+}
+
+func TestPlayerRepeatedMediaEndsAndRetainsProgress(t *testing.T) {
+	path := testMpvLibrary(t)
 	api, err := loadMpvAPI(path)
 	if err != nil {
 		t.Fatal(err)
@@ -93,10 +104,7 @@ func TestPlayerStopCancelsPendingLoadWithoutWaiting(t *testing.T) {
 }
 
 func TestBundledLibMpvInitializes(t *testing.T) {
-	path := filepath.Join("..", "..", "resources", "windows-amd64", "player", "libmpv-2.dll")
-	if _, err := os.Stat(path); err != nil {
-		t.Skip("libmpv LFS asset is not present in this checkout")
-	}
+	path := testMpvLibrary(t)
 	api, err := loadMpvAPI(path)
 	if err != nil {
 		t.Fatalf("load libmpv: %v", err)
@@ -122,4 +130,50 @@ func TestBundledLibMpvInitializes(t *testing.T) {
 		t.Fatalf("initialize libmpv: %s", mpvError(api, code))
 	}
 	api.terminate(ctx)
+}
+
+func TestPlayerSnapshotDuringSlowMpvRefresh(t *testing.T) {
+	blocked := make(chan struct{})
+	release := make(chan struct{})
+	finished := make(chan struct{})
+	var once sync.Once
+	api := &mpvAPI{
+		getProperty: func(_ uintptr, _ *byte, format int32, _ unsafe.Pointer) int32 {
+			if format == mpvFormatFlag {
+				once.Do(func() {
+					close(blocked)
+					<-release
+				})
+			}
+			return -1
+		},
+		getPropertyStr: func(uintptr, *byte) uintptr { return 0 },
+	}
+	p := &playerProcess{}
+	p.resetSession(api, 1, 0, 0)
+	p.state.AudioTracks = []PlayerTrack{{ID: 1}}
+	go func() {
+		defer close(finished)
+		p.refreshState()
+	}()
+	defer func() {
+		close(release)
+		<-finished
+	}()
+	select {
+	case <-blocked:
+	case <-time.After(time.Second):
+		t.Fatal("refresh did not query libmpv")
+	}
+
+	snapshot := make(chan PlayerSnapshot, 1)
+	go func() { snapshot <- p.snapshot() }()
+	select {
+	case got := <-snapshot:
+		if len(got.AudioTracks) != 1 || got.AudioTracks[0].ID != 1 {
+			t.Fatalf("invalid cached tracks: %+v", got.AudioTracks)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cached snapshot waited for libmpv")
+	}
 }

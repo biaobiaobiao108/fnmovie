@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build !windows && !darwin
 
 package app
 
@@ -12,23 +12,23 @@ import (
 type playerProcess struct{}
 
 func (p *playerProcess) start(string, string, uintptr, float64) error {
-	return errors.New("embedded mpv playback is only supported on Windows")
+	return errors.New("embedded mpv playback is only supported on Windows and macOS")
 }
 func (p *playerProcess) startContext(context.Context, string, string, uintptr, float64) error {
-	return errors.New("embedded mpv playback is only supported on Windows")
+	return errors.New("embedded mpv playback is only supported on Windows and macOS")
 }
-func (p *playerProcess) running() bool  { return false }
-func (p *playerProcess) stop()          {}
-func (p *playerProcess) command(...any) {}
+func (p *playerProcess) running() bool       { return false }
+func (p *playerProcess) stop()               {}
+func (p *playerProcess) queueCommand(...any) {}
 func (p *playerProcess) seekTo(float64) (uint64, error) {
-	return 0, errors.New("playback is only supported on Windows")
+	return 0, errors.New("playback is only supported on Windows and macOS")
 }
 func (p *playerProcess) position() (float64, float64, bool) { return 0, 0, false }
 func (p *playerProcess) snapshot() PlayerSnapshot           { return PlayerSnapshot{} }
 func (p *playerProcess) pointerActivity() <-chan struct{}   { return nil }
 func windowScale(uintptr) float64                           { return 1 }
 func createPlayerSurface(uintptr) (uintptr, error) {
-	return 0, errors.New("embedded mpv playback is only supported on Windows")
+	return 0, errors.New("embedded mpv playback is only supported on Windows and macOS")
 }
 func showPlayerSurface(uintptr)                            {}
 func hidePlayerSurface(uintptr)                            {}
@@ -40,3 +40,6 @@ func findMyGoCaptionButtons(uintptr) uintptr               { return 0 }
 func placePlayerOverlayAboveSurface(uintptr, uintptr)      {}
 func updatePlayerOverlayShapes(uintptr, uintptr, uintptr)  {}
 func destroyPlayerSurface(uintptr)                         {}
+
+const playerMpvFilename = "libmpv"
+const playerResourcePlatform = ""

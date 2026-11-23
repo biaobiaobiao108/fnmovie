@@ -52,12 +52,6 @@ func (a *appState) createPlayerWindow(title string, requestID uint64) {
 	a.playerWindow.Show()
 }
 
-func (a *appState) destroyPlayerWindow() {
-	if window := a.detachPlayerWindow(); window != nil {
-		window.Destroy()
-	}
-}
-
 func (a *appState) detachPlayerWindow() *mygo.Window {
 	window := a.playerWindow
 	a.playerWindow = nil

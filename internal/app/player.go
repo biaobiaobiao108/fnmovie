@@ -148,9 +148,9 @@ func (p *Player) StartContext(ctx context.Context, streamURL string, parent uint
 	findLibMpv := func() string {
 		resourceDir, _ := mygo.App.Path(mygo.PathResources)
 		candidates := []string{
-			filepath.Join(resourceDir, "player", "libmpv-2.dll"),
-			filepath.Join(resourceDir, "windows-amd64", "player", "libmpv-2.dll"),
-			filepath.Join("resources", "windows-amd64", "player", "libmpv-2.dll"),
+			filepath.Join(resourceDir, "player", playerMpvFilename),
+			filepath.Join(resourceDir, playerResourcePlatform, "player", playerMpvFilename),
+			filepath.Join("resources", playerResourcePlatform, "player", playerMpvFilename),
 		}
 		for _, candidate := range candidates {
 			if _, err := os.Stat(candidate); err == nil {
@@ -161,7 +161,7 @@ func (p *Player) StartContext(ctx context.Context, streamURL string, parent uint
 	}
 	dll := findLibMpv()
 	if dll == "" {
-		return fmt.Errorf("找不到 libmpv-2.dll；请检查应用资源目录")
+		return fmt.Errorf("找不到 %s，请检查应用资源目录", playerMpvFilename)
 	}
 	process := &playerProcess{}
 	if err := process.startContext(ctx, dll, streamURL, parent, resumeAt); err != nil {
@@ -226,14 +226,16 @@ func (p *Player) SetViewport(rect ui.Rect) {
 
 func (p *Player) ShowSurface() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	showPlayerSurface(p.surface)
+	surface := p.surface
+	p.mu.Unlock()
+	showPlayerSurface(surface)
 }
 
 func (p *Player) HideSurface() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	hidePlayerSurface(p.surface)
+	surface := p.surface
+	p.mu.Unlock()
+	hidePlayerSurface(surface)
 }
 
 func (p *Player) ReleaseSurface() {
@@ -263,7 +265,7 @@ func (p *Player) TogglePause() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.process != nil {
-		p.process.command("cycle", "pause")
+		p.process.queueCommand("cycle", "pause")
 	}
 }
 func (p *Player) ToggleMute() { p.command("cycle", "mute") }
@@ -297,7 +299,7 @@ func (p *Player) Seek(seconds float64) {
 		p.position = p.duration
 	}
 	if p.process != nil {
-		p.process.command("seek", strconv.FormatFloat(seconds, 'f', 1, 64), "relative")
+		p.process.queueCommand("seek", strconv.FormatFloat(seconds, 'f', 1, 64), "relative")
 	}
 }
 
@@ -399,6 +401,6 @@ func (p *Player) command(args ...any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.process != nil {
-		p.process.command(args...)
+		p.process.queueCommand(args...)
 	}
 }

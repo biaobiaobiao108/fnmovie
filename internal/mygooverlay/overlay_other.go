@@ -11,5 +11,6 @@ type presenter struct{}
 
 func attach(*surface.Conn) *presenter                         { return &presenter{} }
 func (*presenter) close()                                     {}
+func (*presenter) clearFrame()                                {}
 func (*presenter) setOpacity(w *mygo.Window, opacity float64) { w.SetOpacity(opacity) }
 func setIgnoreMouseEvents(w *mygo.Window, ignore bool)        { w.SetIgnoreMouseEvents(ignore) }

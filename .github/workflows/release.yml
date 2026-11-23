@@ -1,15 +1,16 @@
-name: Release Windows x64
+name: Build desktop installers
 
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build:
+  build-windows:
     name: Build Windows amd64
     runs-on: windows-latest
     steps:
@@ -39,7 +40,7 @@ jobs:
         run: |
           $config = Get-Content mygo.json -Raw -Encoding utf8 | ConvertFrom-Json
           $expectedTag = "v$($config.version)"
-          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $expectedTag) {
             throw "Tag $env:GITHUB_REF_NAME does not match mygo.json version $expectedTag"
           }
 
@@ -73,12 +74,45 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  build-macos:
+    name: Build macOS arm64
+    runs-on: macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install libmpv build assets
+        run: brew install mpv
+
+      - name: Vet application
+        run: go vet ./...
+
+      - name: Build and verify disk image
+        run: bash scripts/build-macos.sh
+
+      - name: Upload macOS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: 哞哩影院-macos-arm64
+          path: out/fnmovie-macos/darwin-arm64/*-arm64.dmg
+          if-no-files-found: error
+          retention-days: 1
+
   release:
     name: Publish GitHub Release
-    needs: build
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - name: Download Windows build
+      - name: Download desktop installers
         uses: actions/download-artifact@v4
         with:
           path: release-assets

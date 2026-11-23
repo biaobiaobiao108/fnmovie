@@ -158,6 +158,15 @@ func nativePlayerSamplePoint(window *mygo.Window, x, y int) (playerPoint, bool) 
 // moved the last progress-bar bitmap into the middle of the video.
 func checkNativePlayerMenus(a *appState) error {
 	onUI := func(fn func()) { done := make(chan struct{}); a.window.Update(func() { fn(); close(done) }); <-done }
+	var menuHandle uintptr
+	onUI(func() {
+		if a.playerMenuWindow != nil && !a.playerMenuWindow.IsVisible() {
+			menuHandle = a.playerMenuWindow.NativeHandle()
+		}
+	})
+	if menuHandle == 0 {
+		return fmt.Errorf("menu window was not prepared before the first click")
+	}
 	var transportBounds mygo.Rectangle
 	var mainBounds mygo.Rectangle
 	onUI(func() {
@@ -179,6 +188,10 @@ func checkNativePlayerMenus(a *appState) error {
 			}
 			a.playback.AudioTracks, a.playback.SubtitleTracks = tracks, tracks
 			a.openPlayerOverlayMenu(option)
+			if a.playerMenuWindow.NativeHandle() != menuHandle {
+				err = fmt.Errorf("%s menu recreated its native window", option)
+				return
+			}
 			// OS window placement may finish while this test starts. Compare
 			// placement relative to the video, allowing legitimate main-window moves.
 			currentMain, currentTransport := a.playbackWindow().ContentBounds(), a.playerOverlayWindow.ContentBounds()
@@ -224,8 +237,8 @@ func checkNativePlayerMenus(a *appState) error {
 				_ = os.WriteFile("../../out/overlay-check/menu-"+option+".png", png, 0600)
 			}
 			a.closePlayerOverlayMenu()
-			if a.playerMenuWindow != nil {
-				err = fmt.Errorf("closed menu surface was retained")
+			if a.playerMenuWindow == nil || a.playerMenuWindow.IsVisible() {
+				err = fmt.Errorf("closed menu surface must be retained and hidden")
 			}
 		})
 		if err != nil {

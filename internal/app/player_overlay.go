@@ -78,6 +78,7 @@ func (a *appState) createPlayerOverlay() {
 		Content: a.playerSeekFeedbackContent,
 	})
 	overlay.SetIgnoreMouseEvents(a.playerSeekFeedbackWindow, true)
+	a.createPlayerMenuWindow(bounds)
 	a.registerPlayerOverlayHooks()
 	a.syncPlayerOverlay()
 	a.overlayMu.Lock()
@@ -163,7 +164,7 @@ func (a *appState) syncPlayerOverlay() {
 	}
 	a.playerOverlayWindow.Invalidate()
 	a.playerHeaderWindow.Invalidate()
-	if a.playerMenuWindow != nil {
+	if a.playerOverlayMenu != "" && a.playerMenuWindow != nil {
 		if menuBounds := playerMenuBounds(bounds); a.playerMenuWindow.ContentBounds() != menuBounds {
 			a.playerMenuWindow.SetContentBounds(menuBounds)
 		}
@@ -292,7 +293,6 @@ func (a *appState) showPlayerOverlay() {
 	if a.playerOverlayWindow == nil || a.playbackWindow() == nil || a.playbackWindow().IsMinimized() {
 		return
 	}
-	a.syncPlayerOverlay()
 	a.overlayMu.Lock()
 	wasVisible := a.playerOverlayVisible
 	a.playerOverlayVisible = true
@@ -303,13 +303,11 @@ func (a *appState) showPlayerOverlay() {
 		if a.playerHeaderWindow != nil {
 			a.playerHeaderWindow.ShowInactive()
 		}
-		if a.playerMenuWindow != nil {
+		if a.playerOverlayMenu != "" && a.playerMenuWindow != nil {
 			a.playerMenuWindow.ShowInactive()
 		}
 		a.syncPlayerOverlay()
 		a.animatePlayerOverlay(playerOverlayTargetOpacity)
-	} else {
-		a.playerOverlayWindow.Invalidate()
 	}
 }
 
@@ -450,6 +448,7 @@ func (a *appState) closePlayerOverlay() {
 	a.playerOverlayShape = playerOverlayShape{}
 	a.playerSeekFeedbackVisible = false
 	a.playerOverlayMenu = ""
+	a.playerMenuTracks = nil
 	a.seekDragging = false
 	a.seekFeedback = seekFeedback{}
 	a.volumeDragging = false
@@ -780,7 +779,6 @@ func (a *appState) playerOptionButton(c *ui.Context, option string) {
 }
 
 func (a *appState) openPlayerOverlayMenu(option string) {
-	a.destroyPlayerMenuWindow()
 	a.playerOverlayMenu = option
 	switch option {
 	case "subtitle":
@@ -794,7 +792,28 @@ func (a *appState) openPlayerOverlayMenu(option string) {
 	if a.playbackWindow() == nil || a.playerOverlayWindow == nil {
 		return
 	}
-	bounds := playerMenuBounds(a.playbackWindow().ContentBounds())
+	ownerBounds := a.playbackWindow().ContentBounds()
+	if a.playerMenuWindow == nil {
+		a.createPlayerMenuWindow(ownerBounds)
+	}
+	menu := a.playerMenuWindow
+	a.playerMenuContent.ClearFrame()
+	if bounds := playerMenuBounds(ownerBounds); menu.ContentBounds() != bounds {
+		menu.SetContentBounds(bounds)
+	}
+	a.playerMenuContent.SetOpacity(menu, a.playerOverlayOpacity*a.fullscreenFade())
+	menu.Invalidate()
+	if !menu.IsVisible() {
+		menu.Show()
+	}
+	if a.player != nil {
+		placePlayerOverlayAboveSurface(a.player.surface, menu.NativeHandle())
+	}
+	a.playerOverlayWindow.Invalidate()
+}
+
+func (a *appState) createPlayerMenuWindow(ownerBounds mygo.Rectangle) {
+	bounds := playerMenuBounds(ownerBounds)
 	a.playerMenuContent = overlay.View(a.playerMenuView)
 	a.playerMenuWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: "播放选项", X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height,
@@ -802,12 +821,6 @@ func (a *appState) openPlayerOverlayMenu(option string) {
 		BackgroundColor: "#00000000", DisableResize: true, DisableMinimize: true, DisableMaximize: true,
 		Content: a.playerMenuContent,
 	})
-	// A new menu surface contains no previous transport/menu bitmap. It stays
-	// transparent until its own first paint, and never shifts the control bar.
-	a.playerMenuContent.SetOpacity(a.playerMenuWindow, a.playerOverlayOpacity)
-	a.playerMenuWindow.Show()
-	a.syncPlayerOverlay()
-	a.playerOverlayWindow.Invalidate()
 }
 
 func (a *appState) destroyPlayerMenuWindow() {
@@ -834,7 +847,7 @@ func (a *appState) playerPopover(c *ui.Context) {
 			title = "播放速度"
 		}
 		ui.Text(c, title).Padding(4, 9).FontSize(11).Bold().TextColor(ui.RGBA(255, 255, 255, 0.65))
-		ui.Scroll(c).Grow(1).FillWidth().MinWidth(0).Children(func() {
+		ui.Scroll(c.Key(a.playerOverlayMenu)).Grow(1).FillWidth().MinWidth(0).Children(func() {
 			switch a.playerOverlayMenu {
 			case "subtitle":
 				selected := true
@@ -964,7 +977,9 @@ func playerTrackLabel(track PlayerTrack) string {
 
 func (a *appState) closePlayerOverlayMenu() {
 	ownedFocus := a.playerOverlayHasFocus()
-	a.destroyPlayerMenuWindow()
+	if a.playerMenuWindow != nil {
+		a.playerMenuWindow.Hide()
+	}
 	a.playerOverlayMenu = ""
 	a.playerMenuTracks = nil
 	if a.playerOverlayWindow != nil {

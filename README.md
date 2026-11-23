@@ -2,11 +2,11 @@
 
 [![Listed on Awesome MyGo](https://awesomemygo.dev/badge.svg)](https://awesomemygo.dev/apps/fnmovie)
 
-**把家里的飞牛影视片库，带到 Windows 桌面。**
+**把家里的飞牛影视片库，带到电脑桌面。**
 
-哞哩影院让找片和继续观看更顺手：登录自己的飞牛影视，按影视库浏览电影与剧集，查看详情，再从上次的进度接着播放。它是一款 Windows x64 原生桌面客户端，界面贴合 Windows 使用习惯，视频由 libmpv 播放。
+哞哩影院让找片和继续观看更顺手：登录自己的飞牛影视，按影视库浏览电影与剧集，查看详情，再从上次的进度接着播放。它提供 Windows x64 和 Apple Silicon macOS 原生桌面构建，视频由 libmpv 播放。
 
-> **准备开始？** 前往 [GitHub Releases 下载 Windows 版本](https://github.com/biaobiaobiao108/fnmovie/releases/latest)。应用需要连接到你有权访问的飞牛影视服务器。
+> **准备开始？** 前往 [GitHub Releases 下载客户端](https://github.com/biaobiaobiao108/fnmovie/releases/latest)。应用需要连接到你有权访问的飞牛影视服务器。
 
 ## 从片库到播放
 
@@ -33,7 +33,7 @@
 
 ## 第一次使用
 
-1. 从 [Releases](https://github.com/biaobiaobiao108/fnmovie/releases/latest) 下载 Windows x64 安装包，或使用便携版。
+1. 从 [Releases](https://github.com/biaobiaobiao108/fnmovie/releases/latest) 下载对应平台的包。Windows 提供安装包和便携版，Apple Silicon macOS 提供 DMG。
 2. 启动哞哩影院，输入自己的飞牛影视服务器地址、用户名和密码。
 3. 选择有权限访问的影视库，浏览内容并开始播放。
 
@@ -41,11 +41,12 @@
 
 ## 账户与数据
 
-登录密码和会话凭据由 Windows 凭据管理器保护。服务器地址与用户名保存在本机用户配置目录中。媒体信息按所选影视库读取；应用不会在项目文件中保存你的 NAS 密码或会话令牌。
+登录密码和会话凭据由 Windows 凭据管理器或 macOS 钥匙串保护。服务器地址与用户名保存在本机用户配置目录中。媒体信息按所选影视库读取；应用不会在项目文件中保存你的 NAS 密码或会话令牌。
 
 ## 适用平台
 
 - Windows x64
+- macOS 15 或更新版本，Apple Silicon
 - 可访问的飞牛影视服务与个人账户
 
 客户端界面由 Go 与 MyGo 原生绘制，视频播放通过动态加载的 libmpv 完成，不使用浏览器页面或 WebView。
@@ -62,9 +63,11 @@ pwsh -File scripts/build-windows.ps1
 
 Windows x64 构建输出到 `out\fnmovie-20261007\windows-amd64`。
 
+在 Apple Silicon Mac 上安装 Xcode 命令行工具和 Homebrew 后，运行 `brew install mpv` 和 `bash scripts/build-macos.sh`。DMG 输出到 `out/fnmovie-macos/darwin-arm64`，内含 libmpv 和它链接的第三方库。默认使用临时签名（ad hoc），未经过 Apple 公证。
+
 ### 发布版本
 
-在 PowerShell 中运行一次 `pwsh -File scripts/install-command.ps1`，然后在仓库目录输入 `fnmovie patch`、`fnmovie minor` 或 `fnmovie major`。命令会更新 `mygo.json` 版本、提交并创建对应的 `vX.Y.Z` tag，再依次推送当前分支和 tag；tag 会触发 GitHub Actions 构建并发布 Windows amd64 安装包。发布要求工作区干净且当前分支配置了远程 upstream；当前分支上已提交但尚未推送的提交也会一起推送。可用 `fnmovie patch -WhatIf` 预览。
+在 PowerShell 中运行一次 `pwsh -File scripts/install-command.ps1`，然后在仓库目录输入 `fnmovie patch`、`fnmovie minor` 或 `fnmovie major`。命令会更新 `mygo.json` 版本、提交并创建对应的 `vX.Y.Z` tag，再依次推送当前分支和 tag。GitHub Actions 会构建 Windows x64 和 macOS arm64 安装包，并将两者发布到同一个 Release。发布要求工作区干净且当前分支配置了远程 upstream，当前分支上已提交但尚未推送的提交也会一起推送。可用 `fnmovie patch -WhatIf` 预览。
 
 ## 许可证
 
