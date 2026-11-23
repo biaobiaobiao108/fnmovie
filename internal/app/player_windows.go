@@ -24,7 +24,7 @@ import (
 
 var (
 	user32Player              = syscall.NewLazyDLL("user32.dll")
-	procEnumChildWindows      = user32Player.NewProc("EnumChildWindows")
+	procFindWindowExW         = user32Player.NewProc("FindWindowExW")
 	procGetWindowThreadPID    = user32Player.NewProc("GetWindowThreadProcessId")
 	procGetDPIForWindow       = user32Player.NewProc("GetDpiForWindow")
 	procGetClassNameW         = user32Player.NewProc("GetClassNameW")
@@ -61,16 +61,16 @@ var (
 type mpvAPI struct {
 	dll             *syscall.DLL
 	create          func() uintptr
-	setOption       func(uintptr, uintptr, uintptr) int32
+	setOption       func(uintptr, *byte, *byte) int32
 	initialize      func(uintptr) int32
-	command         func(uintptr, uintptr) int32
-	commandAsync    func(uintptr, uint64, uintptr) int32
-	observeProperty func(uintptr, uint64, uintptr, int32) int32
+	command         func(uintptr, **byte) int32
+	commandAsync    func(uintptr, uint64, **byte) int32
+	observeProperty func(uintptr, uint64, *byte, int32) int32
 	waitEvent       func(uintptr, float64) uintptr
-	getProperty     func(uintptr, uintptr, int32, uintptr) int32
-	getPropertyStr  func(uintptr, uintptr) uintptr
+	getProperty     func(uintptr, *byte, int32, unsafe.Pointer) int32
+	getPropertyStr  func(uintptr, *byte) uintptr
 	free            func(uintptr)
-	freeNode        func(uintptr)
+	freeNode        func(*mpvNode)
 	wakeup          func(uintptr)
 	terminate       func(uintptr)
 	errorString     func(int32) uintptr
@@ -228,6 +228,7 @@ func (p *playerProcess) startContext(playbackCtx context.Context, dllPath, strea
 		{"config", "no"}, {"config-dir", configDir}, {"vo", "gpu-next"}, {"gpu-context", "d3d11"},
 		{"hwdec", "auto-safe"}, {"ao", "wasapi"}, {"audio-channels", "auto-safe"},
 		{"osc", "no"}, {"osd-level", "0"}, {"input-default-bindings", "no"}, {"input-vo-keyboard", "no"},
+		{"load-console", "no"}, {"load-commands", "no"}, {"load-stats-overlay", "no"}, {"load-select", "no"},
 		{"keepaspect", "yes"}, {"force-window", "yes"}, {"wid", strconv.FormatUint(uint64(host), 10)},
 		{"log-file", filepath.Join(configDir, "mpv.log")}, {"msg-level", "all=warn,ao=info,ad=info,vd=info,ffmpeg=info"},
 	}
@@ -257,6 +258,9 @@ func (p *playerProcess) startContext(playbackCtx context.Context, dllPath, strea
 		go p.watchPointer(p.done, host, p.pointerDone)
 		return nil
 	case <-p.done:
+		if message := p.snapshot().Error; message != "" {
+			return fmt.Errorf("%s", message)
+		}
 		return fmt.Errorf("libmpv 在媒体载入前退出")
 	case <-time.After(25 * time.Second):
 		p.stop()
@@ -266,8 +270,7 @@ func (p *playerProcess) startContext(playbackCtx context.Context, dllPath, strea
 
 func (p *playerProcess) observeTrackList() bool {
 	name, _ := syscall.BytePtrFromString("track-list")
-	code := p.api.observeProperty(p.ctx, mpvTrackListObserveUserdata, uintptr(unsafe.Pointer(name)), mpvFormatNode)
-	runtime.KeepAlive(name)
+	code := p.api.observeProperty(p.ctx, mpvTrackListObserveUserdata, name, mpvFormatNode)
 	if code < 0 {
 		log.Printf("监听 libmpv track-list 变化失败，将使用定时刷新：%s", mpvError(p.api, code))
 		return false
@@ -292,10 +295,7 @@ func (p *playerProcess) resetSession(api *mpvAPI, ctx, host uintptr, resumeAt fl
 func setMpvOption(api *mpvAPI, ctx uintptr, name, value string) int32 {
 	n, _ := syscall.BytePtrFromString(name)
 	v, _ := syscall.BytePtrFromString(value)
-	code := api.setOption(ctx, uintptr(unsafe.Pointer(n)), uintptr(unsafe.Pointer(v)))
-	runtime.KeepAlive(n)
-	runtime.KeepAlive(v)
-	return code
+	return api.setOption(ctx, n, v)
 }
 
 func mpvError(api *mpvAPI, code int32) string {
@@ -354,9 +354,7 @@ func (p *playerProcess) command(args ...any) int32 {
 	for i, arg := range stringsArg {
 		ptrs[i], _ = syscall.BytePtrFromString(arg)
 	}
-	code := p.api.command(p.ctx, uintptr(unsafe.Pointer(&ptrs[0])))
-	runtime.KeepAlive(ptrs)
-	return code
+	return p.api.command(p.ctx, &ptrs[0])
 }
 
 func (p *playerProcess) seekTo(seconds float64) (uint64, error) {
@@ -376,8 +374,7 @@ func (p *playerProcess) seekTo(seconds float64) (uint64, error) {
 	for i, arg := range args {
 		ptrs[i], _ = syscall.BytePtrFromString(arg)
 	}
-	code := p.api.commandAsync(p.ctx, request, uintptr(unsafe.Pointer(&ptrs[0])))
-	runtime.KeepAlive(ptrs)
+	code := p.api.commandAsync(p.ctx, request, &ptrs[0])
 	if code < 0 {
 		return request, fmt.Errorf("%s", mpvError(p.api, code))
 	}
@@ -435,8 +432,8 @@ func (p *playerProcess) eventLoop() {
 				return
 			case 7:
 				if event.data != 0 {
-					endBytes, _ := readCBytes(event.data, 8)
-					if len(endBytes) < 8 {
+					endBytes, ok := readCBytes(event.data, 8)
+					if !ok {
 						continue
 					}
 					end := [2]int32{int32(binary.LittleEndian.Uint32(endBytes)), int32(binary.LittleEndian.Uint32(endBytes[4:]))}
@@ -470,7 +467,8 @@ func (p *playerProcess) finishMedia(reason, code int32) bool {
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
 	if reason == 4 {
-		p.state.Error = mpvError(p.api, code)
+		log.Printf("libmpv playback ended with error %d: %s", code, mpvError(p.api, code))
+		p.state.Error = "无法继续读取或解码视频，请关闭播放窗口后重试。"
 	}
 	if reason == 0 && p.state.Duration > 0 {
 		p.state.Position = p.state.Duration
@@ -543,8 +541,7 @@ func (p *playerProcess) getFlag(name string) bool {
 
 func (p *playerProcess) getString(name string) string {
 	key, _ := syscall.BytePtrFromString(name)
-	ptr := p.api.getPropertyStr(p.ctx, uintptr(unsafe.Pointer(key)))
-	runtime.KeepAlive(key)
+	ptr := p.api.getPropertyStr(p.ctx, key)
 	if ptr == 0 {
 		return ""
 	}
@@ -555,21 +552,18 @@ func (p *playerProcess) getString(name string) string {
 
 func (p *playerProcess) getRaw(name string, format int32, data unsafe.Pointer) int32 {
 	key, _ := syscall.BytePtrFromString(name)
-	code := p.api.getProperty(p.ctx, uintptr(unsafe.Pointer(key)), format, uintptr(data))
-	runtime.KeepAlive(key)
-	runtime.KeepAlive(data)
-	return code
+	return p.api.getProperty(p.ctx, key, format, data)
 }
 
 func (p *playerProcess) getTracks() ([]PlayerTrack, []PlayerTrack, bool) {
 	var node mpvNode
-	if p.getRaw("track-list", 6, unsafe.Pointer(&node)) < 0 || node.format != 7 || node.value == 0 {
+	if p.getRaw("track-list", mpvFormatNode, unsafe.Pointer(&node)) < 0 {
 		return nil, nil, false
 	}
-	defer func() {
-		p.api.freeNode(uintptr(unsafe.Pointer(&node)))
-		runtime.KeepAlive(&node)
-	}()
+	defer p.api.freeNode(&node)
+	if node.format != 7 || node.value == 0 {
+		return nil, nil, false
+	}
 	listBytes, ok := readCBytes(node.value, 24)
 	if !ok {
 		return nil, nil, false
@@ -1252,34 +1246,20 @@ func findMyGoSurface(parent uintptr) uintptr {
 	if length > 0 && syscall.UTF16ToString(className[:length]) == "MyGoSurface" {
 		return parent
 	}
-	var result uintptr
-	callback := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
-		className := make([]uint16, 128)
-		length, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&className[0])), uintptr(len(className)))
-		if length > 0 && syscall.UTF16ToString(className[:length]) == "MyGoSurface" {
-			result = hwnd
-			return 0
-		}
-		return 1
-	})
-	procEnumChildWindows.Call(parent, callback, 0)
-	return result
+	return findPlayerChildWindow(parent, "MyGoSurface")
 }
 
 func findMyGoCaptionButtons(parent uintptr) uintptr {
+	return findPlayerChildWindow(parent, "MyGoCaption")
+}
+
+func findPlayerChildWindow(parent uintptr, className string) uintptr {
 	if parent == 0 {
 		return 0
 	}
-	var buttons uintptr
-	callback := syscall.NewCallback(func(hwnd, _ uintptr) uintptr {
-		className := make([]uint16, 64)
-		length, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&className[0])), uintptr(len(className)))
-		if length > 0 && syscall.UTF16ToString(className[:length]) == "MyGoCaption" {
-			buttons = hwnd
-			return 0
-		}
-		return 1
-	})
-	procEnumChildWindows.Call(parent, callback, 0)
-	return buttons
+	// MyGo creates both widgets directly under its top-level HWND. A new
+	// syscall callback per enumeration would permanently occupy a Go callback slot.
+	class, _ := syscall.UTF16PtrFromString(className)
+	child, _, _ := procFindWindowExW.Call(parent, 0, uintptr(unsafe.Pointer(class)), 0)
+	return child
 }

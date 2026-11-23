@@ -4,7 +4,7 @@ go 1.27.3
 
 require (
 	github.com/ebitengine/purego v0.11.1
-	github.com/egoist/mygo v0.10.0
+	github.com/egoist/mygo v0.10.1-0.20261123071500-1f690f298738
 	github.com/egoist/mygo/fnmovieoverlay v0.0.0
 	golang.org/x/image v0.46.0
 )

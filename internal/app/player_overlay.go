@@ -98,11 +98,20 @@ func (a *appState) registerPlayerOverlayHooks() {
 		return
 	}
 	a.playerOverlayHooks = true
-	a.playbackWindow().OnResize(a.syncPlayerOverlay)
-	a.playbackWindow().OnMove(a.syncPlayerOverlay)
-	a.playbackWindow().OnEnterFullScreen(a.syncPlayerOverlay)
-	a.playbackWindow().OnLeaveFullScreen(a.syncPlayerOverlay)
-	a.playbackWindow().OnMinimize(func() {
+	window := a.playbackWindow()
+	syncOverlay := func() {
+		if a.playbackWindow() == window {
+			a.syncPlayerOverlay()
+		}
+	}
+	window.OnResize(syncOverlay)
+	window.OnMove(syncOverlay)
+	window.OnEnterFullScreen(syncOverlay)
+	window.OnLeaveFullScreen(syncOverlay)
+	window.OnMinimize(func() {
+		if a.playbackWindow() != window {
+			return
+		}
 		a.cancelPlayerFullscreen()
 		if a.player != nil {
 			a.player.HideSurface()
@@ -113,7 +122,10 @@ func (a *appState) registerPlayerOverlayHooks() {
 		}
 		a.syncPlayerSeekFeedbackVisibility()
 	})
-	a.playbackWindow().OnRestore(func() {
+	window.OnRestore(func() {
+		if a.playbackWindow() != window {
+			return
+		}
 		a.syncPlayerOverlay()
 		if a.playback.Active {
 			if a.player != nil {
@@ -233,6 +245,7 @@ func (a *appState) startPlayerOverlayMonitor() {
 	done := make(chan struct{})
 	a.playerOverlayMonitorDone = done
 	activity := a.player.PointerActivity()
+	window := a.playbackWindow()
 	go func() {
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
@@ -241,22 +254,20 @@ func (a *appState) startPlayerOverlayMonitor() {
 			case <-done:
 				return
 			case <-activity:
-				if a.playbackWindow() != nil {
-					a.playbackWindow().Update(func() {
-						select {
-						case <-done:
-							return
-						default:
-						}
-						a.showPlayerOverlay()
-					})
-				}
+				window.Update(func() {
+					select {
+					case <-done:
+						return
+					default:
+					}
+					a.showPlayerOverlay()
+				})
 			case now := <-ticker.C:
 				a.overlayMu.Lock()
 				hide := a.playerOverlayVisible && !a.playerOverlayPinned && !a.playerOverlaySeeking && now.Sub(a.playerOverlayLastInput) >= playerOverlayHideDelay
 				a.overlayMu.Unlock()
-				if hide && a.playbackWindow() != nil {
-					a.playbackWindow().Update(func() {
+				if hide {
+					window.Update(func() {
 						select {
 						case <-done:
 							return
@@ -975,23 +986,24 @@ func (a *appState) seekDisplayPosition() float64 {
 
 func (a *appState) playerShortcuts(c *ui.Context) {
 	keys := [...]ui.Key{ui.KeySpace, ui.KeyLeft, ui.KeyRight, ui.KeyUp, ui.KeyDown, ui.KeyM, ui.KeyF, ui.KeyEscape}
-	fullscreen := a.playbackWindow() != nil && a.playbackWindow().IsFullScreen()
+	reduceMotion := c.Preferences().ReduceMotion
 	for _, key := range keys {
-		if c.Shortcut(0, key) {
+		c.OnWindowShortcut(0, key, func() {
 			if key == ui.KeyEscape && a.playerOverlayMenu != "" {
 				a.closePlayerOverlayMenu()
 				return
 			}
+			window := a.playbackWindow()
+			fullscreen := window != nil && window.IsFullScreen()
 			action := playerShortcutAction(0, key, fullscreen)
 			if action == playerToggleFull {
-				a.togglePlayerFullscreen(c.Preferences().ReduceMotion)
+				a.togglePlayerFullscreen(reduceMotion)
 			} else if action == playerExitFull {
-				a.requestPlayerFullscreen(false, c.Preferences().ReduceMotion)
+				a.requestPlayerFullscreen(false, reduceMotion)
 			} else {
 				a.performPlayerAction(action)
 			}
-			return
-		}
+		})
 	}
 }
 

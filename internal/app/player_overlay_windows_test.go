@@ -3,6 +3,7 @@
 package app
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -279,9 +280,8 @@ func checkNativeFullscreen(a *appState, onUI func(func())) error {
 }
 
 func checkNativePlaybackSessions(a *appState, result chan<- error) {
-	// Reach the actual app -> API -> local proxy -> libmpv path with synthetic
-	// media. Cancel A while its API request is blocked, then play B for longer
-	// than the reported ten-second failure window.
+	// Cancel both an API lookup and an in-flight media open, then play through
+	// an interrupted HTTP response using the real loopback proxy and libmpv.
 	cwd, err := os.Getwd()
 	if err != nil {
 		result <- err
@@ -296,6 +296,8 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 	defer os.Chdir(cwd)
 	data := nativeTestAVI()
 	entered, release := make(chan struct{}), make(chan struct{})
+	mediaEntered, mediaCancelled := make(chan struct{}), make(chan struct{})
+	var mediaAttempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/api/v1/play/info":
@@ -307,12 +309,29 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 				close(entered)
 				<-release
 			}
+			if body.ID == "slow-media" {
+				fmt.Fprint(w, `{"code":0,"data":{"media_guid":"slow","ts":0}}`)
+				return
+			}
 			fmt.Fprint(w, `{"code":0,"data":{"media_guid":"synthetic","ts":0}}`)
 		case "/api/v1/stream":
-			fmt.Fprint(w, `{"code":0,"data":{"video_stream":{"duration":20},"direct_link_qualities":[{"url":"/media.avi","resolution":"test"}]}}`)
-		case "/media.avi":
-			w.Header().Set("Content-Type", "video/x-msvideo")
-			_, _ = w.Write(data)
+			var body struct {
+				ID string `json:"media_guid"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			fmt.Fprintf(w, `{"code":0,"data":{"video_stream":{"duration":20},"direct_link_qualities":[{"url":"/%s.avi","resolution":"test"}]}}`, body.ID)
+		case "/slow.avi":
+			close(mediaEntered)
+			<-r.Context().Done()
+			close(mediaCancelled)
+		case "/synthetic.avi":
+			if mediaAttempts.Add(1) == 1 {
+				w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+				w.Header().Set("Accept-Ranges", "bytes")
+				_, _ = w.Write(data[:len(data)/4])
+				return
+			}
+			http.ServeContent(w, r, "media.avi", time.Time{}, bytes.NewReader(data))
 		case "/api/v1/play/record":
 			fmt.Fprint(w, `{"code":0,"data":{}}`)
 		default:
@@ -338,6 +357,21 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		finish(err)
 		return
 	}
+	var surfaceFound bool
+	onUI(func() {
+		parent := a.window.NativeHandle()
+		// Windows Go callbacks occupy a fixed table for the life of the process.
+		for range 2500 {
+			surfaceFound = findMyGoSurface(parent) != 0
+			if !surfaceFound {
+				break
+			}
+		}
+	})
+	if !surfaceFound {
+		finish(fmt.Errorf("could not repeatedly resolve the native player surface"))
+		return
+	}
 	onUI(func() {
 		a.playback = PlaybackState{}
 		a.server = NewServer(server.URL, "synthetic-token")
@@ -350,13 +384,31 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 		finish(fmt.Errorf("cancelled request did not reach API"))
 		return
 	}
-	onUI(func() { a.cancelPlaybackLoading(); a.startPlayback(MediaItem{ID: "current", Title: "当前播放"}) })
+	onUI(func() { a.cancelPlaybackLoading(); a.startPlayback(MediaItem{ID: "slow-media", Title: "等待媒体"}) })
 	close(release)
+	select {
+	case <-mediaEntered:
+	case <-time.After(5 * time.Second):
+		finish(fmt.Errorf("slow media did not reach the proxy"))
+		return
+	}
+	var canceledWindow *mygo.Window
+	onUI(func() {
+		canceledWindow = a.playerWindow
+		a.cancelPlaybackLoading()
+		a.startPlayback(MediaItem{ID: "current", Title: "当前播放"})
+	})
+	select {
+	case <-mediaCancelled:
+	case <-time.After(5 * time.Second):
+		finish(fmt.Errorf("canceling a media open did not close its HTTP request"))
+		return
+	}
 	deadline := time.Now().Add(8 * time.Second)
 	for {
 		ready, failed := false, ""
 		onUI(func() {
-			ready = a.playback.Active && a.playerOverlayWindow != nil && a.playerHeaderWindow != nil
+			ready = a.playback.Active && a.playerOverlayWindow != nil && a.playerHeaderWindow != nil && canceledWindow.IsDestroyed()
 			failed = a.status
 		})
 		if ready {
@@ -426,6 +478,10 @@ func checkNativePlaybackSessions(a *appState, result chan<- error) {
 	}
 	var finalErr error
 	onUI(func() {
+		if mediaAttempts.Load() < 2 {
+			finalErr = fmt.Errorf("libmpv did not retry the interrupted media response")
+			return
+		}
 		if !a.playback.Active || !a.player.Running() || a.playback.Position < 10 {
 			finalErr = fmt.Errorf("playback unexpectedly stopped: active=%t running=%t position=%v status=%s", a.playback.Active, a.player.Running(), a.playback.Position, a.status)
 			return

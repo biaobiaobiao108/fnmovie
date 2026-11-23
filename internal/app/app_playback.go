@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"time"
+
+	"github.com/egoist/mygo"
 )
 
 func (a *appState) startPlayback(item MediaItem) {
@@ -26,9 +28,9 @@ func (a *appState) startPlayback(item MediaItem) {
 	server := a.server
 	requestPlayer := NewPlayer()
 	requestPlayer.SetOnDoubleClick(func() {
-		if window := a.playbackWindow(); window != nil {
+		if window := a.playbackWindow(); window != nil && a.player == requestPlayer {
 			window.Update(func() {
-				if a.playbackWindow() != nil && (a.playback.Active || a.playbackLoading) {
+				if a.player == requestPlayer && (a.playback.Active || a.playbackLoading) {
 					a.togglePlayerFullscreen(false)
 				}
 			})
@@ -37,11 +39,9 @@ func (a *appState) startPlayback(item MediaItem) {
 	go func() {
 		stream, err := server.PlaybackContext(ctx, item)
 		if ctx.Err() != nil {
-			a.cleanupPlayerRequest(requestID, requestPlayer)
 			return
 		}
 		if err != nil {
-			a.cleanupPlayerRequest(requestID, requestPlayer)
 			a.window.Update(func() {
 				if ctx.Err() != nil {
 					return
@@ -57,11 +57,9 @@ func (a *appState) startPlayback(item MediaItem) {
 			if proxy != nil {
 				proxy.Close()
 			}
-			a.cleanupPlayerRequest(requestID, requestPlayer)
 			return
 		}
 		if err != nil {
-			a.cleanupPlayerRequest(requestID, requestPlayer)
 			a.window.Update(func() {
 				if ctx.Err() != nil {
 					return
@@ -80,61 +78,45 @@ func (a *appState) startPlayback(item MediaItem) {
 	}()
 }
 
-func (a *appState) cleanupPlayerRequest(requestID uint64, player *Player) {
-	player.Stop()
-	if a.window == nil {
-		player.ReleaseSurface()
-		return
-	}
-	a.window.Update(func() {
-		player.ReleaseSurface()
-		if a.playerWindowRequest == requestID && a.playbackLoadingPlayer == player {
-			if a.player == player {
-				a.player = NewPlayer()
-			}
-			a.destroyPlayerWindow()
-		}
-	})
-}
-
 func (a *appState) startPlayerWindow(ctx context.Context, requestID uint64, server *Server, item MediaItem, stream PlaybackResult, localURL string, proxy *PlaybackProxy, player *Player) {
 	if ctx.Err() != nil || a.server != server || a.playbackRequest != requestID {
 		proxy.Close()
-		a.cleanupPlayerRequest(requestID, player)
 		return
 	}
 	a.player = player
 	a.playbackLoadingPlayer = player
 	a.createPlayerWindow(windowTitleForPlayback(PlaybackState{Active: true, Title: item.Title}), requestID)
-	nativeHandle := a.playerWindow.NativeHandle()
+	window := a.playerWindow
+	nativeHandle := window.NativeHandle()
 	if err := player.PrepareSurface(nativeHandle); err != nil {
 		a.failPlayerStartup(requestID, player, proxy, "播放器绘制区域创建失败："+err.Error())
 		return
 	}
 	go func() {
-		// Wait for media loading off the UI thread.
+		// Closing the proxy interrupts open Range requests while libmpv stops.
+		stopProxyCancel := context.AfterFunc(ctx, proxy.Close)
 		startErr := player.StartContext(ctx, localURL, nativeHandle, stream.Duration, stream.ResumeAt)
+		stopProxyCancel()
 		if ctx.Err() != nil {
 			proxy.Close()
-			a.cleanupPlayerRequest(requestID, player)
-			return
+			player.Stop()
 		}
 		a.window.Update(func() {
-			a.finishPlayerStartup(ctx, requestID, server, item, stream, proxy, player, startErr)
+			a.finishPlayerStartup(ctx, requestID, server, item, stream, proxy, player, window, startErr)
 		})
 	}()
 }
 
-func (a *appState) finishPlayerStartup(ctx context.Context, requestID uint64, server *Server, item MediaItem, stream PlaybackResult, proxy *PlaybackProxy, player *Player, startErr error) {
-	if ctx.Err() != nil || a.server != server || a.playbackRequest != requestID || a.playerWindowRequest != requestID {
+func (a *appState) finishPlayerStartup(ctx context.Context, requestID uint64, server *Server, item MediaItem, stream PlaybackResult, proxy *PlaybackProxy, player *Player, window *mygo.Window, startErr error) {
+	if ctx.Err() != nil || a.server != server || a.playbackRequest != requestID || a.playerWindow != window {
 		proxy.Close()
 		player.Stop()
 		player.ReleaseSurface()
-		if a.playerWindowRequest == requestID {
-			if a.player == player {
-				a.player = NewPlayer()
-			}
+		if a.playerWindow == window {
+			a.player = NewPlayer()
 			a.destroyPlayerWindow()
+		} else {
+			window.Destroy()
 		}
 		return
 	}
@@ -211,21 +193,17 @@ func (a *appState) failPlaybackAttempt() {
 }
 
 func (a *appState) cancelPlaybackLoading() {
-	requestID := a.playbackRequest
 	a.playbackRequest++
 	if a.playbackCancel != nil {
 		a.playbackCancel()
 		a.playbackCancel = nil
 	}
 	if player := a.playbackLoadingPlayer; player != nil {
-		player.Stop()
-		player.ReleaseSurface()
-		if a.player == player {
-			a.player = NewPlayer()
-		}
-		if a.playerWindowRequest == requestID {
-			a.destroyPlayerWindow()
-		}
+		// The startup worker still owns libmpv. Hide the window now and let
+		// finishPlayerStartup release its HWND after stopping libmpv.
+		window := a.detachPlayerWindow()
+		window.Hide()
+		a.player = NewPlayer()
 	}
 	a.clearPlaybackLoadingState()
 	if a.window != nil {
@@ -381,9 +359,9 @@ func (a *appState) closePlayer(keepWindow bool) (*Server, *MediaItem, float64, f
 	}
 	a.clearPlaybackTaskbarProgress()
 	a.closePlayerOverlay()
+	a.playerProxy.Close()
 	a.player.Stop()
 	a.player.ReleaseSurface()
-	a.playerProxy.Close()
 	a.playerProxy = nil
 	a.playingItem = nil
 	a.playback = PlaybackState{}

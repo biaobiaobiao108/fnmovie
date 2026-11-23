@@ -2,7 +2,7 @@ module github.com/egoist/mygo/fnmovieoverlay
 
 go 1.27.3
 
-require github.com/egoist/mygo v0.10.0
+require github.com/egoist/mygo v0.10.1-0.20261123071500-1f690f298738
 
 require (
 	github.com/ebitengine/purego v0.11.1 // indirect

@@ -32,14 +32,17 @@ func (a *appState) createPlayerWindow(title string, requestID uint64) {
 	a.playerWindow = mygo.NewWindow(mygo.WindowOptions{
 		Title: title, X: bounds.X, Y: bounds.Y, Width: bounds.Width, Height: bounds.Height,
 		MinWidth: playerWindowMinWidth, MinHeight: playerWindowMinHeight, TitleBarStyle: mygo.TitleBarHidden, TitleBarHeight: movieTitleBarHeight,
-		BackgroundColor: "#000000", StateKey: "player", Content: ui.View(a.playerWindowView),
+		BackgroundColor: "#000000", StateKey: "player", Content: ui.View(func(c *ui.Context) {
+			if a.playerWindowRequest == requestID {
+				a.playerWindowView(c)
+			}
+		}),
 	})
 	a.playerWindow.OnClose(func(e *mygo.CloseEvent) {
-		if e.Window != a.playerWindow {
-			return
-		}
 		e.PreventDefault()
-		a.stopPlayback()
+		if e.Window == a.playerWindow {
+			a.stopPlayback()
+		}
 	})
 	setWindowTheme(a.playerWindow)
 	if err := a.playerWindow.SetIcon(appIconPNG); err != nil {
@@ -50,14 +53,19 @@ func (a *appState) createPlayerWindow(title string, requestID uint64) {
 }
 
 func (a *appState) destroyPlayerWindow() {
-	if a.playerWindow != nil {
-		a.playerWindow.Destroy()
-		a.playerWindow = nil
+	if window := a.detachPlayerWindow(); window != nil {
+		window.Destroy()
 	}
+}
+
+func (a *appState) detachPlayerWindow() *mygo.Window {
+	window := a.playerWindow
+	a.playerWindow = nil
 	a.playerWindowRequest = 0
 	a.playerWindowSizedForRequest = 0
 	a.playbackLoadingPlayer = nil
 	a.playerOverlayHooks = false
+	return window
 }
 
 func (a *appState) sizePlayerWindowForVideo(requestID uint64, snapshot PlayerSnapshot) {
